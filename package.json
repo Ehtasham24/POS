@@ -4,6 +4,7 @@
     "fastify": "^4.26.1",
     "fastify-cli": "^6.1.1",
     "fastify-swagger": "^5.2.0",
+    "joi": "^17.12.1",
     "pg": "^8.11.3",
     "uuid": "^9.0.1"
   },
