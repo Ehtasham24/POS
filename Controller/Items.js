@@ -1,6 +1,20 @@
 const {v4:uuid4}= require('uuid');
 const {pool}=require('../Db');
+const joi=require('joi');
+const Joi = require('joi');
 
+
+const PostschemaJoi=Joi.object().keys({
+    // id:Joi.string().min(8).max(40).required(),
+    name:Joi.string().min(3).max(18).required(),
+
+});
+
+const UpdateschemaJoi=Joi.object().keys({
+    id:Joi.string().min(8).max(40).required(),
+    name:Joi.string().min(3).max(18).required(),
+
+});
 
 const GetItems=async(req, reply)=>
 {
@@ -18,7 +32,7 @@ const DeleteItem = async (req, reply) => {
     try {
         const result = await pool.query('DELETE FROM items WHERE id=$1', [id]);
         if (result.rowCount === 0) {
-            reply.code(400).send({ message: 'Item not found' });
+            reply.code(404).send({ message: 'Item not found' });
         } else {
             reply.send({ message: 'Item deleted', id });
         }
@@ -40,20 +54,21 @@ const GetItem=async (req,reply)=>{
 }
 
 const PostItems = async (req, reply) => {
-    const  name  = req.body;
-        if(typeof(Number(name))!=='string'){
-            reply.code(250).send({ message: 'Invalid datatype inserted. Name must be a string.' });
-            return;  
-        }
+    const  {name}  = req.body;
+    //     if(typeof name !=='string'){
+    //         reply.code(400).send({ message: 'Invalid datatype inserted. Name must be a string.' });
+    //         return;  
+    //  }
+       // const valid=Joi.valid(name,schemaJoi);
 
-        // const type = typeof(name);
-        else if(typeof name !== 'string'){
-            reply.code(250).send({ message: 'Invalid datatype inserted. Name must be a string.' });
-            return;  
-        }
-    try {
+       const validation=await PostschemaJoi.validateAsync({name});
+       if(validation.error){
+        reply.code(404).send({message:'Validation error'});
+       } 
+
+    try {        
         const result = await pool.query('INSERT INTO items (id, name) VALUES ($1, $2) RETURNING *', [uuid4(), name]);
-        reply.code(201).send({message : 'element inserted',result});
+        reply.send({message : 'element inserted', newItem: result.rows[0]});
     } catch (err) {
         console.error(err);
         reply.code(500).send({ message: 'Internal error' });
@@ -64,11 +79,25 @@ const PostItems = async (req, reply) => {
 const UpdateItem=async(req,reply)=>{
     const {id}=req.params;
     const {name}=req.body;
-    try{
+    
+    // if(typeof name!=='string'){
+    //     reply.code(400).send({ message: 'Invalid datatype inserted. Name must be a string.' });
+    //     return;  
+    // }
+    const validation=await UpdateschemaJoi.validateAsync({id,name});
+    if(validation.error){
+        reply.code(404).send({message:'Validation error'});
+        return;
+    } 
+    try{   
     const result=await pool.query('UPDATE items SET name=$1 WHERE id=$2 RETURNING*',[name,id]);
+    if(result.rowCount===0){
+        reply.code(404).send({message:`Item with id: ${id} not present`});
+    }
+    else
     reply.send(`The item with id ${id} updated with name: ${name} ${result}`)
     }catch(err){
-        reply.code(5000).send({message:'Update query error'})
+        reply.code(500).send({message:'Update query error'})
     }
 }
 
