@@ -1,11 +1,10 @@
 const {v4:uuid4}= require('uuid');
 const {pool}=require('../Db');
-const joi=require('joi');
 const Joi = require('joi');
+const fs=require('fs');
 
 
 const PostschemaJoi=Joi.object().keys({
-    // id:Joi.string().min(8).max(40).required(),
     name:Joi.string().min(3).max(18).required(),
 
 });
@@ -15,6 +14,22 @@ const UpdateschemaJoi=Joi.object().keys({
     name:Joi.string().min(3).max(18).required(),
 
 });
+
+
+const ImgPost=async(req,reply)=>{
+   try{
+    const img=fs.readFileSync('./image.jpg');
+    console.log(img);
+    const imageName='stockImage';
+    const result=await pool.query('INSERT INTO Images (name, imageData) VALUES ($1, $2) RETURNING *',[imageName,img]);
+    reply.send({message:'Image inserted Successfully'});
+
+    }catch(err){
+        console.log(err);
+        reply.code(500).send({message:'Internal error'});
+    }
+
+}
 
 const GetItems=async(req, reply)=>
 {
@@ -55,12 +70,6 @@ const GetItem=async (req,reply)=>{
 
 const PostItems = async (req, reply) => {
     const  {name}  = req.body;
-    //     if(typeof name !=='string'){
-    //         reply.code(400).send({ message: 'Invalid datatype inserted. Name must be a string.' });
-    //         return;  
-    //  }
-       // const valid=Joi.valid(name,schemaJoi);
-
        const validation=await PostschemaJoi.validateAsync({name});
        if(validation.error){
         reply.code(404).send({message:'Validation error'});
@@ -79,11 +88,6 @@ const PostItems = async (req, reply) => {
 const UpdateItem=async(req,reply)=>{
     const {id}=req.params;
     const {name}=req.body;
-    
-    // if(typeof name!=='string'){
-    //     reply.code(400).send({ message: 'Invalid datatype inserted. Name must be a string.' });
-    //     return;  
-    // }
     const validation=await UpdateschemaJoi.validateAsync({id,name});
     if(validation.error){
         reply.code(404).send({message:'Validation error'});
@@ -101,4 +105,4 @@ const UpdateItem=async(req,reply)=>{
     }
 }
 
-module.exports={GetItem,GetItems,PostItems,DeleteItem,UpdateItem};
+module.exports={ImgPost,GetItem,GetItems,PostItems,DeleteItem,UpdateItem};

@@ -1,4 +1,4 @@
-const { GetItems, GetItem, PostItems, DeleteItem, UpdateItem } = require("../Controller/Items");
+const { ImgPost,GetItems, GetItem, PostItems, DeleteItem, UpdateItem } = require("../Controller/Items");
 
 
 
@@ -81,6 +81,21 @@ const updateItems={
     handler:UpdateItem
 }
 
+const ImageUploadSchema = {
+    schema: {
+        response: {
+            201: {
+                type: 'object',
+                properties: {
+                    success: { type: 'boolean', example: true },
+                    message: { type: 'string', example: 'Image uploaded successfully' },
+                    
+                }
+            }
+        }
+    },
+    handler:ImgPost
+};
 
 function Routes(fastify,options, done){
     
@@ -89,6 +104,7 @@ function Routes(fastify,options, done){
     fastify.post('/items',postItems)
     fastify.delete('/items/:id',deleteItems)
     fastify.put('/items/:id',updateItems)
+    fastify.post('/Images',ImageUploadSchema)
     done()
 
 
