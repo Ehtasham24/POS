@@ -3,7 +3,7 @@ const PrintButton = ({ handlePrint }) => {
     <div className="mb-4">
       <button
         onClick={handlePrint}
-        className="bg-green-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-green-700 focus:outline-none focus:ring focus:ring-green-500"
+        className="bg-white-A700 text-primary-600 border border-primary-600 font-semibold py-2.5 px-5 rounded-lg hover:bg-primary-50 transition-colors focus:outline-none focus:ring-4 focus:ring-primary-300"
       >
         Print Sales Data
       </button>

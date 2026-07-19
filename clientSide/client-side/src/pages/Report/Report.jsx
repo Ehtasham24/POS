@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from "react";
 import DateRangeSelector from "./DataRangeSelector";
 import PrintButton from "./PrintBtn";
-import { Helmet } from "react-helmet";
 import Header from "components/Header";
+import Footer from "components/Footer";
 import GroupedSalesData from "./GroupedSalesData";
 
 const SalesDataComponent = () => {
@@ -48,6 +48,7 @@ const SalesDataComponent = () => {
 
   useEffect(() => {
     fetchSalesData(filterType);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handlePrint = () => window.print();
@@ -63,11 +64,11 @@ const SalesDataComponent = () => {
   const groupedData = groupByCategory(salesData);
 
   return (
-    <>
-      <Header className="mt-6 mb-6 pl-6" />
+    <div className="flex flex-col min-h-screen bg-white-A700 dark:bg-gray-900">
+      <Header className="flex flex-row justify-between items-center w-full p-6 sm:p-5 bg-white-A700" />
 
-      <div className="max-w-7xl mx-auto p-6 bg-gray-50 rounded-lg shadow-md">
-        <h1 className="text-3xl font-bold text-gray-800 mb-4">
+      <div className="flex-1 max-w-7xl w-full mx-auto p-6 bg-surface-subtle dark:bg-gray-800 rounded-xl2 shadow-card my-6">
+        <h1 className="text-3xl font-bold text-gray-800 dark:text-gray-100 mb-4">
           Sales Data Overview
         </h1>
 
@@ -84,16 +85,16 @@ const SalesDataComponent = () => {
         <PrintButton handlePrint={handlePrint} />
 
         {loading ? (
-          <p className="text-blue-600">Loading data...</p>
+          <p className="text-primary-600">Loading data...</p>
         ) : error ? (
-          <p className="text-red-500">{error}</p>
+          <p className="text-danger-600">{error}</p>
         ) : (
           <>
-            <p className="font-semibold text-lg text-gray-800 mb-4">
+            <p className="font-semibold text-lg text-gray-800 dark:text-gray-100 mb-4">
               Total Profit/Loss:{" "}
               <span
                 className={
-                  totalProfitLoss >= 0 ? "text-green-600" : "text-red-600"
+                  totalProfitLoss >= 0 ? "text-success-600" : "text-danger-600"
                 }
               >
                 {totalProfitLoss}
@@ -106,7 +107,9 @@ const SalesDataComponent = () => {
           </>
         )}
       </div>
-    </>
+
+      <Footer className="flex justify-center items-center w-full mt-auto p-[30px] sm:p-5 bg-gray-800" />
+    </div>
   );
 };
 

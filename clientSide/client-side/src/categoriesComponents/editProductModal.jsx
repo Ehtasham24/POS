@@ -5,7 +5,7 @@ const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
 const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gray-100";
 
-const UpdateProductModal = ({ isOpen, onClose }) => {
+const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
   const [formData, setFormData] = useState({
     name: "",
     buying_price: "",
@@ -27,6 +27,17 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
     fetchCategories();
   }, []);
 
+  useEffect(() => {
+    if (product) {
+      setFormData({
+        name: product.productname || "",
+        buying_price: product.buyingprice ?? "",
+        quantity: product.quantity ?? "",
+        category_id: product.category_id ?? "",
+      });
+    }
+  }, [product]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prevFormData) => ({
@@ -35,26 +46,29 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
     }));
   };
 
-  const handleUpdationProduct = async (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch("http://localhost:4000/updateproducts", {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
-      });
+      const response = await fetch(
+        `http://localhost:4000/products/${product.id}`,
+        {
+          method: "PUT",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            name: formData.name,
+            price: formData.buying_price,
+            Quantity: formData.quantity,
+            Category_id: formData.category_id,
+          }),
+        }
+      );
       if (!response.ok) {
         throw new Error("Failed to update product");
       }
       alert("Product updated successfully!");
-      setFormData({
-        name: "",
-        buying_price: "",
-        quantity: "",
-        category_id: "",
-      });
+      onUpdated();
       onClose();
     } catch (error) {
       alert(error.message);
@@ -62,16 +76,16 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Update Product">
-      <form className="space-y-4" onSubmit={handleUpdationProduct}>
+    <Modal isOpen={isOpen} onClose={onClose} title="Edit Product">
+      <form className="space-y-4" onSubmit={handleSubmit}>
         <div>
-          <label htmlFor="product_name" className={labelClass}>
+          <label htmlFor="edit_product_name" className={labelClass}>
             Product Name
           </label>
           <input
             type="text"
             name="name"
-            id="product_name"
+            id="edit_product_name"
             value={formData.name}
             onChange={handleChange}
             className={inputClass}
@@ -80,13 +94,13 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
           />
         </div>
         <div>
-          <label htmlFor="buying_price" className={labelClass}>
+          <label htmlFor="edit_buying_price" className={labelClass}>
             Buying Price
           </label>
           <input
             type="number"
             name="buying_price"
-            id="buying_price"
+            id="edit_buying_price"
             value={formData.buying_price}
             placeholder="Enter buying price"
             onChange={handleChange}
@@ -96,13 +110,13 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
         </div>
 
         <div>
-          <label htmlFor="quantity" className={labelClass}>
+          <label htmlFor="edit_quantity" className={labelClass}>
             Quantity
           </label>
           <input
             type="number"
             name="quantity"
-            id="quantity"
+            id="edit_quantity"
             value={formData.quantity}
             placeholder="Enter quantity"
             onChange={handleChange}
@@ -111,12 +125,12 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
           />
         </div>
         <div>
-          <label htmlFor="category_id" className={labelClass}>
+          <label htmlFor="edit_category_id" className={labelClass}>
             Category
           </label>
           <select
             name="category_id"
-            id="category_id"
+            id="edit_category_id"
             onChange={handleChange}
             value={formData.category_id}
             className={inputClass}
@@ -137,11 +151,11 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
           type="submit"
           className="w-full text-white-A700 bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:outline-none focus:ring-primary-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center transition-colors"
         >
-          Submit
+          Save Changes
         </button>
       </form>
     </Modal>
   );
 };
 
-export default UpdateProductModal;
+export default EditProductModal;

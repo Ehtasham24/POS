@@ -6,4 +6,5 @@ import { Button } from "./Button";
 import { CheckBox } from "./CheckBox";
 import { RatingBar } from "./RatingBar";
 import { ReactTable } from "./ReactTable";
-export { Img, Text, Heading, Input, Button, CheckBox, RatingBar, ReactTable };
+import { Modal } from "./Modal";
+export { Img, Text, Heading, Input, Button, CheckBox, RatingBar, ReactTable, Modal };

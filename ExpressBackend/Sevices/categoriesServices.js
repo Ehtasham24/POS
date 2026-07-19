@@ -10,6 +10,21 @@ const getCategories = async () => {
   }
 };
 
+const createCategory = async (category_name) => {
+  try {
+    const result = await pool.query(
+      'INSERT INTO "categories" (category_name) VALUES ($1) RETURNING *',
+      [category_name]
+    );
+    return result;
+  } catch (err) {
+    if (err.code === "23505") {
+      throw new Error("Category already exists");
+    }
+    throw new Error(err.message);
+  }
+};
+
 const getProductsForCategory = async (id) => {
   try {
     const query = `
@@ -27,4 +42,4 @@ const getProductsForCategory = async (id) => {
   }
 };
 
-module.exports = { getCategories, getProductsForCategory };
+module.exports = { getCategories, getProductsForCategory, createCategory };

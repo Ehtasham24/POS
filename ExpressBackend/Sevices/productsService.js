@@ -111,13 +111,13 @@ const updateItemByName = async (name, buying_price, quantity, category_id) => {
 const deleteItemById = async (id) => {
   try {
     const nameResult = await pool.query(
-      `SELECT name FROM "products" WHERE id=$1`,
+      `SELECT productname FROM "products" WHERE id=$1`,
       [id]
     );
     if (nameResult.rows.length === 0) {
       throw new Error(`No item with id: ${id} found`);
     }
-    const name = nameResult.rows[0].name;
+    const name = nameResult.rows[0].productname;
     const deleteResult = await pool.query(
       `DELETE FROM "products" WHERE id=$1`,
       [id]

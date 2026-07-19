@@ -142,9 +142,10 @@ const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id) => {
 const fetchBilledHistory = async () => {
   try {
     const query = `
-      SELECT id, selling_price, quantity, sale_time
-      FROM public.sales
-      ORDER BY DATE_TRUNC('second', sale_time), id ASC;
+      SELECT s.id, s.selling_price, s.quantity, s.sale_time, s.product_id, p.productname
+      FROM public.sales s
+      JOIN public.products p ON s.product_id = p.id
+      ORDER BY DATE_TRUNC('second', s.sale_time), s.id ASC;
     `;
 
     // Fetch the sales data from PostgreSQL
@@ -179,9 +180,10 @@ const fetchBilledHistory = async () => {
         selling_price: row.selling_price,
         quantity: row.quantity,
         sale_time: row.sale_time,
+        product_id: row.product_id,
+        productname: row.productname,
       });
     });
-    console.log(groupedSales);
     return groupedSales;
   } catch (err) {
     console.log(err);

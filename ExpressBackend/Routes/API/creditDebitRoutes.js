@@ -6,20 +6,24 @@ const {
   updateCreditByname,
   deleteCreditByname,
   postCredit,
+  settleCreditController,
   getDebitByname,
   postDebit,
   updateDebitByname,
   deleteDebitByname,
+  settleDebitController,
 } = require("../../Controller/creditDebitController");
 
-routes.get("./creditsDebits", getAllRecords);
-routes.post("./credit", getCreditByname);
-routes.post("./credit", postCredit);
-routes.put("./credit", updateCreditByname);
-routes.delete("./credit", deleteCreditByname);
+routes.get("/creditsDebits", getAllRecords);
+routes.post("/credit/getByName", getCreditByname);
+routes.post("/credit", postCredit);
+routes.put("/credit", updateCreditByname);
+routes.delete("/credit", deleteCreditByname);
+routes.patch("/credit/:id/settle", settleCreditController);
 routes.post("/debit/getByName", getDebitByname);
 routes.post("/debit", postDebit);
 routes.put("/debit", updateDebitByname);
 routes.delete("/debit", deleteDebitByname);
+routes.patch("/debit/:id/settle", settleDebitController);
 
 module.exports = routes;

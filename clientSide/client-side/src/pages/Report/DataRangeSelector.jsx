@@ -1,3 +1,6 @@
+const inputClass =
+  "p-2.5 border border-surface-border dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500";
+
 const DateRangeSelector = ({
   startDate,
   endDate,
@@ -8,37 +11,37 @@ const DateRangeSelector = ({
   fetchSalesData,
 }) => {
   return (
-    <div className="mb-4">
+    <div className="mb-4 flex flex-row md:flex-col flex-wrap items-end md:items-stretch gap-4 bg-white-A700 dark:bg-gray-900 rounded-xl2 p-4 border border-surface-border dark:border-gray-700">
       <div>
-        <label className="block text-gray-700 font-medium mb-1">
+        <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1 text-sm">
           Start Date:
         </label>
         <input
           type="datetime-local"
           value={startDate}
           onChange={onStartDateChange}
-          className="p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring focus:ring-blue-500"
+          className={inputClass}
         />
       </div>
       <div>
-        <label className="block text-gray-700 font-medium mb-1">
+        <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1 text-sm">
           End Date:
         </label>
         <input
           type="datetime-local"
           value={endDate}
           onChange={onEndDateChange}
-          className="p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring focus:ring-blue-500"
+          className={inputClass}
         />
       </div>
       <div>
-        <label className="block text-gray-700 font-medium mb-1">
+        <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1 text-sm">
           Filter by:
         </label>
         <select
           value={filterType}
           onChange={onFilterChange}
-          className="p-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring focus:ring-blue-500"
+          className={inputClass}
         >
           <option value="all">All Products</option>
           <option value="profit">Profitable Products</option>
@@ -47,13 +50,13 @@ const DateRangeSelector = ({
       </div>
       <button
         onClick={() => fetchSalesData(filterType)}
-        className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring focus:ring-blue-500"
+        className="bg-primary-600 text-white-A700 font-semibold py-2.5 px-5 rounded-lg hover:bg-primary-700 transition-colors focus:outline-none focus:ring-4 focus:ring-primary-300"
       >
         Fetch Sales Data
       </button>
 
       {/* Hidden print version */}
-      <div className="hidden print:block mt-4">
+      <div className="hidden print:block mt-4 w-full">
         <p>
           <strong>Start Date:</strong> {startDate}
         </p>

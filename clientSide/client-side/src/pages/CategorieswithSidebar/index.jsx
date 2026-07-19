@@ -1,31 +1,45 @@
 import React, { useEffect, useState } from "react";
 import { useSelector, useDispatch } from "react-redux";
 import { Helmet } from "react-helmet";
-import { Text, Heading } from "../../components";
-import Footer from "../../components/Footer";
-import Header from "../../components/Header";
-import { Link } from "react-router-dom";
+import { Text, Heading } from "components";
+import Footer from "components/Footer";
+import Header from "components/Header";
 import { useNavigate } from "react-router-dom";
+import {
+  HiOutlinePlusCircle,
+  HiOutlineTag,
+  HiOutlineTrash,
+  HiOutlinePencil,
+  HiOutlinePrinter,
+  HiOutlineChartBar,
+  HiOutlineShoppingCart,
+  HiOutlineSquares2X2,
+} from "react-icons/hi2";
 import {
   increaseQuantity,
   decreaseQuantity,
   removeCart,
-} from "../../cartRedux/cartSlice";
+} from "cartRedux/cartSlice";
 
-import AddProductModal from "../../categoriesComponents/addProductModel";
-import DeleteProductModal from "../../categoriesComponents/deleteProductModal";
+import AddProductModal from "categoriesComponents/addProductModel";
+import AddCategoryModal from "categoriesComponents/addCategoryModal";
+import DeleteProductModal from "categoriesComponents/deleteProductModal";
 import UpdateProductModal from "categoriesComponents/updateProductModal";
 import CartCheckout from "categoriesComponents/cartCheckout";
 
-export default function CategorieswithSidebarPage() {
-  const isOpen = useSelector((state) => state.isOpen);
+const sidebarButtonClass =
+  "flex items-center justify-center gap-2 w-full text-white-A700 bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:outline-none focus:ring-primary-300 font-medium rounded-lg text-sm px-5 py-3 text-center transition-colors";
 
+export default function CategorieswithSidebarPage() {
   const dispatch = useDispatch();
   const [categories, setCategories] = useState([]);
-  const [Open, setOpen] = useState(false);
   const navigate = useNavigate();
 
   const [isCartOpen, setIsCartOpen] = useState(false);
+  const [isAddProductOpen, setIsAddProductOpen] = useState(false);
+  const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
+  const [isDeleteProductOpen, setIsDeleteProductOpen] = useState(false);
+  const [isUpdateProductOpen, setIsUpdateProductOpen] = useState(false);
 
   const fetchData = async () => {
     try {
@@ -36,7 +50,6 @@ export default function CategorieswithSidebarPage() {
       }
 
       const data = await response.json();
-      console.log("Categories data:", data);
       setCategories(data);
     } catch (error) {
       console.error("Error fetching categories:", error);
@@ -48,28 +61,7 @@ export default function CategorieswithSidebarPage() {
   }, []);
 
   const productsPage = (prodNum) => {
-    navigate(`/ProductList/${prodNum}`);
-  };
-
-  const handleModalToggle = () => {
-    setOpen(true);
-    const modal = document.getElementById("authentication-modal");
-    modal.classList.toggle("hidden");
-    modal.classList.toggle("flex");
-  };
-
-  const handleUpdateToggle = () => {
-    setOpen(true);
-    const modal = document.getElementById("update-modal");
-    modal.classList.toggle("hidden");
-    modal.classList.toggle("flex");
-  };
-
-  const handleDeleteToggle = () => {
-    setOpen(true);
-    const modal = document.getElementById("delete-modal");
-    modal.classList.toggle("hidden");
-    modal.classList.toggle("flex");
+    navigate(`/categories/${prodNum}`);
   };
 
   const checkOut = () => {
@@ -95,40 +87,14 @@ export default function CategorieswithSidebarPage() {
     }
   };
 
-  //close the add modal
-  const handleModalHide = () => {
-    setOpen(false);
-
-    const modal = document.getElementById("authentication-modal");
-
-    modal.classList.add("hidden");
-    modal.classList.remove("flex");
-  };
-
-  //close the  delete modal
-  const deleteModalHide = () => {
-    setOpen(false);
-    const modal = document.getElementById("delete-modal");
-    modal.classList.add("hidden");
-    modal.classList.remove("flex");
-  };
-
-  //close the update modal
-  const updateModalHide = () => {
-    setOpen(false);
-    const modal = document.getElementById("update-modal");
-    modal.classList.add("hidden");
-    modal.classList.remove("flex");
-  };
-
   // Navigate to Sales Report
   const goToSalesReport = () => {
-    navigate("/Report");
+    navigate("/report");
   };
 
   // Navigate to Print Recent Bill
   const goToBill = () => {
-    navigate("/Bill");
+    navigate("/bill");
   };
 
   const cart = useSelector((store) => store.cart.carts);
@@ -136,156 +102,148 @@ export default function CategorieswithSidebarPage() {
   return (
     <>
       <Helmet>
-        <button>
-          <title>POS system</title>
-        </button>
+        <title>POS system</title>
         <meta
           name="description"
           content="Web site created using create-react-app"
         />
       </Helmet>
 
-      {/*  ADD PRODUCT MODAL */}
+      <AddProductModal
+        isOpen={isAddProductOpen}
+        onClose={() => setIsAddProductOpen(false)}
+      />
+      <AddCategoryModal
+        isOpen={isAddCategoryOpen}
+        onClose={() => setIsAddCategoryOpen(false)}
+        onCategoryAdded={fetchData}
+      />
+      <DeleteProductModal
+        isOpen={isDeleteProductOpen}
+        onClose={() => setIsDeleteProductOpen(false)}
+      />
+      <UpdateProductModal
+        isOpen={isUpdateProductOpen}
+        onClose={() => setIsUpdateProductOpen(false)}
+      />
 
-      <AddProductModal handleModalHide={handleModalHide} />
-
-      {/*  DELETE PRODUCT MODAL */}
-
-      <DeleteProductModal deleteModalHide={deleteModalHide} />
-
-      {/* UPDATE PRODUCT MODAL */}
-      <UpdateProductModal updateModalHide={updateModalHide} />
-
-      <div className="flex flex-col items-center justify-start w-full bg-white-A700">
+      <div className="flex flex-col items-center justify-start w-full bg-white-A700 dark:bg-gray-900 min-h-screen">
         <Header className="flex flex-row justify-between items-center w-full p-6 sm:p-5 bg-white-A700" />
-        {console.log("isOpen", Open)}
-        <div
-          className={`flex flex-col items-center justify-start w-full mt-8 gap-14 md:px-5 max-w-[1636px] relative ${
-            Open ? "opacity-50 pointer-events-none" : ""
-          }`}
-        >
+        <div className="flex flex-col items-center justify-start w-full mt-8 gap-8 md:px-5 max-w-[1636px] relative">
           <Heading as="h1">Categories</Heading>
           <div className="flex flex-row md:flex-col justify-start items-start w-full gap-8 md:gap-5">
             <div className="flex flex-col items-center justify-start w-[16%] md:w-full gap-4">
-              <div className="flex flex-col items-start justify-start w-full gap-[29px]">
-                <div className="flex flex-col gap-5 justify-between items-center w-full">
-                  {/* ADD PRODUCT BUTTON */}
-                  <Text as="p" className="!text-gray-800 text-lg">
-                    <button
-                      data-modal-target="authentication-modal"
-                      data-modal-toggle="authentication-modal"
-                      className="block text-white-A700 bg-gray-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-7 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800"
-                      type="button"
-                      onClick={(e) => {
-                        handleModalToggle();
-                      }}
-                    >
-                      Add Product
-                    </button>
-                  </Text>
-                  {/* DELETE PRODUCT BUTTON */}
-                  <Text as="p" className="!text-gray-800 text-lg">
-                    <button
-                      data-modal-target="delete-modal"
-                      data-modal-toggle="delete-modal"
-                      className="block text-white-A700 bg-gray-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800"
-                      type="button"
-                      onClick={(e) => {
-                        handleDeleteToggle();
-                      }}
-                    >
-                      Delete Product
-                    </button>
-                  </Text>
-                  {/* UPDATE PRODUCT BUTTON */}
-                  <Text as="p" className="!text-gray-800 text-lg">
-                    <button
-                      data-modal-target="update-modal"
-                      data-modal-toggle="update-modal"
-                      className="block text-white-A700 bg-gray-700 mb-5 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800"
-                      type="button"
-                      onClick={(e) => {
-                        handleUpdateToggle();
-                      }}
-                    >
-                      Update Product
-                    </button>
-                  </Text>
-                  {/* PRINT RECENT BILL BUTTON */}{" "}
-                  <Text as="p" className="!text-gray-800 text-lg">
-                    {" "}
-                    <button
-                      className="block text-white-A700 bg-gray-700 mb-5 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center"
-                      type="button"
-                      onClick={goToBill} // Navigate to Bill component
-                    >
-                      Print Recent Bill
-                    </button>
-                  </Text>
-                  {/* SALES REPORT BUTTON */}
-                  <Text as="p" className="!text-gray-800 text-lg">
-                    <button
-                      className="block text-white-A700 bg-gray-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center"
-                      type="button"
-                      onClick={goToSalesReport} // Call the navigation function
-                    >
-                      Sales Report
-                    </button>
-                  </Text>
-                </div>
+              <div className="flex flex-col items-start justify-start w-full gap-3 bg-surface-subtle dark:bg-gray-800 rounded-xl2 p-4">
+                <button
+                  className={sidebarButtonClass}
+                  type="button"
+                  onClick={() => setIsAddProductOpen(true)}
+                >
+                  <HiOutlinePlusCircle className="text-lg" />
+                  Add Product
+                </button>
+                <button
+                  className={sidebarButtonClass}
+                  type="button"
+                  onClick={() => setIsAddCategoryOpen(true)}
+                >
+                  <HiOutlineTag className="text-lg" />
+                  Add Category
+                </button>
+                <button
+                  className={`${sidebarButtonClass} bg-danger-600 hover:bg-danger-700 focus:ring-danger-300`}
+                  type="button"
+                  onClick={() => setIsDeleteProductOpen(true)}
+                >
+                  <HiOutlineTrash className="text-lg" />
+                  Delete Product
+                </button>
+                <button
+                  className={sidebarButtonClass}
+                  type="button"
+                  onClick={() => setIsUpdateProductOpen(true)}
+                >
+                  <HiOutlinePencil className="text-lg" />
+                  Update Product
+                </button>
+                <button
+                  className={`${sidebarButtonClass} bg-gray-800 hover:bg-gray-900 focus:ring-gray-300`}
+                  type="button"
+                  onClick={goToBill}
+                >
+                  <HiOutlinePrinter className="text-lg" />
+                  Print Recent Bill
+                </button>
+                <button
+                  className={`${sidebarButtonClass} bg-gray-800 hover:bg-gray-900 focus:ring-gray-300`}
+                  type="button"
+                  onClick={goToSalesReport}
+                >
+                  <HiOutlineChartBar className="text-lg" />
+                  Sales Report
+                </button>
               </div>
+
               {/* Cart Items */}
-              <div className="h-px w-full bg-blue_gray-100 " />
-              <div className="flex flex-col items-start justify-start w-full gap-[29px]">
-                <div className="ml-16">
-                  <h2 className="ml-3 font-extrabold text-xl">Cart Items</h2>
-                  <ul className="mt-3">
+              <div className="flex flex-col items-start justify-start w-full gap-3 bg-surface-subtle dark:bg-gray-800 rounded-xl2 p-4">
+                <div className="flex items-center gap-2">
+                  <HiOutlineShoppingCart className="text-xl text-primary-600" />
+                  <h2 className="font-semibold text-lg text-gray-800 dark:text-gray-100">
+                    Cart Items
+                  </h2>
+                </div>
+                {cart.length === 0 ? (
+                  <Text as="p" className="!text-gray-500 text-sm">
+                    Your cart is empty.
+                  </Text>
+                ) : (
+                  <ul className="w-full flex flex-col gap-2">
                     {cart.map((item) => (
                       <li
                         key={item.id}
-                        className="w-auto pl-5 pr-5 text-lg mb-2 bg-gray-200"
+                        className="w-full px-3 py-2 text-sm rounded-lg bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 text-gray-800 dark:text-gray-100"
                       >
                         {item.productname}
                       </li>
                     ))}
                   </ul>
-                  {cart.length > 0 && (
-                    <Text as="p" className="!text-gray-800 text-sm">
-                      <button
-                        className="mt-7 ml-3 block text-white-A700 bg-gray-700 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2 text-center"
-                        type="button"
-                        onClick={checkOut}
-                      >
-                        Checkout
-                      </button>
-                    </Text>
-                  )}
+                )}
+                {cart.length > 0 && (
+                  <button
+                    className="w-full text-white-A700 bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:outline-none focus:ring-primary-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center transition-colors"
+                    type="button"
+                    onClick={checkOut}
+                  >
+                    Checkout
+                  </button>
+                )}
 
-                  {/* cart checkout */}
-                  <CartCheckout
-                    isCartOpen={isCartOpen}
-                    closeCheckout={closeCheckout}
-                    cart={cart}
-                    handleDecrease={handleDecrease}
-                    handleIncrease={handleIncrease}
-                  />
-                </div>
+                {/* cart checkout */}
+                <CartCheckout
+                  isCartOpen={isCartOpen}
+                  closeCheckout={closeCheckout}
+                  cart={cart}
+                  handleDecrease={handleDecrease}
+                  handleIncrease={handleIncrease}
+                />
               </div>
             </div>
 
             <div className="flex flex-row justify-start w-[84%] md:w-full">
               <div className="flex flex-col items-center justify-start w-full gap-8">
-                <div className="justify-center w-full gap-8 grid-cols-2 md:grid-cols-1 md:gap-5 grid">
-                  {categories.map((category, index) => (
+                <div className="justify-center w-full gap-6 grid-cols-2 md:grid-cols-1 md:gap-5 grid">
+                  {categories.map((category) => (
                     <button
                       onClick={() => productsPage(category.id)}
                       key={category.id}
+                      className="text-left rounded-xl2 shadow-card hover:shadow-cardHover transition-shadow"
                     >
-                      <div className="flex flex-row sm:flex-col justify-center items-center w-full gap-4 p-[43px] md:p-5 sm:gap-4 bg-gray-50">
-                        <div className="h-[130px] w-[130px] ml-[109px] md:ml-5" />
-                        <div className="flex flex-col items-start justify-start w-[32%] sm:w-full mr-[109px] md:mr-5">
+                      <div className="flex flex-row sm:flex-col justify-start items-center w-full gap-6 p-8 md:p-5 sm:gap-4 bg-surface-subtle dark:bg-gray-800 rounded-xl2">
+                        <div className="h-[100px] w-[100px] shrink-0 rounded-xl2 bg-primary-50 dark:bg-gray-700 flex items-center justify-center">
+                          <HiOutlineSquares2X2 className="text-4xl text-primary-600" />
+                        </div>
+                        <div className="flex flex-col items-start justify-start">
                           <Heading as="h2">{category.category_name}</Heading>
-
                           <Text size="lg" as="p">
                             Collection
                           </Text>

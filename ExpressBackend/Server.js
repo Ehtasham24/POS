@@ -4,6 +4,7 @@ const path = require("path");
 const routesProducts = require("./Routes/API/productsRoutes");
 const routesCategories = require("./Routes/API/categoriesRoutes");
 const routesSales = require("./Routes/API/salesRoutes");
+const routesCreditDebit = require("./Routes/API/creditDebitRoutes");
 const routesPayment = require("./Routes/API/ThirdParty/PayFast/payFastRoutes");
 const cors = require("cors");
 
@@ -26,6 +27,7 @@ const Server = async () => {
   server.use(routesProducts);
   server.use(routesCategories);
   server.use(routesSales);
+  server.use(routesCreditDebit);
 
   // Serve static files from the React app
   server.use(
@@ -36,11 +38,6 @@ const Server = async () => {
   server.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "frontend/build", "index.html"));
   });
-
-  console.log(process.env.USER);
-  console.log(process.env.HOST);
-  console.log(process.env.DATABASE);
-  console.log(process.env.PASSWORD);
 
   try {
     server.listen(Port, () => console.log(`Server started at Port ${Port}`));

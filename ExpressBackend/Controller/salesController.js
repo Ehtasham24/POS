@@ -50,10 +50,10 @@ const getRecentSale = async (req, res) => {
 const getBilledHistory = async (req, res) => {
   try {
     const result = await fetchBilledHistory();
-    res.send(result.rows);
+    res.status(200).send(result);
   } catch (err) {
     console.log(err);
-    res.send(err.message);
+    res.status(500).send({ message: err.message });
   }
 };
 

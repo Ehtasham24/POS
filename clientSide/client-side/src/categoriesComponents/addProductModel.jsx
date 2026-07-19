@@ -1,14 +1,31 @@
-import React, { useState } from "react";
-import { useDispatch } from "react-redux";
+import React, { useState, useEffect } from "react";
+import { Modal } from "components";
 
-const AddProductModal = ({ handleModalHide }) => {
-  const dispatch = useDispatch();
+const inputClass =
+  "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
+const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gray-100";
+
+const AddProductModal = ({ isOpen, onClose }) => {
   const [formData, setFormData] = useState({
     name: "",
     buying_price: "",
     quantity: "",
     category_id: "",
   });
+  const [categories, setCategories] = useState([]);
+
+  useEffect(() => {
+    const fetchCategories = async () => {
+      try {
+        const response = await fetch("http://localhost:4000/categories");
+        const data = await response.json();
+        setCategories(data);
+      } catch (error) {
+        console.error("Error fetching categories:", error);
+      }
+    };
+    fetchCategories();
+  }, []);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -28,149 +45,99 @@ const AddProductModal = ({ handleModalHide }) => {
         },
         body: JSON.stringify(formData),
       });
-      console.log(response);
       if (!response.ok) {
         if (response.status === 409)
           throw new Error("Cannot add duplicate products");
         else throw new Error("Failed to add product");
       }
       alert("Product added successfully!");
+      setFormData({ name: "", buying_price: "", quantity: "", category_id: "" });
+      onClose();
     } catch (error) {
       alert(error.message);
     }
   };
 
   return (
-    <div
-      id="authentication-modal"
-      tabIndex="-1"
-      aria-hidden="true"
-      className={`hidden opacity-100 overflow-y-auto overflow-x-hidden fixed top-0 right-0 left-0 z-50 justify-center items-center w-full md:inset-0 h-[calc(100%-1rem)] max-h-full bg-white`}
-    >
-      <div className="relative p-4 w-full max-w-md max-h-full">
-        <div className="relative bg-white rounded-lg shadow dark:bg-gray-700">
-          <div className="flex items-center justify-between p-4 md:p-5 border-b rounded-t dark:border-gray-600">
-            <h3 className="text-xl  opacity-100 z-50  font-semibold text-gray-900 dark:text-white">
-              Add Product
-            </h3>
-            <button
-              type="button"
-              className="end-2.5 text-gray-400 bg-transparent hover:bg-gray-200 hover:text-gray-900 rounded-lg text-sm w-8 h-8 ms-auto inline-flex justify-center items-center dark:hover:bg-gray-600 dark:hover:text-white"
-              data-modal-hide="authentication-modal"
-              onClick={handleModalHide}
-            >
-              <svg
-                className="w-3 h-3"
-                aria-hidden="true"
-                xmlns="http://www.w3.org/2000/svg"
-                fill="none"
-                viewBox="0 0 14 14"
-              >
-                <path
-                  stroke="currentColor"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth="2"
-                  d="m1 1 6 6m0 0 6 6M7 7l6-6M7 7l-6 6"
-                />
-              </svg>
-              <span className="sr-only">Close modal</span>
-            </button>
-          </div>
-          <div className="p-4 md:p-5  opacity-100 z-50 background bg-white-A700">
-            <form
-              className="space-y-4"
-              action="#"
-              onSubmit={handleSubmitProduct}
-            >
-              <div>
-                <label
-                  htmlFor="product_name"
-                  className="block mb-2 text-[1rem] font-semibold text-gray-900 dark:text-white opacity-100 z-50"
-                >
-                  Product Name
-                </label>
-                <input
-                  type="text"
-                  name="name"
-                  id="product_name"
-                  onChange={handleChange}
-                  className="bg-gray-50 border border-gray-300 mt-4 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white"
-                  placeholder="Enter product"
-                  required
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="buying_price"
-                  className="block mb-2 text-[1rem] font-semibold text-gray-900 dark:text-white"
-                >
-                  Buying Price
-                </label>
-                <input
-                  type="number"
-                  name="buying_price"
-                  id="buying_price"
-                  placeholder="Enter buying price"
-                  onChange={handleChange}
-                  className="bg-gray-50 border border-gray-300 mt-4 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white"
-                  required
-                />
-              </div>
-
-              <div>
-                <label
-                  htmlFor="Quantity"
-                  className="block mb-2 text-[1rem] font-semibold text-gray-900 dark:text-white"
-                >
-                  Quantity
-                </label>
-                <input
-                  type="number"
-                  name="quantity"
-                  id="quantity"
-                  placeholder="Enter quantity"
-                  onChange={handleChange}
-                  className="bg-gray-50 border border-gray-800 mt-4 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white"
-                  required
-                />
-              </div>
-              <div>
-                <label
-                  htmlFor="category_id"
-                  className="block mb-2 text-[1rem] font-semibold text-gray-900 dark:text-white"
-                >
-                  Category
-                </label>
-                <select
-                  name="category_id"
-                  id="category_id"
-                  onChange={handleChange}
-                  value={formData.category_id}
-                  className="bg-gray-50 border border-gray-300 mt-4 text-gray-900 text-sm rounded-lg focus:ring-blue-500 focus:border-blue-500 block w-full p-2.5 dark:bg-gray-600 dark:border-gray-500 dark:placeholder-gray-400 dark:text-white"
-                  required
-                >
-                  <option value="" disabled>
-                    Select category
-                  </option>
-                  <option value="1">Plastic item</option>
-                  <option value="2">Kitchen Appliances</option>
-                  <option value="3">Home Appliances</option>
-                  <option value="4">Kitchen Utensils</option>
-                </select>
-              </div>
-
-              <button
-                type="submit"
-                className="w-full text-white-A700 bg-blue-700 hover:bg-blue-800 focus:ring-4 focus:outline-none focus:ring-blue-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center dark:bg-blue-600 dark:hover:bg-blue-700 dark:focus:ring-blue-800"
-              >
-                Submit
-              </button>
-            </form>
-          </div>
+    <Modal isOpen={isOpen} onClose={onClose} title="Add Product">
+      <form className="space-y-4" onSubmit={handleSubmitProduct}>
+        <div>
+          <label htmlFor="product_name" className={labelClass}>
+            Product Name
+          </label>
+          <input
+            type="text"
+            name="name"
+            id="product_name"
+            value={formData.name}
+            onChange={handleChange}
+            className={inputClass}
+            placeholder="Enter product"
+            required
+          />
         </div>
-      </div>
-    </div>
+        <div>
+          <label htmlFor="buying_price" className={labelClass}>
+            Buying Price
+          </label>
+          <input
+            type="number"
+            name="buying_price"
+            id="buying_price"
+            value={formData.buying_price}
+            placeholder="Enter buying price"
+            onChange={handleChange}
+            className={inputClass}
+            required
+          />
+        </div>
+
+        <div>
+          <label htmlFor="quantity" className={labelClass}>
+            Quantity
+          </label>
+          <input
+            type="number"
+            name="quantity"
+            id="quantity"
+            value={formData.quantity}
+            placeholder="Enter quantity"
+            onChange={handleChange}
+            className={inputClass}
+            required
+          />
+        </div>
+        <div>
+          <label htmlFor="category_id" className={labelClass}>
+            Category
+          </label>
+          <select
+            name="category_id"
+            id="category_id"
+            onChange={handleChange}
+            value={formData.category_id}
+            className={inputClass}
+            required
+          >
+            <option value="" disabled>
+              Select category
+            </option>
+            {categories.map((category) => (
+              <option key={category.id} value={category.id}>
+                {category.category_name}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <button
+          type="submit"
+          className="w-full text-white-A700 bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:outline-none focus:ring-primary-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center transition-colors"
+        >
+          Submit
+        </button>
+      </form>
+    </Modal>
   );
 };
 
