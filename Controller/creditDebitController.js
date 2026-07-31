@@ -15,7 +15,7 @@ const getAllRecords = async (req, res) => {
     res.status(400).send(err);
   }
 };
-
+// TESTING PR FUNCTIONALITY CHERRY SPOT
 const getCreditByname = async (req, res) => {
   const { name } = req.body;
   try {

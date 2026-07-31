@@ -23,5 +23,6 @@ const GetProductsForCategories = async (req, res) => {
     res.send({ message: "Internal error" });
   }
 };
+//TESTINGss PR FUNCTIONALITY CHERRY SPOT
 
 module.exports = { GetCategories, GetProductsForCategories };
