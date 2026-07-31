@@ -20,7 +20,7 @@ const GetItems = async (req, res) => {
     console.log(err);
   }
 };
-//TESTING PR FUNCTIONALITY CHERRY SPOT
+// PR test
 
 const GetItemsById = async (req, res) => {
   const { id } = req.params;
@@ -150,15 +150,9 @@ const UpdateItemsByName = async (req, res) => {
       quantity,
       category_id
     );
-
-    // Check if result is not empty
-    if (result.length === 0) {
-      return res.status(404).send({ message: "No items found to update" });
-    }
-
     console.log("check update", result);
-    console.log(result[0]); // Access the first row if it exists
-    res.send({ message: "updated successfully", updatedItem: result[0] });
+    console.log(result.rows[0]);
+    res.send({ message: "updated successfully" });
   } catch (err) {
     console.error(err);
     res.status(500).send({ message: err.message });
