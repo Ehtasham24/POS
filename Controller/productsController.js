@@ -20,7 +20,7 @@ const GetItems = async (req, res) => {
     console.log(err);
   }
 };
-// PR test
+// PR test ok
 
 const GetItemsById = async (req, res) => {
   const { id } = req.params;
