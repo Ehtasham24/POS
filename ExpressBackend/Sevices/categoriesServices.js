@@ -28,10 +28,13 @@ const createCategory = async (category_name) => {
 const getProductsForCategory = async (id) => {
   try {
     const query = `
-      SELECT p.*
+      SELECT p.*,
+        COUNT(l.id) AS lot_count
       FROM "products" p
       JOIN "categories" c ON p."category_id" = c.id
-      WHERE c.id = $1;
+      LEFT JOIN "lots" l ON l.product_id = p.id AND l.qty_remaining > 0
+      WHERE c.id = $1
+      GROUP BY p.id;
     `;
     const result = await pool.query(query, [id]);
     console.log(result);

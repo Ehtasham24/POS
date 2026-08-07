@@ -24,6 +24,7 @@
     "react-scripts": "5.0.0",
     "react-thermal-printer": "^0.18.1",
     "react-to-print": "^3.0.0",
+    "recharts": "^3.10.0",
     "redux-devtools-extension": "^2.13.9",
     "tw-elements": "^2.0.0",
     "uuid": "^10.0.0",

@@ -3,7 +3,7 @@ module.exports = {
   content: ["./src/**/**/*.{js,ts,jsx,tsx,html,mdx}", "./src/**/*.{js,ts,jsx,tsx,html,mdx}"],
   darkMode: "class",
   theme: {
-    screens: { md: { max: "1050px" }, sm: { max: "550px" } },
+    screens: { md: { max: "1050px" }, sm: { max: "550px" }, cartRail: { min: "1400px" } },
     extend: {
       colors: {
         white: { A700: "#ffffff" },

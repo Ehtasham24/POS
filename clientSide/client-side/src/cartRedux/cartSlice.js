@@ -1,5 +1,9 @@
 import { createSlice } from "@reduxjs/toolkit";
 
+// Cart line shape: { id, productId, productname, category_id, quantity (max sellable —
+// product.quantity for simple items, lot.qty_remaining for batch items), sellingPrice,
+// sellingQuantity, lotId?, lotCode? }. `id` is the product id for simple items or
+// `lot-{lotId}` for batch items, so the same physical lot never merges with another one.
 const initialState = {
   carts: [],
 };
@@ -9,14 +13,20 @@ export const CartSlice = createSlice({
   initialState,
   reducers: {
     addCart(state, action) {
-      console.log("Adding to cart:", action.payload);
+      const addQty = action.payload.sellingQuantity || 1;
       const existingProduct = state.carts.find(
         (item) => item.id === action.payload.id
       );
       if (existingProduct) {
-        existingProduct.sellingQuantity += 1;
+        existingProduct.sellingQuantity = Math.min(
+          existingProduct.sellingQuantity + addQty,
+          existingProduct.quantity
+        );
       } else {
-        state.carts.push({ ...action.payload, sellingQuantity: 1 });
+        state.carts.push({
+          ...action.payload,
+          sellingQuantity: Math.min(addQty, action.payload.quantity || addQty),
+        });
       }
     },
     clearCart(state) {
@@ -46,6 +56,13 @@ export const CartSlice = createSlice({
         }
       }
     },
+    setQuantity(state, action) {
+      const { id, quantity } = action.payload;
+      const item = state.carts.find((item) => item.id === id);
+      if (item) {
+        item.sellingQuantity = Math.min(Math.max(quantity, 1), item.quantity);
+      }
+    },
   },
 });
 
@@ -55,6 +72,7 @@ export const {
   clearCart,
   increaseQuantity,
   decreaseQuantity,
+  setQuantity,
 } = CartSlice.actions;
 
 export default CartSlice.reducer;

@@ -1,14 +1,16 @@
 const { pool } = require("../Db");
+const { getLotById, decrementLot } = require("./lotService");
+const { getSettings } = require("./settingsService");
 
-const insertSales = async (sellingPrice, SellingQuantity, product_id) => {
+const insertSales = async (sellingPrice, sellingQuantity, product_id, lotId, buyingPrice) => {
   try {
     await pool.query(
       `
-      INSERT INTO sales (selling_price, quantity, product_id,sale_time)
-      VALUES ($1, $2, $3,NOW())
+      INSERT INTO sales (selling_price, quantity, product_id, sale_time, lot_id, buying_price)
+      VALUES ($1, $2, $3, NOW(), $4, $5)
       RETURNING *;
     `,
-      [sellingPrice, SellingQuantity, product_id]
+      [sellingPrice, sellingQuantity, product_id, lotId, buyingPrice]
     );
   } catch (err) {
     throw new Error(err.message);
@@ -91,10 +93,53 @@ const getRecentSales = async () => {
   }
 };
 
-const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id) => {
+const getLowStockThreshold = async () => {
+  const settings = await getSettings();
+  const threshold = Number(settings.low_stock_threshold);
+  return Number.isFinite(threshold) ? threshold : 10;
+};
+
+// Sale from a specific, manually-picked lot (batch-tracked products).
+// Decrements exactly that lot (and the product's cached total), and snapshots
+// the lot's buying price onto the sale so later price changes never rewrite past profit.
+const sellFromLot = async (sellingPrice, sellingQuantity, product_id, lotId) => {
+  const lot = await getLotById(lotId);
+  if (!lot) {
+    return { messageSend: `Lot not found` };
+  }
+  if (String(lot.product_id) !== String(product_id)) {
+    return { messageSend: `That lot does not belong to this product` };
+  }
+
+  let updatedLot;
   try {
+    updatedLot = await decrementLot(lotId, sellingQuantity);
+  } catch (err) {
+    return { messageSend: err.message };
+  }
+
+  await insertSales(sellingPrice, sellingQuantity, product_id, lotId, lot.buying_price);
+
+  const { rows } = await pool.query(`SELECT quantity FROM products WHERE id = $1`, [product_id]);
+  const updatedQuantity = rows[0].quantity;
+
+  const threshold = await getLowStockThreshold();
+  let messageSend = "Sale processed successfully";
+  if (updatedQuantity < threshold) {
+    messageSend = `Inventory is less than ${threshold}`;
+  }
+
+  return { updatedQuantity, messageSend, lotRemaining: updatedLot.qty_remaining };
+};
+
+const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id, lotId) => {
+  try {
+    if (lotId) {
+      return await sellFromLot(sellingPrice, SellingQuantity, product_id, lotId);
+    }
+
     const { rows } = await pool.query(
-      `SELECT quantity FROM products WHERE id = $1`,
+      `SELECT quantity, buyingprice FROM products WHERE id = $1`,
       [product_id]
     );
 
@@ -115,11 +160,7 @@ const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id) => {
 
       return { messageSend };
     } else {
-      if (getQuantity < 10) {
-        messageSend = "Inventory is less than 10";
-      }
-
-      await insertSales(sellingPrice, SellingQuantity, product_id);
+      await insertSales(sellingPrice, SellingQuantity, product_id, null, rows[0].buyingprice);
 
       updatedQuantity = getQuantity - SellingQuantity;
 
@@ -129,8 +170,14 @@ const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id) => {
          WHERE id = $2`,
         [updatedQuantity, product_id]
       );
-      messageSend = "Sale processed successfully";
-      console.log(updatedQuantity, messageSend);
+
+      // Check stock remaining AFTER this sale — not the pre-sale quantity — against the
+      // threshold, so the cashier is warned about the level the shelf is actually at now.
+      const threshold = await getLowStockThreshold();
+      messageSend =
+        updatedQuantity < threshold
+          ? `Inventory is less than ${threshold}`
+          : "Sale processed successfully";
 
       return { updatedQuantity, messageSend };
     }
@@ -209,22 +256,25 @@ const fetchSales = async (startDate, endDate) => {
       );
     }
 
-    // Query to fetch product sales, calculate profit/loss, include buying price, and category
+    // Query to fetch product sales, calculate profit/loss, include buying price, and category.
+    // Costs are sourced from sales.buying_price — the price snapshotted at the moment each
+    // sale happened — not the product's current price, so past profit never shifts when a
+    // product's/lot's price changes later.
     const response = await pool.query(
-      `SELECT 
+      `SELECT
          p.productname,
          p.category_id,
          c.category_name,  -- Fetch category name from the categories table
-         p.buyingprice,  -- Include buying price
+         CAST(AVG(s.buying_price) AS INT) AS buyingprice,  -- avg cost actually paid across the sold units
          SUM(s.quantity) AS total_quantity_sold,
          CAST(AVG(s.selling_price) AS INT) AS avg_selling_price,  -- Cast average selling price to INT
-         CAST((AVG(s.selling_price) - p.buyingprice) AS INT) AS profit_loss,  -- Profit per piece as INT
-         (SUM(s.quantity) * (AVG(s.selling_price) - p.buyingprice))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
+         CAST(AVG(s.selling_price - s.buying_price) AS INT) AS profit_loss,  -- Profit per piece as INT
+         SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
        FROM Sales s
        INNER JOIN Products p ON s.product_id = p.id
        INNER JOIN Categories c ON p.category_id = c.id  -- Join with Categories table to get category name
        WHERE s.sale_time BETWEEN $1 AND $2
-       GROUP BY p.productname, p.category_id, p.buyingprice, c.category_name  -- Group by necessary columns including category name
+       GROUP BY p.productname, p.category_id, c.category_name  -- Group by necessary columns including category name
        ORDER BY profit_loss DESC`,
       [startDate, endDate]
     );
@@ -265,30 +315,28 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type) => {
     // Determine the profit condition based on the type
     let profitCondition;
     if (type === "profit") {
-      profitCondition =
-        "(SUM(s.quantity) * (AVG(s.selling_price) - p.buyingprice))::BIGINT > 0"; // Show only positive overall profit
+      profitCondition = "SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT > 0"; // Show only positive overall profit
     } else if (type === "loss") {
-      profitCondition =
-        "(SUM(s.quantity) * (AVG(s.selling_price) - p.buyingprice))::BIGINT < 0"; // Show only negative overall profit
+      profitCondition = "SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT < 0"; // Show only negative overall profit
     } else {
       throw new Error("Invalid type. Must be 'profit' or 'loss'.");
     }
 
     const response = await pool.query(
-      `SELECT 
+      `SELECT
          p.productname,
          p.category_id,
          c.category_name,
-         p.buyingprice,  -- Include buying price
+         CAST(AVG(s.buying_price) AS INT) AS buyingprice,  -- avg cost actually paid across the sold units
          SUM(s.quantity) AS total_quantity_sold,
          CAST(AVG(s.selling_price) AS INT) AS avg_selling_price,  -- Cast average selling price to INT
-         CAST((AVG(s.selling_price) - p.buyingprice) AS INT) AS profit_loss,  -- Profit per piece as INT
-         (SUM(s.quantity) * (AVG(s.selling_price) - p.buyingprice))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
+         CAST(AVG(s.selling_price - s.buying_price) AS INT) AS profit_loss,  -- Profit per piece as INT
+         SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
        FROM Sales s
        INNER JOIN Products p ON s.product_id = p.id
-       INNER JOIN Categories c ON p.category_id = c.id 
+       INNER JOIN Categories c ON p.category_id = c.id
        WHERE s.sale_time BETWEEN $1 AND $2
-       GROUP BY p.productname, p.category_id, p.buyingprice, c.category_name  -- Group by product name and buying price
+       GROUP BY p.productname, p.category_id, c.category_name  -- Group by product name and category
        HAVING ${profitCondition} -- Apply the profit condition for profit-only items
        ORDER BY overall_profit_loss DESC`,
       [startDate, endDate]
@@ -313,10 +361,33 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type) => {
   }
 };
 
+// Daily revenue/profit/units within a date range — powers the Sales Report trend chart.
+const fetchSalesTimeSeries = async (startDate, endDate) => {
+  if (!startDate || !endDate || !isValidDate(startDate) || !isValidDate(endDate)) {
+    throw new Error("Invalid date inputs. Please provide valid start and end dates.");
+  }
+
+  const response = await pool.query(
+    `SELECT
+       DATE_TRUNC('day', s.sale_time) AS day,
+       SUM(s.quantity * s.selling_price)::BIGINT AS revenue,
+       SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit,
+       SUM(s.quantity)::BIGINT AS units
+     FROM Sales s
+     WHERE s.sale_time BETWEEN $1 AND $2
+     GROUP BY day
+     ORDER BY day`,
+    [startDate, endDate]
+  );
+
+  return response.rows;
+};
+
 module.exports = {
   updateSalesRecord,
   fetchSales,
   fetchSalesByProfitLoss,
+  fetchSalesTimeSeries,
   getRecentSales,
   fetchBilledHistory,
 };

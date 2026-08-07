@@ -1,4 +1,5 @@
 const { pool } = require("../Db");
+const { createLot } = require("./lotService");
 
 const getItems = async () => {
   try {
@@ -39,19 +40,33 @@ const getItemByName = async (name) => {
   }
 };
 
-const postItems = async (name, buying_price, quantity, category_id) => {
+const postItems = async (name, buying_price, quantity, category_id, batchOptions = {}) => {
   try {
+    const isBatch = !!batchOptions.batch_tracked;
+
+    // Batch products start at 0/0 — createLot below adds the first lot's quantity/price.
     const result = await pool.query(
       `
             INSERT INTO products(
-                productname, buyingprice, "quantity", "category_id")
-            VALUES ($1, $2, $3, $4)
-            RETURNING id, productname, buyingprice, quantity, category_id
+                productname, buyingprice, "quantity", "category_id", batch_tracked)
+            VALUES ($1, $2, $3, $4, $5)
+            RETURNING id, productname, buyingprice, quantity, category_id, batch_tracked
         `,
-      [name, buying_price, quantity, category_id]
+      [name, isBatch ? 0 : buying_price, isBatch ? 0 : quantity, category_id, isBatch]
     );
 
-    return result.rows; // Return rows
+    const product = result.rows[0];
+    let lot = null;
+
+    if (isBatch && product) {
+      lot = await createLot(product.id, {
+        vendor_id: batchOptions.vendor_id,
+        buying_price,
+        quantity,
+      });
+    }
+
+    return { rows: result.rows, lot }; // Return rows (+ the created first lot, if batch-tracked)
   } catch (err) {
     if (err.code === "23505" && err.constraint === "products_productname_key") {
       throw new Error("Cannot enter duplicate products!");

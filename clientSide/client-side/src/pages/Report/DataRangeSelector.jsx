@@ -8,7 +8,6 @@ const DateRangeSelector = ({
   onStartDateChange,
   onEndDateChange,
   onFilterChange,
-  fetchSalesData,
 }) => {
   return (
     <div className="mb-4 flex flex-row md:flex-col flex-wrap items-end md:items-stretch gap-4 bg-white-A700 dark:bg-gray-900 rounded-xl2 p-4 border border-surface-border dark:border-gray-700">
@@ -48,12 +47,6 @@ const DateRangeSelector = ({
           <option value="loss">Loss-Making Products</option>
         </select>
       </div>
-      <button
-        onClick={() => fetchSalesData(filterType)}
-        className="bg-primary-600 text-white-A700 font-semibold py-2.5 px-5 rounded-lg hover:bg-primary-700 transition-colors focus:outline-none focus:ring-4 focus:ring-primary-300"
-      >
-        Fetch Sales Data
-      </button>
 
       {/* Hidden print version */}
       <div className="hidden print:block mt-4 w-full">

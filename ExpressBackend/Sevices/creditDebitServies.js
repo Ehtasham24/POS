@@ -2,8 +2,20 @@ const { pool } = require("../Db");
 
 const fetchAllRecords = async () => {
   try {
-    const resultDebit = await pool.query(`SELECT * FROM public."debit"`);
-    const resultCredit = await pool.query(`SELECT * FROM public."credit"`);
+    // Prefer the linked contact's current name (single source of truth) but fall back to the
+    // legacy free-text name for any rows created before contacts existed.
+    const resultDebit = await pool.query(
+      `SELECT d.*, COALESCE(c.name, d.name) AS name
+       FROM public."debit" d
+       LEFT JOIN contacts c ON c.id = d.contact_id
+       ORDER BY d.id`
+    );
+    const resultCredit = await pool.query(
+      `SELECT cr.*, COALESCE(c.name, cr.name) AS name
+       FROM public."credit" cr
+       LEFT JOIN contacts c ON c.id = cr.contact_id
+       ORDER BY cr.id`
+    );
     return { Debit: resultDebit.rows, Credit: resultCredit.rows };
   } catch (err) {
     console.log("services error", err);
@@ -22,15 +34,15 @@ const fetchCreditByName = async (name) => {
   }
 };
 
-const insertCredit = async (name, amount_due, amount_received) => {
+const insertCredit = async (name, amount_due, amount_received, contact_id) => {
   try {
     const result = await pool.query(
       `INSERT INTO public.credit(
-    name, amount_due, amount_received, amount_pending, total_amount_id)
-  VALUES ($1, $2, $3, $4, $5)
+    name, amount_due, amount_received, amount_pending, total_amount_id, contact_id)
+  VALUES ($1, $2, $3, $4, $5, $6)
   RETURNING *
 `,
-      [name, amount_due, amount_received, amount_due - amount_received, null]
+      [name, amount_due, amount_received, amount_due - amount_received, null, contact_id || null]
     );
     return result;
   } catch (err) {
@@ -75,6 +87,22 @@ const deleteCreditByName = async (name) => {
   }
 };
 
+const updateCreditById = async (id, contact_id, amount_due, amount_received) => {
+  try {
+    const result = await pool.query(
+      `UPDATE public.credit
+       SET contact_id = $2, amount_due = $3, amount_received = $4,
+           amount_pending = GREATEST($3::numeric - $4::numeric, 0)
+       WHERE id = $1
+       RETURNING *`,
+      [id, contact_id, amount_due, amount_received]
+    );
+    return result;
+  } catch (err) {
+    console.log("services error", err);
+  }
+};
+
 const settleCredit = async (id, amountPaid) => {
   try {
     const result = await pool.query(
@@ -103,15 +131,15 @@ const fetchDebitByName = async (name) => {
   }
 };
 
-const insertDebit = async (name, amount_due, amount_received) => {
+const insertDebit = async (name, amount_due, amount_received, contact_id) => {
   try {
     const result = await pool.query(
       `INSERT INTO public.debit(
-    name, amount_due, amount_received, amount_pending, total_amount_id)
-  VALUES ($1, $2, $3, $4, $5)
+    name, amount_due, amount_received, amount_pending, total_amount_id, contact_id)
+  VALUES ($1, $2, $3, $4, $5, $6)
   RETURNING *
 `,
-      [name, amount_due, amount_received, amount_due - amount_received, null]
+      [name, amount_due, amount_received, amount_due - amount_received, null, contact_id || null]
     );
     return result;
   } catch (err) {
@@ -156,6 +184,22 @@ const deleteDebitByName = async (name) => {
   }
 };
 
+const updateDebitById = async (id, contact_id, amount_due, amount_received) => {
+  try {
+    const result = await pool.query(
+      `UPDATE public.debit
+       SET contact_id = $2, amount_due = $3, amount_received = $4,
+           amount_pending = GREATEST($3::numeric - $4::numeric, 0)
+       WHERE id = $1
+       RETURNING *`,
+      [id, contact_id, amount_due, amount_received]
+    );
+    return result;
+  } catch (err) {
+    console.log("services error", err);
+  }
+};
+
 const settleDebit = async (id, amountPaid) => {
   try {
     const result = await pool.query(
@@ -177,11 +221,13 @@ module.exports = {
   fetchCreditByName,
   insertCredit,
   updateCreditByName,
+  updateCreditById,
   deleteCreditByName,
   settleCredit,
   fetchDebitByName,
   insertDebit,
   updateDebitByName,
+  updateDebitById,
   deleteDebitByName,
   settleDebit,
 };

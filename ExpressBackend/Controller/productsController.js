@@ -10,11 +10,61 @@ const {
 } = require("../Sevices/productsService");
 
 const { GetItem } = require("./categoriesController");
+const { getLotsForProduct, getLotByCode, createLot, addStockToLot } = require("../Sevices/lotService");
+
+const GetLotByCode = async (req, res) => {
+  const { code } = req.params;
+  try {
+    const lot = await getLotByCode(code.toUpperCase());
+    if (!lot) {
+      return res.status(404).send({ message: `No lot found with code: ${code}` });
+    }
+    res.send(lot);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Controller error" });
+  }
+};
+
+const GetProductLots = async (req, res) => {
+  const { id } = req.params;
+  try {
+    const lots = await getLotsForProduct(id);
+    res.send(lots);
+  } catch (err) {
+    console.error(err);
+    res.status(500).send({ message: "Controller error" });
+  }
+};
+
+const PostProductLot = async (req, res) => {
+  const { id } = req.params;
+  const { vendor_id, buying_price, quantity } = req.body;
+  try {
+    const lot = await createLot(id, { vendor_id, buying_price, quantity });
+    res.status(201).send(lot);
+  } catch (err) {
+    console.error(err);
+    res.status(400).send({ message: err.message });
+  }
+};
+
+const PatchLotAddStock = async (req, res) => {
+  const { id } = req.params;
+  const { quantity } = req.body;
+  try {
+    const lot = await addStockToLot(id, quantity);
+    res.send(lot);
+  } catch (err) {
+    console.error(err);
+    res.status(400).send({ message: err.message });
+  }
+};
 
 const GetItems = async (req, res) => {
   try {
     const result = await getItems();
-    res.send(result.rows);
+    res.send(result);
   } catch (err) {
     res.status(500).send({ message: "Controller error" });
     console.log(err);
@@ -27,7 +77,7 @@ const GetItemsById = async (req, res) => {
 
   try {
     const result = await getItemById(id);
-    res.send(result.rows);
+    res.send(result);
   } catch (err) {
     console.error("Error:", err);
     res.status(500).send({ message: "Controller error" });
@@ -41,7 +91,7 @@ const GetItemsByName = async (req, res) => {
 
   try {
     const result = await getItemByName(nameLower);
-    res.send(result.rows);
+    res.send(result);
   } catch (err) {
     console.error("Error:", err);
     res.status(500).send({ message: "Controller error" });
@@ -49,7 +99,7 @@ const GetItemsByName = async (req, res) => {
 };
 
 const PostItems = async (req, res) => {
-  const { name, buying_price, quantity, category_id } = req.body;
+  const { name, buying_price, quantity, category_id, batch_tracked, vendor_id } = req.body;
   const nameLower = name.toLowerCase();
 
   console.log(req.body);
@@ -58,11 +108,12 @@ const PostItems = async (req, res) => {
       nameLower,
       buying_price,
       quantity,
-      category_id
+      category_id,
+      { batch_tracked, vendor_id }
     );
 
     console.log("check", result);
-    res.send(result.rows);
+    res.send({ product: result.rows[0], lot: result.lot });
   } catch (err) {
     if (
       err.message === "Cannot enter duplicate products!" ||
@@ -174,4 +225,8 @@ module.exports = {
   GetItemsById,
   UpdateItemsByName,
   DeleteItemsByName,
+  GetLotByCode,
+  GetProductLots,
+  PostProductLot,
+  PatchLotAddStock,
 };

@@ -1,6 +1,7 @@
 const SalesTable = ({ salesData }) => {
   return (
-    <table className="min-w-full bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 rounded-xl2 overflow-hidden">
+    <div className="w-full overflow-x-auto rounded-xl2 border border-surface-border dark:border-gray-700">
+    <table className="min-w-full bg-white-A700 dark:bg-gray-900 overflow-hidden">
       <thead>
         <tr className="bg-surface-subtle dark:bg-gray-800">
           <th className="py-3 px-4 text-left text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -52,6 +53,7 @@ const SalesTable = ({ salesData }) => {
         ))}
       </tbody>
     </table>
+    </div>
   );
 };
 

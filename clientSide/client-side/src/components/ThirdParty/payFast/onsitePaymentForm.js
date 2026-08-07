@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
+import { useToast } from "components/Toast/ToastContext";
 // import { v4 as uuidv4 } from "uuid";
 
 const PaymentForm = () => {
+  const toast = useToast();
   const [formData, setFormData] = useState({
     firstName: "",
     lastName: "",
@@ -43,7 +45,7 @@ const PaymentForm = () => {
       if (!response.ok) {
         const errorData = await response.json();
         console.error("Payment failed:", errorData.error);
-        alert(`Payment failed: ${errorData.error}`);
+        toast.error(`Payment failed: ${errorData.error}`);
         return;
       }
 
@@ -53,11 +55,11 @@ const PaymentForm = () => {
         window.payfast_do_onsite_payment({ identifier: result.identifier });
       } else {
         console.error("Payment failed:", result.message);
-        alert(`Payment failed: ${result.message}`);
+        toast.error(`Payment failed: ${result.message}`);
       }
     } catch (error) {
       console.error("Error submitting payment:", error);
-      alert(`Error submitting payment: ${error.message}`);
+      toast.error(`Error submitting payment: ${error.message}`);
     }
   };
 

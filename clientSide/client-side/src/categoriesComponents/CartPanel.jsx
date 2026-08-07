@@ -1,0 +1,308 @@
+import { useState, useEffect } from "react";
+import { useDispatch, useSelector } from "react-redux";
+import { HiOutlineShoppingBag, HiOutlineCube, HiOutlineBanknotes, HiOutlineCreditCard } from "react-icons/hi2";
+import { useToast } from "components/Toast/ToastContext";
+import { Modal } from "components";
+import { useLanguage } from "i18n/LanguageContext";
+import {
+  removeCart,
+  increaseQuantity,
+  decreaseQuantity,
+  setQuantity,
+  clearCart,
+} from "cartRedux/cartSlice";
+
+// Cash amounts customers commonly hand over — used to build one-tap tender suggestions.
+const CASH_DENOMINATIONS = [50, 100, 500, 1000, 5000];
+
+const roundUpToDenomination = (amount, denomination) =>
+  Math.ceil(amount / denomination) * denomination;
+
+const tenderSuggestions = (subtotal) => {
+  if (subtotal <= 0) return [];
+  const candidates = [subtotal, ...CASH_DENOMINATIONS.map((d) => roundUpToDenomination(subtotal, d))];
+  return [...new Set(candidates)].sort((a, b) => a - b).slice(0, 5);
+};
+
+// Lets the quantity be typed directly instead of only stepped via +/-. Keeps its own
+// draft text while focused (so clearing/retyping digits works) and commits — clamped
+// to [1, max stock] by the setQuantity reducer — on blur or Enter.
+function QuantityInput({ item, onCommit }) {
+  const [value, setValue] = useState(String(item.sellingQuantity));
+
+  useEffect(() => {
+    setValue(String(item.sellingQuantity));
+  }, [item.sellingQuantity]);
+
+  const commit = () => {
+    const parsed = parseInt(value, 10);
+    if (Number.isNaN(parsed)) {
+      setValue(String(item.sellingQuantity));
+    } else {
+      onCommit(parsed);
+    }
+  };
+
+  return (
+    <input
+      type="number"
+      min={1}
+      max={item.quantity}
+      value={value}
+      onChange={(e) => setValue(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
+      className="h-7 w-14 rounded-md border border-surface-border bg-white-A700 text-center text-sm text-gray-800 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+    />
+  );
+}
+
+// The actual cart contents + checkout action. Rendered as an always-visible panel on
+// desktop (POS terminal layout) and inside a bottom sheet on mobile — no modal/overlay
+// chrome of its own, so it can be dropped into either container.
+export default function CartPanel({ onCheckedOut }) {
+  const cart = useSelector((state) => state.cart.carts);
+  const dispatch = useDispatch();
+  const toast = useToast();
+  const { t } = useLanguage();
+
+  const [showPayment, setShowPayment] = useState(false);
+  const [paymentMethod, setPaymentMethod] = useState("cash");
+  const [amountTendered, setAmountTendered] = useState("");
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  const calculateSubtotal = () =>
+    cart.reduce((total, item) => total + item.sellingPrice * item.sellingQuantity, 0);
+
+  const subtotal = calculateSubtotal();
+  const tenderedNum = parseFloat(amountTendered) || 0;
+  const changeDue = tenderedNum - subtotal;
+  const canConfirm = paymentMethod === "card" || tenderedNum >= subtotal;
+
+  const openPayment = () => {
+    setPaymentMethod("cash");
+    setAmountTendered("");
+    setShowPayment(true);
+  };
+
+  const handleCheckout = async () => {
+    setIsProcessing(true);
+
+    const salesData = cart.map((item) => ({
+      sellingPrice: item.sellingPrice,
+      quantity: item.sellingQuantity,
+      productID: item.productId || item.id,
+      lotId: item.lotId,
+    }));
+
+    try {
+      const results = await Promise.all(
+        salesData.map(async (sale, index) => {
+          const response = await fetch("http://localhost:4000/sales", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(sale),
+          });
+          if (!response.ok) throw new Error("Failed to sell product");
+          const json = await response.json();
+          return { item: cart[index], messageSend: json.data?.messageSend };
+        })
+      );
+
+      dispatch(clearCart());
+      setShowPayment(false);
+      toast.success(
+        paymentMethod === "cash" && changeDue > 0
+          ? `Sold for PKR ${subtotal}. Change due: PKR ${changeDue.toFixed(0)}.`
+          : `Sold for PKR ${subtotal}. Products sold successfully!`
+      );
+
+      // The sale endpoint already flags when a product just dropped below the low-stock
+      // threshold — surface that immediately instead of making the cashier notice on
+      // the Inventory page later.
+      results
+        .filter((r) => r.messageSend?.toLowerCase().includes("less than"))
+        .forEach((r) => toast.warning(`Low stock: ${r.item.productname} — ${r.messageSend}.`));
+
+      onCheckedOut?.();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRemove = (id) => dispatch(removeCart(id));
+  const handleDecrease = (id) => dispatch(decreaseQuantity({ id }));
+  const handleIncrease = (item) => dispatch(increaseQuantity(item));
+
+  return (
+    <div className="flex h-full flex-col">
+      <div className="flex-1 overflow-y-auto px-4 py-4">
+        {cart.length === 0 ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
+            <HiOutlineShoppingBag className="text-5xl text-gray-400" />
+            <p className="text-gray-500 dark:text-gray-400">{t("cart.empty")}</p>
+            <p className="text-sm text-gray-400 dark:text-gray-500">{t("cart.emptyHint")}</p>
+          </div>
+        ) : (
+          <ul className="divide-y divide-surface-border dark:divide-gray-700">
+            {cart.map((item) => (
+              <li key={item.id} className="flex gap-3 py-4 first:pt-0">
+                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-surface-muted dark:bg-gray-700">
+                  <HiOutlineCube className="text-2xl text-gray-400" />
+                </div>
+                <div className="flex flex-1 flex-col min-w-0">
+                  <div className="flex justify-between gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
+                    <span className="truncate">{item.productname}</span>
+                    <span className="shrink-0">PKR {item.sellingPrice}</span>
+                  </div>
+                  {item.lotCode && (
+                    <span className="mt-0.5 inline-flex w-fit rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
+                      {item.lotCode}
+                    </span>
+                  )}
+                  <div className="mt-2 flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={() => handleDecrease(item.id)}
+                        className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-muted text-gray-800 hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
+                      >
+                        -
+                      </button>
+                      <QuantityInput
+                        item={item}
+                        onCommit={(qty) => dispatch(setQuantity({ id: item.id, quantity: qty }))}
+                      />
+                      <button
+                        onClick={() => handleIncrease(item)}
+                        className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-muted text-gray-800 hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
+                      >
+                        +
+                      </button>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(item.id)}
+                      className="font-medium text-danger-600 hover:text-danger-700"
+                    >
+                      {t("cart.remove")}
+                    </button>
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <div className="border-t border-surface-border px-4 py-4 dark:border-gray-700">
+        <div className="flex justify-between text-base font-semibold text-gray-800 dark:text-gray-100">
+          <span>{t("cart.subtotal")}</span>
+          <span>PKR {subtotal}</span>
+        </div>
+        <button
+          onClick={openPayment}
+          disabled={cart.length === 0}
+          className="mt-3 flex w-full items-center justify-center rounded-lg bg-primary-600 py-3 font-medium text-white-A700 shadow-sm transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          {t("cart.checkout")}
+        </button>
+      </div>
+
+      <Modal isOpen={showPayment} onClose={() => setShowPayment(false)} title={t("payment.title")}>
+        <div className="mb-4 flex items-center justify-between rounded-lg bg-surface-subtle px-4 py-3 dark:bg-gray-900/40">
+          <span className="text-sm text-gray-600 dark:text-gray-300">{t("payment.amountDue")}</span>
+          <span className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
+            PKR {subtotal}
+          </span>
+        </div>
+
+        <div className="mb-4 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            onClick={() => setPaymentMethod("cash")}
+            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${
+              paymentMethod === "cash"
+                ? "border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400"
+                : "border-surface-border text-gray-600 hover:bg-surface-subtle dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+            }`}
+          >
+            <HiOutlineBanknotes className="text-lg" />
+            {t("payment.cash")}
+          </button>
+          <button
+            type="button"
+            onClick={() => setPaymentMethod("card")}
+            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${
+              paymentMethod === "card"
+                ? "border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400"
+                : "border-surface-border text-gray-600 hover:bg-surface-subtle dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+            }`}
+          >
+            <HiOutlineCreditCard className="text-lg" />
+            {t("payment.card")}
+          </button>
+        </div>
+
+        {paymentMethod === "cash" && (
+          <>
+            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+              {t("payment.amountReceived")}
+            </label>
+            <input
+              type="number"
+              value={amountTendered}
+              onChange={(e) => setAmountTendered(e.target.value)}
+              placeholder={t("payment.amountReceivedPlaceholder")}
+              autoFocus
+              className="mb-2 block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            />
+
+            <div className="mb-3 flex flex-wrap gap-2">
+              {tenderSuggestions(subtotal).map((amount) => (
+                <button
+                  key={amount}
+                  type="button"
+                  onClick={() => setAmountTendered(String(amount))}
+                  className="rounded-full bg-surface-muted px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-surface-border dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                >
+                  PKR {amount}
+                </button>
+              ))}
+            </div>
+
+            <div
+              className={`mb-4 flex items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold ${
+                amountTendered === ""
+                  ? "bg-surface-muted text-gray-500 dark:bg-gray-700 dark:text-gray-400"
+                  : changeDue >= 0
+                  ? "bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-500"
+                  : "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-400"
+              }`}
+            >
+              <span>{changeDue >= 0 ? t("payment.changeDue") : t("payment.amountShort")}</span>
+              <span>PKR {Math.abs(amountTendered === "" ? 0 : changeDue).toFixed(0)}</span>
+            </div>
+          </>
+        )}
+
+        <div className="flex justify-end gap-3">
+          <button
+            onClick={() => setShowPayment(false)}
+            className="rounded-lg bg-surface-muted px-4 py-2 text-gray-800 transition-colors hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
+          >
+            {t("payment.cancel")}
+          </button>
+          <button
+            onClick={handleCheckout}
+            disabled={!canConfirm || isProcessing}
+            className="rounded-lg bg-primary-600 px-4 py-2 text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isProcessing ? t("payment.processing") : t("payment.confirmSale")}
+          </button>
+        </div>
+      </Modal>
+    </div>
+  );
+}

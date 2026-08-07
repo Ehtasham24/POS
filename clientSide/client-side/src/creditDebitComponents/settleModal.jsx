@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Modal } from "components";
+import { useToast } from "components/Toast/ToastContext";
 
 const SettleModal = ({ isOpen, onClose, entry, type, onSettled }) => {
+  const toast = useToast();
   const [amountPaid, setAmountPaid] = useState("");
 
   useEffect(() => {
@@ -15,7 +17,7 @@ const SettleModal = ({ isOpen, onClose, entry, type, onSettled }) => {
     const pending = Number(entry.amount_pending);
     const amount = Math.min(Number(amountPaid), pending);
     if (amount <= 0) {
-      alert("Enter an amount greater than 0.");
+      toast.error("Enter an amount greater than 0.");
       return;
     }
     try {
@@ -28,10 +30,11 @@ const SettleModal = ({ isOpen, onClose, entry, type, onSettled }) => {
         }
       );
       if (!response.ok) throw new Error("Failed to settle entry");
+      toast.success("Entry settled successfully");
       onSettled();
       onClose();
     } catch (error) {
-      alert(error.message);
+      toast.error(error.message);
     }
   };
 

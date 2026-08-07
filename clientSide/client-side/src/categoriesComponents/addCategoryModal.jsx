@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { Modal } from "components";
+import { useToast } from "components/Toast/ToastContext";
 
 const AddCategoryModal = ({ isOpen, onClose, onCategoryAdded }) => {
+  const toast = useToast();
   const [categoryName, setCategoryName] = useState("");
 
   const handleChange = (e) => {
@@ -23,12 +25,12 @@ const AddCategoryModal = ({ isOpen, onClose, onCategoryAdded }) => {
           throw new Error("Category already exists");
         else throw new Error("Failed to add category");
       }
-      alert("Category added successfully!");
+      toast.success("Category added successfully!");
       setCategoryName("");
       onCategoryAdded();
       onClose();
     } catch (error) {
-      alert(error.message);
+      toast.error(error.message);
     }
   };
 

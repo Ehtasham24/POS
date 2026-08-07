@@ -1,7 +1,9 @@
 import React, { useState } from "react";
 import { Modal } from "components";
+import { useToast } from "components/Toast/ToastContext";
 
 const DeleteProductModal = ({ isOpen, onClose }) => {
+  const toast = useToast();
   const [deletionData, setDeletionData] = useState({
     name: "",
   });
@@ -22,12 +24,12 @@ const DeleteProductModal = ({ isOpen, onClose }) => {
           throw new Error(`${productName} not found!`);
         } else throw new Error("Failed to delete product");
       }
-      alert("Product deleted successfully");
+      toast.success("Product deleted successfully");
       setDeletionData({ name: "" });
       onClose();
     } catch (err) {
       console.error("Error deleting product:", err);
-      alert(err.message);
+      toast.error(err.message);
     }
   };
 

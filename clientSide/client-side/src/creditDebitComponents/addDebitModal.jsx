@@ -1,16 +1,32 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { Modal } from "components";
+import { useToast } from "components/Toast/ToastContext";
+import ContactSelect from "./ContactSelect";
 
 const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
 const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gray-100";
 
-const AddDebitModal = ({ isOpen, onClose, onAdded }) => {
+// Doubles as "Add Payable" (no `entry`) and "Edit Payable" (entry passed in) — the two
+// forms are identical, only the submit target (POST vs PUT-by-id) and title differ.
+const AddDebitModal = ({ isOpen, onClose, onAdded, entry }) => {
+  const toast = useToast();
+  const isEdit = !!entry;
   const [formData, setFormData] = useState({
-    name: "",
+    contact_id: "",
     amount_due: "",
     amount_received: "0",
   });
+
+  useEffect(() => {
+    if (!isOpen) return;
+    setFormData({
+      contact_id: entry ? String(entry.contact_id || "") : "",
+      amount_due: entry ? String(entry.amount_due) : "",
+      amount_received: entry ? String(entry.amount_received) : "0",
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, entry]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -19,44 +35,41 @@ const AddDebitModal = ({ isOpen, onClose, onAdded }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!formData.contact_id) {
+      toast.error("Select a vendor");
+      return;
+    }
     try {
-      const response = await fetch("http://localhost:4000/debit", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          amount_due: Number(formData.amount_due),
-          amount_received: Number(formData.amount_received || 0),
-        }),
-      });
-      if (!response.ok) throw new Error("Failed to add payable entry");
-      alert("Payable entry added!");
-      setFormData({ name: "", amount_due: "", amount_received: "0" });
+      const response = await fetch(
+        isEdit ? `http://localhost:4000/api/debit/${entry.id}` : "http://localhost:4000/debit",
+        {
+          method: isEdit ? "PUT" : "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            contact_id: Number(formData.contact_id),
+            amount_due: Number(formData.amount_due),
+            amount_received: Number(formData.amount_received || 0),
+          }),
+        }
+      );
+      if (!response.ok) throw new Error(`Failed to ${isEdit ? "update" : "add"} payable entry`);
+      toast.success(isEdit ? "Payable entry updated!" : "Payable entry added!");
       onAdded();
       onClose();
     } catch (error) {
-      alert(error.message);
+      toast.error(error.message);
     }
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title="Add Payable (Supplier)">
+    <Modal isOpen={isOpen} onClose={onClose} title={isEdit ? "Edit Payable" : "Add Payable (Supplier)"}>
       <form className="space-y-4" onSubmit={handleSubmit}>
-        <div>
-          <label htmlFor="debit_name" className={labelClass}>
-            Supplier Name
-          </label>
-          <input
-            type="text"
-            name="name"
-            id="debit_name"
-            value={formData.name}
-            onChange={handleChange}
-            className={inputClass}
-            placeholder="Enter supplier name"
-            required
-          />
-        </div>
+        <ContactSelect
+          type="vendor"
+          id="debit_contact"
+          value={formData.contact_id}
+          onChange={(contact_id) => setFormData((prev) => ({ ...prev, contact_id }))}
+        />
         <div>
           <label htmlFor="debit_amount_due" className={labelClass}>
             Amount Due
@@ -92,7 +105,7 @@ const AddDebitModal = ({ isOpen, onClose, onAdded }) => {
           type="submit"
           className="w-full text-white-A700 bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:outline-none focus:ring-primary-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center transition-colors"
         >
-          Add Entry
+          {isEdit ? "Save Changes" : "Add Entry"}
         </button>
       </form>
     </Modal>

@@ -5,6 +5,10 @@ const routesProducts = require("./Routes/API/productsRoutes");
 const routesCategories = require("./Routes/API/categoriesRoutes");
 const routesSales = require("./Routes/API/salesRoutes");
 const routesCreditDebit = require("./Routes/API/creditDebitRoutes");
+const routesSettings = require("./Routes/API/settingsRoutes");
+const routesSearch = require("./Routes/API/searchRoutes");
+const routesInventory = require("./Routes/API/inventoryRoutes");
+const routesContacts = require("./Routes/API/contactsRoutes");
 const routesPayment = require("./Routes/API/ThirdParty/PayFast/payFastRoutes");
 const cors = require("cors");
 
@@ -28,6 +32,10 @@ const Server = async () => {
   server.use(routesCategories);
   server.use(routesSales);
   server.use(routesCreditDebit);
+  server.use(routesSettings);
+  server.use(routesSearch);
+  server.use(routesInventory);
+  server.use(routesContacts);
 
   // Serve static files from the React app
   server.use(

@@ -1,14 +1,16 @@
 import React, { useState, useEffect } from "react";
-import { Helmet } from "react-helmet";
 import { useDispatch } from "react-redux";
 import { addCart } from "cartRedux/cartSlice";
-import Footer from "components/Footer";
-import { Text, Heading, Modal } from "components";
-import Header from "components/Header";
-import { useParams } from "react-router-dom";
-import { ImSearch } from "react-icons/im";
-import { Link } from "react-router-dom";
+import { Modal } from "components";
+import { useParams, Link } from "react-router-dom";
+import {
+  HiOutlineMagnifyingGlass,
+  HiOutlineCube,
+  HiOutlineShoppingCart,
+  HiOutlineQrCode,
+} from "react-icons/hi2";
 import EditProductModal from "categoriesComponents/editProductModal";
+import AppShell from "components/AppShell";
 
 export default function ProductListPage() {
   const [categories, setCategories] = useState([]);
@@ -17,13 +19,17 @@ export default function ProductListPage() {
   const [showPopup, setShowPopup] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [sellingPrice, setSellingPrice] = useState("");
+  const [sellQuantity, setSellQuantity] = useState("1");
   const [showEditModal, setShowEditModal] = useState(false);
   const [productToEdit, setProductToEdit] = useState(null);
+
+  // Lot picker for batch-tracked products
+  const [lotPickProduct, setLotPickProduct] = useState(null);
+  const [availableLots, setAvailableLots] = useState([]);
 
   const { prodNum } = useParams(); // Get the category ID from the URL
   const dispatch = useDispatch();
 
-  // Fetch categories when the component mounts
   useEffect(() => {
     const fetchCategories = async () => {
       try {
@@ -41,7 +47,6 @@ export default function ProductListPage() {
     fetchCategories();
   }, []);
 
-  // Fetch products when the selected category changes or search value changes
   const fetchProducts = async () => {
     if (!prodNum) return; // Don't fetch products if no category is selected
     try {
@@ -75,179 +80,299 @@ export default function ProductListPage() {
     setSearchValue(event.target.value);
   };
 
-  const handleAddToCartClick = (product) => {
-    setSelectedProduct(product);
-    setShowPopup(true);
-  };
+  const handleSellClick = async (product) => {
+    setSellQuantity("1");
 
-  const handlePopupSubmit = () => {
-    if (sellingPrice) {
-      const productWithPrice = {
-        ...selectedProduct,
-        sellingPrice: parseInt(sellingPrice, 10),
-      };
-      dispatch(addCart(productWithPrice));
-      setShowPopup(false);
-      setSellingPrice("");
+    if (!product.batch_tracked) {
+      setSelectedProduct(product);
+      setShowPopup(true);
+      return;
+    }
+
+    setLotPickProduct(product);
+    try {
+      const response = await fetch(`http://localhost:4000/api/products/${product.id}/lots`);
+      const lots = await response.json();
+      setAvailableLots(lots.filter((lot) => lot.qty_remaining > 0));
+    } catch (error) {
+      console.error("Error fetching lots:", error);
+      setAvailableLots([]);
     }
   };
 
+  const handleLotPick = (lot) => {
+    setSellQuantity("1");
+    setSelectedProduct({
+      id: `lot-${lot.id}`,
+      productId: lotPickProduct.id,
+      productname: lotPickProduct.productname,
+      category_id: lotPickProduct.category_id,
+      quantity: lot.qty_remaining,
+      buyingprice: lot.buying_price,
+      lotId: lot.id,
+      lotCode: lot.lot_code,
+    });
+    setLotPickProduct(null);
+    setAvailableLots([]);
+    setShowPopup(true);
+  };
+
+  const sellMaxQty = selectedProduct?.quantity || 0;
+  const sellQtyNum = parseInt(sellQuantity, 10) || 0;
+  const sellQtyInvalid = !selectedProduct || sellQtyNum < 1 || sellQtyNum > sellMaxQty;
+
+  const handlePopupSubmit = () => {
+    if (!sellingPrice || sellQtyInvalid) return;
+
+    const productWithPrice = {
+      ...selectedProduct,
+      productId: selectedProduct.productId || selectedProduct.id,
+      sellingPrice: parseInt(sellingPrice, 10),
+      sellingQuantity: sellQtyNum,
+    };
+    dispatch(addCart(productWithPrice));
+    setShowPopup(false);
+    setSellingPrice("");
+    setSellQuantity("1");
+  };
+
+  const visibleProducts = products.filter((product) => product.quantity >= 1);
+
   return (
     <>
-      <Helmet>
-        <title>POS system</title>
-        <meta
-          name="description"
-          content="Web site created using create-react-app"
-        />
-      </Helmet>
-      <div className="flex flex-col items-center justify-start w-full bg-white-A700 dark:bg-gray-900 min-h-screen">
-        <Header className="flex flex-row justify-between items-center w-full p-6 sm:p-5 bg-white-A700" />
-        <div className="flex flex-col items-center justify-start w-full mt-[31px] gap-[51px] md:px-5 max-w-[1632px]">
-          <div className="flex flex-row justify-between items-center gap-2 w-auto">
-            <Link to="/" className="text-primary-600 hover:underline">
-              Home
-            </Link>
-            <Text as="p" className="!text-blue_gray-100">
-              &gt;
-            </Text>
-            <Text as="p" className="!text-gray-800">
-              Product List
-            </Text>
-          </div>
-          <Heading as="h1">Product List</Heading>
-
-          <div className="relative w-96 max-w-full">
+      <AppShell
+        title="Product List"
+        actions={
+          <div className="relative w-72 max-w-full">
             <input
               type="text"
               value={searchValue}
               onChange={handleSearchInputChange}
-              placeholder="Search products..."
-              className="h-11 w-full pl-4 pr-10 border border-surface-border dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500"
+              placeholder="Filter this category..."
+              className="h-10 w-full rounded-xl border border-surface-border bg-surface-subtle pl-4 pr-10 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
             />
-            <div className="absolute inset-y-0 right-0 flex items-center pr-3 text-gray-500 dark:text-gray-400">
-              <ImSearch className="text-lg" />
-            </div>
+            <HiOutlineMagnifyingGlass className="pointer-events-none absolute inset-y-0 right-3 my-auto text-lg text-gray-500 dark:text-gray-400" />
           </div>
-
-          <div className="flex flex-row md:flex-col justify-start items-start w-full gap-8 md:gap-5">
-            {/* Left Column: Categories */}
-            <div className="flex flex-col items-start justify-start w-[16%] md:w-full gap-4 bg-surface-subtle dark:bg-gray-800 rounded-xl2 p-4">
-              <Text as="p" className="!text-gray-800 dark:!text-gray-100 font-semibold">
-                Categories
-              </Text>
-              <div className="flex flex-col items-start justify-start w-full gap-1">
-                {categories.map((category) => {
-                  const isActive = String(category.id) === String(prodNum);
-                  return (
-                    <Link
-                      key={category.id}
-                      to={`/categories/${category.id}`}
-                      className={`w-full px-3 py-2 rounded-lg text-sm transition-colors ${
-                        isActive
-                          ? "bg-primary-50 dark:bg-gray-700 text-primary-700 dark:text-primary-300 font-medium"
-                          : "text-gray-800 dark:text-gray-300 hover:bg-surface-muted dark:hover:bg-gray-700"
-                      }`}
-                    >
-                      {category.category_name}
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-
-            {/* Right Column: Products */}
-            <div className="flex flex-col items-center justify-start w-[84%] md:w-full gap-[29px]">
-              <div className="w-full max-h-[900px] overflow-y-auto rounded-xl2 border border-surface-border dark:border-gray-700">
-                <table className="w-full border-collapse">
-                  <thead className="bg-surface-subtle dark:bg-gray-800 sticky top-0">
-                    <tr>
-                      <th className="text-left pl-5 py-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
-                        No
-                      </th>
-                      <th className="text-left py-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
-                        Product Name
-                      </th>
-                      <th className="text-left py-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
-                        Quantity
-                      </th>
-                      <th className="text-left py-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
-                        Buying Price
-                      </th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-surface-border dark:divide-gray-700">
-                    {products
-                      .filter((product) => product.quantity >= 1)
-                      .map((product, index) => (
-                        <tr key={product.id} className="even:bg-surface-subtle dark:even:bg-gray-800">
-                          <td className="pl-5 py-3 text-gray-800 dark:text-gray-100">
-                            {index + 1}.
-                          </td>
-                          <td className="py-3 font-medium text-gray-800 dark:text-gray-100">
-                            {product.productname}
-                          </td>
-                          <td className="py-3 text-gray-800 dark:text-gray-100">
-                            {product.quantity}
-                          </td>
-                          <td className="py-3 text-gray-800 dark:text-gray-100">
-                            {product.buyingprice}
-                          </td>
-                          <td className="py-3 pr-5 text-right space-x-2 whitespace-nowrap">
-                            <button
-                              onClick={() => handleEditClick(product)}
-                              className="px-4 py-2 bg-surface-muted dark:bg-gray-700 hover:bg-surface-border dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-xs font-bold uppercase rounded-lg transition-colors"
-                            >
-                              Edit
-                            </button>
-                            <button
-                              onClick={() => handleAddToCartClick(product)}
-                              className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white-A700 text-xs font-bold uppercase rounded-lg transition-colors"
-                            >
-                              Add to cart
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <Footer className="flex justify-center items-center w-full mt-[85px] p-[30px] sm:p-5 bg-gray-800" />
-      </div>
-
-      {/* Popup for selling price */}
-      <Modal
-        isOpen={showPopup}
-        onClose={() => setShowPopup(false)}
-        title="Enter Selling Price"
+        }
       >
-        <input
-          type="number"
-          value={sellingPrice}
-          onChange={(e) => setSellingPrice(e.target.value)}
-          className="bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5 mb-4"
-          placeholder="Enter price"
-          autoFocus
-        />
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={() => setShowPopup(false)}
-            className="px-4 py-2 bg-surface-muted dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-lg hover:bg-surface-border dark:hover:bg-gray-600 transition-colors"
-          >
-            Cancel
-          </button>
-          <button
-            onClick={handlePopupSubmit}
-            className="px-4 py-2 bg-primary-600 text-white-A700 rounded-lg hover:bg-primary-700 transition-colors"
-          >
-            Submit
-          </button>
+        {/* Category pill filter */}
+        <div className="mb-6 flex flex-wrap gap-2">
+          {categories.map((category) => {
+            const isActive = String(category.id) === String(prodNum);
+            return (
+              <Link
+                key={category.id}
+                to={`/categories/${category.id}`}
+                className={`rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+                  isActive
+                    ? "bg-primary-600 text-white-A700 shadow-md shadow-primary-900/20"
+                    : "bg-surface-subtle text-gray-700 hover:bg-surface-muted dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                }`}
+              >
+                {category.category_name}
+              </Link>
+            );
+          })}
         </div>
+
+        <div className="w-full overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
+          <div className="max-h-[70vh] overflow-auto">
+            <table className="w-full min-w-[640px] border-collapse">
+              <thead className="sticky top-0 bg-surface-subtle dark:bg-gray-800">
+                <tr>
+                  <th className="pl-5 pr-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Product
+                  </th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Quantity
+                  </th>
+                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Buying Price
+                  </th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-surface-border dark:divide-gray-800">
+                {visibleProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-16 text-center text-gray-500 dark:text-gray-400">
+                      No products found.
+                    </td>
+                  </tr>
+                ) : (
+                  visibleProducts.map((product) => (
+                    <tr
+                      key={product.id}
+                      className="transition-colors hover:bg-surface-subtle dark:hover:bg-gray-800/60"
+                    >
+                      <td className="pl-5 pr-3 py-3">
+                        <div className="flex items-center gap-3">
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
+                            <HiOutlineCube className="text-lg text-primary-600 dark:text-primary-400" />
+                          </div>
+                          <span className="font-medium text-gray-800 dark:text-gray-100">
+                            {product.productname}
+                          </span>
+                          {product.batch_tracked && (
+                            <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
+                              {product.lot_count} lot{Number(product.lot_count) === 1 ? "" : "s"}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <span className="inline-flex rounded-full bg-surface-muted px-2.5 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                          {product.quantity} in stock
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 text-gray-800 dark:text-gray-100">
+                        Rs.{product.buyingprice}
+                      </td>
+                      <td className="py-3 pr-5 text-right whitespace-nowrap space-x-2">
+                        <button
+                          onClick={() => handleEditClick(product)}
+                          className="rounded-lg bg-surface-muted px-3.5 py-2 text-xs font-bold uppercase text-gray-800 transition-colors hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
+                        >
+                          Edit
+                        </button>
+                        <button
+                          onClick={() => handleSellClick(product)}
+                          className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3.5 py-2 text-xs font-bold uppercase text-white-A700 transition-colors hover:bg-primary-700"
+                        >
+                          {product.batch_tracked ? <HiOutlineQrCode /> : <HiOutlineShoppingCart />}
+                          {product.batch_tracked ? "Pick lot" : "Add"}
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </AppShell>
+
+      {/* Lot picker (batch-tracked products) */}
+      <Modal
+        isOpen={!!lotPickProduct}
+        onClose={() => setLotPickProduct(null)}
+        title={`Pick a lot — ${lotPickProduct?.productname || ""}`}
+      >
+        {availableLots.length === 0 ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">No stock available in any lot.</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {availableLots.map((lot) => (
+              <li key={lot.id}>
+                <button
+                  type="button"
+                  onClick={() => handleLotPick(lot)}
+                  className="flex w-full items-center justify-between rounded-lg border border-surface-border px-4 py-3 text-left transition-colors hover:bg-surface-subtle dark:border-gray-700 dark:hover:bg-gray-700"
+                >
+                  <span>
+                    <span className="block font-semibold text-gray-800 dark:text-gray-100">
+                      {lot.lot_code}
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      Vendor: {lot.vendor_name || "—"}
+                    </span>
+                  </span>
+                  <span className="text-right text-sm">
+                    <span className="block font-medium text-gray-800 dark:text-gray-100">
+                      Rs.{lot.buying_price}
+                    </span>
+                    <span className="text-xs text-gray-500 dark:text-gray-400">
+                      {lot.qty_remaining} left
+                    </span>
+                  </span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Modal>
+
+      {/* Sell detail: full product info + quantity + price, in one place */}
+      <Modal isOpen={showPopup} onClose={() => setShowPopup(false)} title="Sell Product">
+        {selectedProduct && (
+          <>
+            <div className="mb-4 rounded-xl bg-surface-subtle p-3 dark:bg-gray-900/40">
+              <p className="font-poppins text-base font-bold text-gray-800 dark:text-gray-100">
+                {selectedProduct.productname}
+              </p>
+              <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
+                <dt className="text-gray-500 dark:text-gray-400">Category</dt>
+                <dd className="text-right font-medium text-gray-800 dark:text-gray-100">
+                  {categories.find((c) => c.id === selectedProduct.category_id)?.category_name || "—"}
+                </dd>
+                {selectedProduct.lotCode && (
+                  <>
+                    <dt className="text-gray-500 dark:text-gray-400">Lot</dt>
+                    <dd className="text-right font-medium text-primary-600 dark:text-primary-400">
+                      {selectedProduct.lotCode}
+                    </dd>
+                  </>
+                )}
+                <dt className="text-gray-500 dark:text-gray-400">In stock</dt>
+                <dd className="text-right font-medium text-gray-800 dark:text-gray-100">{sellMaxQty}</dd>
+                <dt className="text-gray-500 dark:text-gray-400">Cost price</dt>
+                <dd className="text-right font-medium text-gray-800 dark:text-gray-100">
+                  Rs.{selectedProduct.buyingprice}
+                </dd>
+              </dl>
+            </div>
+
+            <div className="mb-1 grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+                  Quantity
+                </label>
+                <input
+                  type="number"
+                  min={1}
+                  max={sellMaxQty}
+                  value={sellQuantity}
+                  onChange={(e) => setSellQuantity(e.target.value)}
+                  className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+                  Selling price
+                </label>
+                <input
+                  type="number"
+                  value={sellingPrice}
+                  onChange={(e) => setSellingPrice(e.target.value)}
+                  className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                  placeholder="Enter price"
+                  autoFocus
+                />
+              </div>
+            </div>
+            {sellQtyInvalid && (
+              <p className="mb-2 text-xs font-medium text-danger-600">
+                Enter a quantity between 1 and {sellMaxQty}.
+              </p>
+            )}
+
+            <div className="mt-3 flex justify-end gap-3">
+              <button
+                onClick={() => setShowPopup(false)}
+                className="px-4 py-2 bg-surface-muted dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-lg hover:bg-surface-border dark:hover:bg-gray-600 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handlePopupSubmit}
+                disabled={sellQtyInvalid || !sellingPrice}
+                className="px-4 py-2 bg-primary-600 text-white-A700 rounded-lg hover:bg-primary-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                Add to Cart
+              </button>
+            </div>
+          </>
+        )}
       </Modal>
 
       <EditProductModal

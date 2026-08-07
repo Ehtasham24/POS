@@ -3,15 +3,17 @@ const {
   updateSalesRecord,
   fetchSales,
   fetchSalesByProfitLoss,
+  fetchSalesTimeSeries,
   fetchBilledHistory,
 } = require("../Sevices/salesService");
 
 const PostSales = async (req, res) => {
-  const { sellingPrice, quantity, productID } = req.body;
+  const { sellingPrice, quantity, productID, lotId } = req.body;
   const { messageSend, updatedQuantity } = await updateSalesRecord(
     sellingPrice,
     quantity,
-    productID
+    productID,
+    lotId
   );
 
   try {
@@ -84,10 +86,21 @@ const getSalesByProfitLoss = async (req, res) => {
   }
 };
 
+const getSalesTimeSeries = async (req, res) => {
+  const { startDate, endDate } = req.body;
+  try {
+    const response = await fetchSalesTimeSeries(startDate, endDate);
+    res.status(200).send(response);
+  } catch (err) {
+    res.status(500).send({ error: err.message });
+  }
+};
+
 module.exports = {
   PostSales,
   getSales,
   getSalesByProfitLoss,
+  getSalesTimeSeries,
   getRecentSale,
   getBilledHistory,
 };

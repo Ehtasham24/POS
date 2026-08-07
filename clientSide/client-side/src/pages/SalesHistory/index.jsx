@@ -1,9 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Helmet } from "react-helmet";
-import Header from "components/Header";
-import Footer from "components/Footer";
-import { Heading, Text, Modal } from "components";
+import { Text, Modal } from "components";
+import { HiOutlineClipboardDocumentList, HiOutlinePrinter } from "react-icons/hi2";
 import { printReceipt } from "utils/printReceipt";
+import AppShell from "components/AppShell";
 
 const batchTotal = (batch) =>
   batch.reduce((sum, sale) => sum + sale.selling_price * sale.quantity, 0);
@@ -32,49 +31,46 @@ export default function SalesHistoryPage() {
 
   return (
     <>
-      <Helmet>
-        <title>POS system</title>
-        <meta
-          name="description"
-          content="Web site created using create-react-app"
-        />
-      </Helmet>
-      <div className="flex flex-col items-center justify-start w-full bg-white-A700 dark:bg-gray-900 min-h-screen">
-        <Header className="flex flex-row justify-between items-center w-full p-6 sm:p-5 bg-white-A700" />
-        <div className="flex flex-col items-center justify-start w-full mt-[31px] gap-8 md:px-5 max-w-[1632px]">
-          <Heading as="h1">Sales History</Heading>
-
-          <div className="w-full max-w-4xl rounded-xl2 border border-surface-border dark:border-gray-700 overflow-hidden">
-            <table className="w-full border-collapse">
+      <AppShell title="Sales History">
+        <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
+          <div className="w-full overflow-x-auto">
+            <table className="w-full min-w-[560px] border-collapse">
               <thead className="bg-surface-subtle dark:bg-gray-800">
                 <tr>
-                  <th className="text-left pl-5 py-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  <th className="text-left pl-5 pr-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     Date/Time
                   </th>
-                  <th className="text-left py-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  <th className="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     Items
                   </th>
-                  <th className="text-left py-3 text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  <th className="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     Total
                   </th>
                   <th></th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-surface-border dark:divide-gray-700">
+              <tbody className="divide-y divide-surface-border dark:divide-gray-800">
                 {batches.length === 0 ? (
                   <tr>
-                    <td colSpan={4} className="text-center py-6 text-gray-500 dark:text-gray-400">
-                      No past sales found.
+                    <td colSpan={4} className="py-16 text-center text-gray-500 dark:text-gray-400">
+                      <div className="flex flex-col items-center gap-3">
+                        <HiOutlineClipboardDocumentList className="text-3xl text-gray-400" />
+                        No past sales found.
+                      </div>
                     </td>
                   </tr>
                 ) : (
                   batches.map((batch, index) => (
-                    <tr key={index} className="even:bg-surface-subtle dark:even:bg-gray-800">
-                      <td className="pl-5 py-3 text-gray-800 dark:text-gray-100">
+                    <tr key={index} className="transition-colors hover:bg-surface-subtle dark:hover:bg-gray-800/60">
+                      <td className="pl-5 pr-3 py-3 whitespace-nowrap text-gray-800 dark:text-gray-100">
                         {new Date(batch[0].sale_time).toLocaleString()}
                       </td>
-                      <td className="py-3 text-gray-800 dark:text-gray-100">{batch.length}</td>
-                      <td className="py-3 text-gray-800 dark:text-gray-100">
+                      <td className="px-3 py-3">
+                        <span className="inline-flex rounded-full bg-surface-muted px-2.5 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                          {batch.length} item{batch.length === 1 ? "" : "s"}
+                        </span>
+                      </td>
+                      <td className="px-3 py-3 whitespace-nowrap font-medium text-gray-800 dark:text-gray-100">
                         Rs.{batchTotal(batch).toFixed(2)}
                       </td>
                       <td className="py-3 pr-5 text-right">
@@ -92,9 +88,7 @@ export default function SalesHistoryPage() {
             </table>
           </div>
         </div>
-
-        <Footer className="flex justify-center items-center w-full mt-[85px] p-[30px] sm:p-5 bg-gray-800" />
-      </div>
+      </AppShell>
 
       <Modal
         isOpen={!!selectedBatch}
@@ -104,7 +98,8 @@ export default function SalesHistoryPage() {
       >
         {selectedBatch && (
           <>
-            <table className="w-full border-collapse mb-4">
+            <div className="w-full overflow-x-auto mb-4">
+            <table className="w-full min-w-[420px] border-collapse">
               <thead>
                 <tr className="bg-surface-subtle dark:bg-gray-700">
                   <th className="text-left px-2 py-2 text-sm font-semibold text-gray-800 dark:text-gray-100">
@@ -140,6 +135,7 @@ export default function SalesHistoryPage() {
                 ))}
               </tbody>
             </table>
+            </div>
             <Text as="p" className="font-semibold !text-gray-800 dark:!text-gray-100 mb-4">
               Total: Rs.{batchTotal(selectedBatch).toFixed(2)}
             </Text>
@@ -147,8 +143,9 @@ export default function SalesHistoryPage() {
               onClick={() =>
                 printReceipt(selectedBatch, batchTotal(selectedBatch))
               }
-              className="w-full py-2.5 bg-primary-600 text-white-A700 rounded-lg hover:bg-primary-700 transition-colors"
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-primary-600 py-2.5 font-semibold text-white-A700 transition-colors hover:bg-primary-700"
             >
+              <HiOutlinePrinter />
               Print / Duplicate Receipt
             </button>
           </>

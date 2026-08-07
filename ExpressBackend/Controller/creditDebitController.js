@@ -3,11 +3,13 @@ const {
   fetchCreditByName,
   insertCredit,
   updateCreditByName,
+  updateCreditById,
   deleteCreditByName,
   settleCredit,
   fetchDebitByName,
   insertDebit,
   updateDebitByName,
+  updateDebitById,
   deleteDebitByName,
   settleDebit,
 } = require("../Sevices/creditDebitServies");
@@ -34,9 +36,9 @@ const getCreditByname = async (req, res) => {
 };
 
 const postCredit = async (req, res) => {
-  const { name, amount_due, amount_received } = req.body;
+  const { name, amount_due, amount_received, contact_id } = req.body;
   try {
-    const result = await insertCredit(name, amount_due, amount_received);
+    const result = await insertCredit(name, amount_due, amount_received, contact_id);
     res.send(`new entry inserted ${result.rows}`);
   } catch (err) {
     console.log(err);
@@ -71,6 +73,18 @@ const deleteCreditByname = async (req, res) => {
   }
 };
 
+const updateCreditByIdController = async (req, res) => {
+  const { id } = req.params;
+  const { contact_id, amount_due, amount_received } = req.body;
+  try {
+    const result = await updateCreditById(id, contact_id, amount_due, amount_received);
+    res.send(result.rows[0]);
+  } catch (err) {
+    console.log(err);
+    res.status(400).send(err);
+  }
+};
+
 const settleCreditController = async (req, res) => {
   const { id } = req.params;
   const { amountPaid } = req.body;
@@ -95,9 +109,9 @@ const getDebitByname = async (req, res) => {
 };
 
 const postDebit = async (req, res) => {
-  const { name, amount_due, amount_received } = req.body;
+  const { name, amount_due, amount_received, contact_id } = req.body;
   try {
-    const result = await insertDebit(name, amount_due, amount_received);
+    const result = await insertDebit(name, amount_due, amount_received, contact_id);
     res.send(`New entry inserted: ${result.rows}`);
   } catch (err) {
     console.log(err);
@@ -132,6 +146,18 @@ const deleteDebitByname = async (req, res) => {
   }
 };
 
+const updateDebitByIdController = async (req, res) => {
+  const { id } = req.params;
+  const { contact_id, amount_due, amount_received } = req.body;
+  try {
+    const result = await updateDebitById(id, contact_id, amount_due, amount_received);
+    res.send(result.rows[0]);
+  } catch (err) {
+    console.log(err);
+    res.status(400).send(err);
+  }
+};
+
 const settleDebitController = async (req, res) => {
   const { id } = req.params;
   const { amountPaid } = req.body;
@@ -149,11 +175,13 @@ module.exports = {
   getCreditByname,
   postCredit,
   updateCreditByname,
+  updateCreditByIdController,
   deleteCreditByname,
   settleCreditController,
   getDebitByname,
   postDebit,
   updateDebitByname,
+  updateDebitByIdController,
   deleteDebitByname,
   settleDebitController,
 };
