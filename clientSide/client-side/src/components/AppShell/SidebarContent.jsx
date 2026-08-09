@@ -3,6 +3,7 @@ import { NavLink, Link } from "react-router-dom";
 import { HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import useTheme from "hooks/useTheme";
 import { useLanguage } from "i18n/LanguageContext";
+import Logo from "components/Logo";
 import { navItems } from "./navItems";
 
 export default function SidebarContent({ onNavigate = () => {} }) {
@@ -12,11 +13,7 @@ export default function SidebarContent({ onNavigate = () => {} }) {
   return (
     <div className="flex h-full flex-col bg-gray-900 text-gray-300">
       <Link to="/" onClick={onNavigate} className="flex items-center gap-2.5 px-6 py-6">
-        <img
-          src="/logo192.png"
-          alt="POS System"
-          className="h-9 w-9 rounded-xl shadow-lg shadow-primary-900/40"
-        />
+        <Logo className="h-9 w-9" />
         <span className="font-poppins text-lg font-bold tracking-tight text-white-A700">
           POS System
         </span>

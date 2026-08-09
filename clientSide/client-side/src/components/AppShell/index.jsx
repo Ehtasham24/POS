@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { Helmet } from "react-helmet";
 import { Link } from "react-router-dom";
 import { HiOutlineBars3, HiOutlineXMark } from "react-icons/hi2";
+import Logo from "components/Logo";
 import SidebarContent from "./SidebarContent";
 import GlobalSearch from "components/GlobalSearch";
 import LowStockBell from "./LowStockBell";
@@ -57,7 +58,7 @@ export default function AppShell({ title, actions, hideSearch, children }) {
               <HiOutlineBars3 className="text-xl" />
             </button>
             <Link to="/" className="flex items-center gap-2">
-              <img src="/logo192.png" alt="POS System" className="h-6 w-6 rounded-md" />
+              <Logo className="h-6 w-6" />
               <span className="font-poppins text-base font-bold text-gray-800 dark:text-gray-100">
                 POS System
               </span>
