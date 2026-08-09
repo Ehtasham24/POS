@@ -1,7 +1,17 @@
 body {
   margin: 0;
   padding: 0;
-  font-family: Poppins;
+  /* Poppins has no Urdu glyphs, so the browser falls back per-character to whatever
+     generic Arabic-script font the OS ships — often cramped/hard to read. Listing Noto
+     Nastaliq Urdu as the fallback means any Urdu text (however it's styled) renders in
+     a proper, readable Nastaliq shape instead. */
+  font-family: Poppins, "Noto Nastaliq Urdu", sans-serif;
+}
+/* Nastaliq's diagonal, connected letterforms need more vertical room than Latin text to
+   stay legible (clipped ascenders/descenders otherwise) — only applied when Urdu is the
+   active language, so English layout density is untouched. */
+html[lang="ur"] body {
+  line-height: 1.9;
 }
 * {
   box-sizing: border-box;

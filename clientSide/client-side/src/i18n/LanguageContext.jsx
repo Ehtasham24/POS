@@ -1,5 +1,6 @@
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
 import translations from "./translations";
+import { apiGet, apiPut } from "utils/api";
 
 const LanguageContext = createContext({
   language: "en",
@@ -13,10 +14,13 @@ export function LanguageProvider({ children }) {
   const [language, setLanguageState] = useState("en");
 
   useEffect(() => {
+    document.documentElement.lang = language;
+  }, [language]);
+
+  useEffect(() => {
     (async () => {
       try {
-        const response = await fetch("http://localhost:4000/api/settings");
-        const data = await response.json();
+        const data = await apiGet("/api/settings");
         if (data.language === "ur" || data.language === "en") {
           setLanguageState(data.language);
         }
@@ -29,11 +33,7 @@ export function LanguageProvider({ children }) {
   const setLanguage = useCallback(async (lang) => {
     setLanguageState(lang);
     try {
-      await fetch("http://localhost:4000/api/settings", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ key: "language", value: lang }),
-      });
+      await apiPut("/api/settings", { key: "language", value: lang });
     } catch (error) {
       console.error("Error saving language setting:", error);
     }

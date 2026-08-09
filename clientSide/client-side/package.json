@@ -11,6 +11,7 @@
     "@testing-library/react": "^11.2.7",
     "@testing-library/user-event": "^12.8.3",
     "buffer": "^6.0.3",
+    "idb-keyval": "^6.3.0",
     "prop-types": "^15.8.1",
     "react": "^18.2.0",
     "react-datepicker": "^4.5.0",
@@ -26,6 +27,7 @@
     "react-to-print": "^3.0.0",
     "recharts": "^3.10.0",
     "redux-devtools-extension": "^2.13.9",
+    "sql.js": "^1.14.1",
     "tw-elements": "^2.0.0",
     "uuid": "^10.0.0",
     "web-vitals": "^2.1.0"

@@ -6,6 +6,7 @@ import {
   HiOutlineArchiveBox,
   HiOutlineUserGroup,
   HiOutlineCog6Tooth,
+  HiOutlineBuildingOffice2,
 } from "react-icons/hi2";
 
 export const navItems = [
@@ -20,5 +21,6 @@ export const navItems = [
   { to: "/credit-debit", label: "Credit / Debit", labelKey: "nav.creditDebit", icon: HiOutlineBanknotes },
   { to: "/contacts", label: "Contacts", labelKey: "nav.contacts", icon: HiOutlineUserGroup },
   { to: "/report", label: "Sales Report", labelKey: "nav.report", icon: HiOutlineChartBarSquare },
+  { to: "/company", label: "Company", labelKey: "nav.company", icon: HiOutlineBuildingOffice2 },
   { to: "/settings", label: "Settings", labelKey: "nav.settings", icon: HiOutlineCog6Tooth },
 ];

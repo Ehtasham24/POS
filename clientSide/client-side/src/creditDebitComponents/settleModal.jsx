@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
+import { apiPatch } from "utils/api";
 
 const SettleModal = ({ isOpen, onClose, entry, type, onSettled }) => {
   const toast = useToast();
@@ -21,15 +22,7 @@ const SettleModal = ({ isOpen, onClose, entry, type, onSettled }) => {
       return;
     }
     try {
-      const response = await fetch(
-        `http://localhost:4000/${type}/${entry.id}/settle`,
-        {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ amountPaid: amount }),
-        }
-      );
-      if (!response.ok) throw new Error("Failed to settle entry");
+      await apiPatch(`/${type}/${entry.id}/settle`, { amountPaid: amount });
       toast.success("Entry settled successfully");
       onSettled();
       onClose();

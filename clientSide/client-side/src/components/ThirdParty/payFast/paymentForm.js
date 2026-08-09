@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { API_BASE_URL } from "utils/api";
 
 const PaymentForm = () => {
   const [formData, setFormData] = useState({
@@ -22,7 +23,7 @@ const PaymentForm = () => {
     console.log("Submitting form with data:", formData); // Log form data
 
     try {
-      const response = await fetch("http://localhost:4000/api/payfast", {
+      const response = await fetch(`${API_BASE_URL}/api/payfast`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

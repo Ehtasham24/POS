@@ -1,24 +1,39 @@
 import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HiOutlineBell, HiOutlineExclamationTriangle, HiOutlineXCircle } from "react-icons/hi2";
+import { apiGet } from "utils/api";
 
 const POLL_MS = 60000;
+const READ_STORAGE_KEY = "pos_low_stock_read";
+
+const loadReadState = () => {
+  try {
+    return JSON.parse(localStorage.getItem(READ_STORAGE_KEY)) || {};
+  } catch {
+    return {};
+  }
+};
 
 // Global "below low-stock threshold" indicator, rendered on every page (AppShell).
 // Reuses the same /api/inventory status/threshold logic already powering the Inventory
 // page's badges, so the two never disagree. Polls periodically since a page (e.g. the
 // POS terminal) can stay open a long time without a navigation to trigger a refetch.
+//
+// Badge count is "unread" alerts, not just "currently low" ones — opening the dropdown
+// marks every alert shown at that moment as read (persisted to localStorage, keyed by
+// product id + the quantity at read time), so the badge doesn't keep nagging about the
+// same stock level once it's been seen. If that same product's quantity drops further
+// afterwards, it's treated as new information and counts as unread again.
 export default function LowStockBell() {
   const navigate = useNavigate();
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(false);
+  const [readState, setReadState] = useState(loadReadState);
   const containerRef = useRef(null);
 
   const fetchAlerts = async () => {
     try {
-      const response = await fetch("http://localhost:4000/api/inventory");
-      if (!response.ok) return;
-      const data = await response.json();
+      const data = await apiGet("/api/inventory");
       setItems(
         (data.items || []).filter((item) => item.status === "low_stock" || item.status === "out_of_stock")
       );
@@ -47,18 +62,37 @@ export default function LowStockBell() {
     navigate("/inventory");
   };
 
+  const unreadCount = items.filter(
+    (item) => readState[item.id] === undefined || readState[item.id] > Number(item.quantity)
+  ).length;
+
+  const handleToggle = () => {
+    setOpen((prev) => {
+      const next = !prev;
+      if (next && items.length > 0) {
+        const updated = { ...readState };
+        items.forEach((item) => {
+          updated[item.id] = Number(item.quantity);
+        });
+        setReadState(updated);
+        localStorage.setItem(READ_STORAGE_KEY, JSON.stringify(updated));
+      }
+      return next;
+    });
+  };
+
   return (
     <div className="relative" ref={containerRef}>
       <button
         type="button"
-        onClick={() => setOpen((prev) => !prev)}
+        onClick={handleToggle}
         aria-label="Low stock alerts"
         className="relative flex h-10 w-10 items-center justify-center rounded-xl text-gray-600 hover:bg-surface-muted dark:text-gray-300 dark:hover:bg-gray-800"
       >
         <HiOutlineBell className="text-xl" />
-        {items.length > 0 && (
+        {unreadCount > 0 && (
           <span className="absolute -top-1 -right-1 flex h-5 min-w-5 items-center justify-center rounded-full bg-danger-600 px-1 text-[11px] font-bold text-white-A700 ring-2 ring-white-A700 dark:ring-gray-900">
-            {items.length}
+            {unreadCount}
           </span>
         )}
       </button>

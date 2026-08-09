@@ -2,25 +2,34 @@ import React, { useEffect, useState } from "react";
 import { HiOutlinePlusCircle, HiOutlinePencil, HiOutlineUserGroup } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import ContactModal from "categoriesComponents/contactModal";
+import { EmptyState, SkeletonCards } from "components";
+import { useToast } from "components/Toast/ToastContext";
+import { useLanguage } from "i18n/LanguageContext";
+import { apiGet } from "utils/api";
 
 export default function ContactsPage() {
+  const toast = useToast();
+  const { t } = useLanguage();
   const [contacts, setContacts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState(null);
 
   const fetchContacts = async () => {
     try {
-      const response = await fetch("http://localhost:4000/api/contacts");
-      const data = await response.json();
-      setContacts(data);
+      setContacts(await apiGet("/api/contacts"));
     } catch (error) {
       console.error("Error fetching contacts:", error);
+      toast.error("Couldn't load contacts — check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchContacts();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const openAdd = () => {
@@ -42,7 +51,7 @@ export default function ContactsPage() {
   return (
     <>
       <AppShell
-        title="Contacts"
+        title={t("contacts.title")}
         actions={
           <button
             type="button"
@@ -50,15 +59,15 @@ export default function ContactsPage() {
             className="inline-flex items-center gap-2 rounded-xl bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700"
           >
             <HiOutlinePlusCircle className="text-lg" />
-            Add Contact
+            {t("contacts.addContact")}
           </button>
         }
       >
         <div className="mb-6 flex gap-2">
           {[
-            { key: "all", label: "All" },
-            { key: "vendor", label: "Vendors" },
-            { key: "customer", label: "Customers" },
+            { key: "all", label: t("contacts.all") },
+            { key: "vendor", label: t("contacts.vendors") },
+            { key: "customer", label: t("contacts.customers") },
           ].map((option) => (
             <button
               key={option.key}
@@ -74,11 +83,10 @@ export default function ContactsPage() {
           ))}
         </div>
 
-        {filteredContacts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-surface-border py-24 text-center dark:border-gray-700">
-            <HiOutlineUserGroup className="text-4xl text-gray-400" />
-            <p className="text-gray-500 dark:text-gray-400">No contacts yet. Add a customer or vendor.</p>
-          </div>
+        {loading ? (
+          <SkeletonCards />
+        ) : filteredContacts.length === 0 ? (
+          <EmptyState icon={HiOutlineUserGroup} title={t("contacts.empty")} />
         ) : (
           <div className="grid grid-cols-3 gap-4 md:grid-cols-2 sm:grid-cols-1">
             {filteredContacts.map((contact) => (
@@ -94,12 +102,12 @@ export default function ContactsPage() {
                     <div className="mt-1 flex gap-1.5">
                       {contact.is_vendor && (
                         <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
-                          Vendor
+                          {t("contacts.vendor")}
                         </span>
                       )}
                       {contact.is_customer && (
                         <span className="rounded-full bg-success-50 px-2 py-0.5 text-xs font-semibold text-success-600 dark:bg-success-500/10 dark:text-success-500">
-                          Customer
+                          {t("contacts.customer")}
                         </span>
                       )}
                     </div>
@@ -118,7 +126,7 @@ export default function ContactsPage() {
                   {contact.email && <p>{contact.email}</p>}
                   {contact.address && <p>{contact.address}</p>}
                   {!contact.phone && !contact.email && !contact.address && (
-                    <p className="text-gray-400 dark:text-gray-500">No contact details.</p>
+                    <p className="text-gray-400 dark:text-gray-500">{t("contacts.noDetails")}</p>
                   )}
                 </div>
               </div>

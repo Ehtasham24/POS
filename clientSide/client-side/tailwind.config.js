@@ -3,7 +3,15 @@ module.exports = {
   content: ["./src/**/**/*.{js,ts,jsx,tsx,html,mdx}", "./src/**/*.{js,ts,jsx,tsx,html,mdx}"],
   darkMode: "class",
   theme: {
-    screens: { md: { max: "1050px" }, sm: { max: "550px" }, cartRail: { min: "1400px" } },
+    screens: {
+      md: { max: "1050px" },
+      sm: { max: "550px" },
+      // 1280px, not something lower — the persistent left nav (w-64, 256px) plus this
+      // panel (w-96, 384px) is 640px of fixed chrome; below ~1280px there isn't enough
+      // room left for the page's own content (category grid/tables) to render without
+      // being squeezed into an uncomfortably narrow column.
+      cartDock: { min: "1280px" },
+    },
     extend: {
       colors: {
         white: { A700: "#ffffff" },
@@ -25,7 +33,7 @@ module.exports = {
         cardHover: "0 4px 12px 0 rgb(0 0 0 / 0.08)",
         modal: "0 20px 25px -5px rgb(0 0 0 / 0.1), 0 8px 10px -6px rgb(0 0 0 / 0.1)",
       },
-      fontFamily: { poppins: "Poppins" },
+      fontFamily: { poppins: "Poppins, 'Noto Nastaliq Urdu', sans-serif" },
     },
   },
   plugins: [require("@tailwindcss/forms")],

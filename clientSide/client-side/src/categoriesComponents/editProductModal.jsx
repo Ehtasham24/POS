@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
+import { apiGet, apiPut } from "utils/api";
 
 const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
@@ -19,9 +20,7 @@ const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
   useEffect(() => {
     const fetchCategories = async () => {
       try {
-        const response = await fetch("http://localhost:4000/categories");
-        const data = await response.json();
-        setCategories(data);
+        setCategories(await apiGet("/categories"));
       } catch (error) {
         console.error("Error fetching categories:", error);
       }
@@ -51,26 +50,14 @@ const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(
-        `http://localhost:4000/products/${product.id}`,
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            name: formData.name,
-            // Batch-tracked products keep their real price/quantity in `lots` — editing
-            // those here would desync them, so only name/category are sent for those.
-            price: product.batch_tracked ? product.buyingprice : formData.buying_price,
-            Quantity: product.batch_tracked ? product.quantity : formData.quantity,
-            Category_id: formData.category_id,
-          }),
-        }
-      );
-      if (!response.ok) {
-        throw new Error("Failed to update product");
-      }
+      await apiPut(`/products/${product.id}`, {
+        name: formData.name,
+        // Batch-tracked products keep their real price/quantity in `lots` — editing
+        // those here would desync them, so only name/category are sent for those.
+        price: product.batch_tracked ? product.buyingprice : formData.buying_price,
+        Quantity: product.batch_tracked ? product.quantity : formData.quantity,
+        Category_id: formData.category_id,
+      });
       toast.success("Product updated successfully!");
       onUpdated();
       onClose();
@@ -116,6 +103,8 @@ const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
                 placeholder="Enter buying price"
                 onChange={handleChange}
                 className={inputClass}
+                min="0"
+                step="0.01"
                 required
               />
             </div>
@@ -132,6 +121,8 @@ const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
                 placeholder="Enter quantity"
                 onChange={handleChange}
                 className={inputClass}
+                min="0"
+                step="1"
                 required
               />
             </div>

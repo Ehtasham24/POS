@@ -33,3 +33,13 @@
   font-family: "Playfair Display";
   font-weight: 700;
 }
+/* Urdu UI text falls back to whatever generic Arabic-script font the OS ships (often
+   cramped/hard to read at small UI sizes) unless a dedicated Urdu font is loaded — this
+   is the traditional Nastaliq shape Urdu readers expect from print/newspapers. */
+@font-face {
+  font-display: swap;
+  font-style: normal;
+  src: url("/public/fonts/NotoNastaliqUrdu.woff2") format("woff2");
+  font-family: "Noto Nastaliq Urdu";
+  font-weight: 400 700;
+}

@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
+import { apiGet, apiPost } from "utils/api";
 
 const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
@@ -27,24 +28,23 @@ const AddProductModal = ({ isOpen, onClose }) => {
 
     const fetchCategories = async () => {
       try {
-        const response = await fetch("http://localhost:4000/categories");
-        const data = await response.json();
-        setCategories(data);
+        setCategories(await apiGet("/categories"));
       } catch (error) {
         console.error("Error fetching categories:", error);
+        toast.error("Couldn't load categories — check your connection and try again.");
       }
     };
     const fetchVendors = async () => {
       try {
-        const response = await fetch("http://localhost:4000/api/contacts?type=vendor");
-        const data = await response.json();
-        setVendors(data);
+        setVendors(await apiGet("/api/contacts?type=vendor"));
       } catch (error) {
         console.error("Error fetching vendors:", error);
+        toast.error("Couldn't load vendors — check your connection and try again.");
       }
     };
     fetchCategories();
     fetchVendors();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
   const handleChange = (e) => {
@@ -62,23 +62,10 @@ const AddProductModal = ({ isOpen, onClose }) => {
       return;
     }
     try {
-      const response = await fetch("http://localhost:4000/product", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          ...formData,
-          batch_tracked: batchTracked,
-        }),
+      const data = await apiPost("/product", {
+        ...formData,
+        batch_tracked: batchTracked,
       });
-      if (!response.ok) {
-        if (response.status === 409)
-          throw new Error("Cannot add duplicate products");
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.message || "Failed to add product");
-      }
-      const data = await response.json();
       if (data.lot) {
         toast.success(`Product added! First lot: ${data.lot.lot_code}`);
       } else {
@@ -170,6 +157,8 @@ const AddProductModal = ({ isOpen, onClose }) => {
             placeholder="Enter buying price"
             onChange={handleChange}
             className={inputClass}
+            min="0"
+            step="0.01"
             required
           />
         </div>
@@ -186,6 +175,8 @@ const AddProductModal = ({ isOpen, onClose }) => {
             placeholder="Enter quantity"
             onChange={handleChange}
             className={inputClass}
+            min="0"
+            step="1"
             required
           />
         </div>

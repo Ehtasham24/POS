@@ -6,19 +6,23 @@ import { useLanguage } from "i18n/LanguageContext";
 import CartPanel from "./CartPanel";
 
 // Floating cart icon + item-count badge, rendered globally (AppShell) so the cart is
-// reachable from every page. On the Home/POS-terminal page there's already a permanently
-// reserved cart column at genuinely wide screens (see the "cartRail" breakpoint in
-// tailwind.config.js, 1400px), so the floating icon steps aside there to avoid a
-// redundant duplicate cart. Every other page has no such alternative, so it always shows.
+// reachable from every page. Categories (the POS terminal, "/") and Product List
+// ("/categories/:id") — the only two pages where items actually get added to the cart —
+// instead render the always-visible CartDock, so this component steps aside there
+// entirely to avoid a redundant duplicate cart affordance. Every other page has no such
+// alternative, so it always shows.
 function CartCheckout() {
   const [expanded, setExpanded] = useState(false);
   const cart = useSelector((state) => state.cart.carts);
   const itemCount = cart.reduce((sum, item) => sum + item.sellingQuantity, 0);
-  const isHome = useLocation().pathname === "/";
+  const pathname = useLocation().pathname;
+  const isSellingPage = pathname === "/" || pathname.startsWith("/categories/");
   const { t } = useLanguage();
 
+  if (isSellingPage) return null;
+
   return (
-    <div className={isHome ? "cartRail:hidden" : ""}>
+    <>
       <button
         type="button"
         onClick={() => setExpanded(true)}
@@ -36,8 +40,15 @@ function CartCheckout() {
       {expanded && (
         <>
           <div className="fixed inset-0 z-40 bg-gray-900/60" onClick={() => setExpanded(false)} />
-          <div className="fixed inset-x-0 bottom-0 z-50 h-[85vh] rounded-t-2xl bg-white-A700 shadow-modal dark:bg-gray-800">
-            <div className="flex items-center justify-between border-b border-surface-border px-4 py-4 dark:border-gray-700">
+          {/* Capped, not a flat 85vh — on a browser window that's tall but not
+              phone-sized, 85% of the viewport is far more than a short cart list needs
+              and leaves a large dead gray area below it. min() keeps it proportional on
+              genuinely short (phone) screens while never exceeding ~600px total. */}
+          {/* left-64/md:left-0 mirrors AppShell's own pl-64/md:pl-0 — clears the
+              persistent desktop sidebar (visible above the "md" breakpoint, >1050px),
+              which otherwise painted over the left edge of this sheet. */}
+          <div className="fixed left-64 right-0 bottom-0 z-50 flex h-[min(75vh,38rem)] flex-col rounded-t-2xl bg-white-A700 shadow-modal dark:bg-gray-800 md:left-0">
+            <div className="flex shrink-0 items-center justify-between border-b border-surface-border px-4 py-4 dark:border-gray-700">
               <span className="font-poppins font-bold text-gray-800 dark:text-gray-100">{t("cart.title")}</span>
               <button
                 type="button"
@@ -48,13 +59,13 @@ function CartCheckout() {
                 <HiChevronDown className="text-lg" />
               </button>
             </div>
-            <div className="h-[calc(85vh-64px)]">
+            <div className="min-h-0 flex-1">
               <CartPanel onCheckedOut={() => setExpanded(false)} />
             </div>
           </div>
         </>
       )}
-    </div>
+    </>
   );
 }
 

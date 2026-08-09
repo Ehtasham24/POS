@@ -186,52 +186,105 @@ const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id, lotI
   }
 };
 
-const fetchBilledHistory = async () => {
+const DEFAULT_HISTORY_PAGE_SIZE = 30;
+
+// Paginated, optionally date-filtered billed history. A "transaction" is a group of
+// sales rows sharing the same sale_time truncated to the second (one checkout). Pagination
+// is applied at the transaction level in SQL so a page only ever pulls the rows it needs,
+// instead of loading the entire sales table into memory and grouping in JS.
+const fetchBilledHistory = async (
+  startDate,
+  endDate,
+  categoryId,
+  page = 1,
+  pageSize = DEFAULT_HISTORY_PAGE_SIZE
+) => {
   try {
-    const query = `
-      SELECT s.id, s.selling_price, s.quantity, s.sale_time, s.product_id, p.productname
-      FROM public.sales s
-      JOIN public.products p ON s.product_id = p.id
-      ORDER BY DATE_TRUNC('second', s.sale_time), s.id ASC;
-    `;
+    const hasDateFilter =
+      startDate && endDate && isValidDate(startDate) && isValidDate(endDate);
+    const parsedCategoryId = parseInt(categoryId, 10);
+    const hasCategoryFilter = Number.isFinite(parsedCategoryId);
 
-    // Fetch the sales data from PostgreSQL
-    const result = await pool.query(query);
+    // A transaction "matches" the category filter if any item in it belongs to that
+    // category — the product join is only needed to test that, not to restrict which
+    // items are later shown (a matched transaction is still returned in full).
+    const conditions = [];
+    const params = [];
+    if (hasDateFilter) {
+      params.push(startDate, endDate);
+      conditions.push(`s.sale_time BETWEEN $${params.length - 1} AND $${params.length}`);
+    }
+    if (hasCategoryFilter) {
+      params.push(parsedCategoryId);
+      conditions.push(`p.category_id = $${params.length}`);
+    }
+    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const joinClause = hasCategoryFilter
+      ? "JOIN public.products p ON s.product_id = p.id"
+      : "";
 
-    // Initialize an empty array for the grouped transactions
-    const groupedSales = [];
+    const countResult = await pool.query(
+      `SELECT COUNT(DISTINCT DATE_TRUNC('second', s.sale_time)) AS total
+       FROM public.sales s
+       ${joinClause}
+       ${whereClause};`,
+      params
+    );
+    const totalCount = parseInt(countResult.rows[0].total, 10) || 0;
+    const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+    const safePage = Math.min(Math.max(1, page), totalPages);
+    const offset = (safePage - 1) * pageSize;
 
-    // Iterate over the sales data and group by selling_time (up to the second)
-    result.rows.forEach((row, index) => {
-      // Ensure sale_time exists and is valid
-      if (!row.sale_time) {
-        console.log(`Missing sale_time for id ${row.id}`);
-        return; // Skip this entry if sale_time is null or undefined
-      }
+    const txnResult = await pool.query(
+      `SELECT DATE_TRUNC('second', s.sale_time) AS txn_time
+       FROM public.sales s
+       ${joinClause}
+       ${whereClause}
+       GROUP BY txn_time
+       ORDER BY txn_time DESC
+       LIMIT $${params.length + 1} OFFSET $${params.length + 2};`,
+      [...params, pageSize, offset]
+    );
+    const txnTimes = txnResult.rows.map((row) => row.txn_time);
 
-      const saleTime = row.sale_time.toISOString().slice(0, 19); // Slice the time to seconds
+    if (txnTimes.length === 0) {
+      return { batches: [], totalCount, totalPages, page: safePage, pageSize };
+    }
 
-      // If the last group doesn't exist or sale_time has changed, start a new group
-      if (
-        groupedSales.length === 0 ||
-        groupedSales[groupedSales.length - 1][0].sale_time
-          .toISOString()
-          .slice(0, 19) !== saleTime
-      ) {
-        groupedSales.push([]);
-      }
+    const rowsResult = await pool.query(
+      `SELECT s.id, s.selling_price, s.buying_price, s.quantity, s.sale_time, s.product_id,
+              p.productname, l.lot_code
+       FROM public.sales s
+       JOIN public.products p ON s.product_id = p.id
+       LEFT JOIN public.lots l ON s.lot_id = l.id
+       WHERE DATE_TRUNC('second', s.sale_time) = ANY($1::timestamp[])
+       ORDER BY DATE_TRUNC('second', s.sale_time) DESC, s.id ASC;`,
+      [txnTimes]
+    );
 
-      // Push the current row to the latest group
-      groupedSales[groupedSales.length - 1].push({
+    // Bucket rows by their truncated sale_time, then rebuild in the same DESC order as txnTimes
+    const batchesByTime = new Map();
+    rowsResult.rows.forEach((row) => {
+      const key = row.sale_time.toISOString().slice(0, 19);
+      if (!batchesByTime.has(key)) batchesByTime.set(key, []);
+      batchesByTime.get(key).push({
         id: row.id,
         selling_price: row.selling_price,
+        buying_price: row.buying_price,
         quantity: row.quantity,
         sale_time: row.sale_time,
         product_id: row.product_id,
         productname: row.productname,
+        // Which lot this unit was sold out of, when the product is lot-tracked
+        lot_code: row.lot_code,
       });
     });
-    return groupedSales;
+
+    const batches = txnTimes
+      .map((t) => batchesByTime.get(t.toISOString().slice(0, 19)))
+      .filter(Boolean);
+
+    return { batches, totalCount, totalPages, page: safePage, pageSize };
   } catch (err) {
     console.log(err);
     throw new Error(err.message);

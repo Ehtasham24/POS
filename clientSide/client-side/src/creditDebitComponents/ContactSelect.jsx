@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useToast } from "components/Toast/ToastContext";
+import { apiGet, apiPost } from "utils/api";
 
 const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
@@ -29,8 +30,7 @@ export default function ContactSelect({ type, value, onChange, id }) {
   }, [value]);
 
   const fetchContacts = () => {
-    fetch(`http://localhost:4000/api/contacts?type=${type}`)
-      .then((r) => r.json())
+    apiGet(`/api/contacts?type=${type}`)
       .then(setContacts)
       .catch((err) => console.error(`Error fetching ${type}s:`, err));
   };
@@ -56,18 +56,12 @@ export default function ContactSelect({ type, value, onChange, id }) {
     }
     setSaving(true);
     try {
-      const response = await fetch("http://localhost:4000/api/contacts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: newName.trim(),
-          phone: newPhone.trim() || undefined,
-          is_customer: !isVendor,
-          is_vendor: isVendor,
-        }),
+      const contact = await apiPost("/api/contacts", {
+        name: newName.trim(),
+        phone: newPhone.trim() || undefined,
+        is_customer: !isVendor,
+        is_vendor: isVendor,
       });
-      if (!response.ok) throw new Error(`Failed to create ${type}`);
-      const contact = await response.json();
       setContacts((prev) => [...prev, contact].sort((a, b) => a.name.localeCompare(b.name)));
       setSelectValue(String(contact.id));
       onChange(String(contact.id));

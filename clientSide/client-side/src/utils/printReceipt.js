@@ -1,111 +1,98 @@
-export function printReceipt(salesData, totalAmount) {
+import { apiGet } from "utils/api";
+import * as printerConnection from "utils/thermalPrinter/connection";
+import { buildReceiptBytes } from "utils/thermalPrinter/buildReceiptBytes";
+import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
+import { withFallback, getSettings as getOfflineSettings } from "offline/cache";
+
+// Escapes text pulled from settings/product names before it's spliced into the
+// print-dialog fallback's raw HTML string (that window is built with document.write, not JSX).
+const esc = (value) =>
+  String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;",
+  }[ch]));
+
+function printViaBrowserDialog(salesData, totalAmount, company) {
+  const itemRows = salesData.length
+    ? salesData
+        .map((sale) => {
+          const lineTotal = (sale.selling_price * sale.quantity).toFixed(2);
+          return `
+            <div class="item">
+              <div class="item-name">${esc(sale.productname)}</div>
+              <div class="item-line">
+                <span>${sale.quantity} x ${Number(sale.selling_price).toFixed(2)}</span>
+                <span>Rs.${lineTotal}</span>
+              </div>
+            </div>`;
+        })
+        .join("")
+    : `<p style="text-align:center;">No sale data available</p>`;
+
+  const now = new Date().toLocaleString();
+
   const receiptContent = `
   <html>
     <head>
       <title>Receipt</title>
       <style>
+        @page { size: 80mm auto; margin: 0; }
+        * { box-sizing: border-box; }
         body {
-          font-family: 'Arial', sans-serif;
-          padding: 10px;
-          width: 300px; /* Adjust for thermal printer width */
+          font-family: 'Courier New', Courier, monospace;
+          width: 80mm;
           margin: 0;
-        }
-        h2 {
-          text-align: center;
-          font-size: 20px;
-          margin-bottom: 5px;
-        }
-        h3 {
-          margin: 0;
-          font-size: 16px;
-          text-align: center;
-        }
-        h4 {
-          text-align: center;
-          margin-top: 10px;
-          font-size: 18px;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin: 10px 0;
-        }
-        th, td {
-          border: 1px solid #ccc;
-          padding: 5px;
-          text-align: left;
-          font-size: 14px;
-        }
-        th {
-          background-color: #f4f4f4;
-        }
-        .thank-you {
-          text-align: center;
-          margin-top: 20px;
-          font-size: 14px;
-        }
-        .no-return {
-          text-align: center;
-          margin-top: 10px;
+          padding: 3mm;
           font-size: 12px;
-          font-weight: bold;
+          color: #000;
         }
-
-        /* Custom styles for thermal printing */
-        #thermal-print {
-          width: 58mm; /* Width specific to thermal printer */
-          font-size: 12px;
+        .center { text-align: center; }
+        .logo { max-width: 45mm; max-height: 20mm; margin: 0 auto 2mm; display: block; }
+        .company-name { font-size: 16px; font-weight: bold; margin: 0 0 1mm; }
+        .company-meta { font-size: 11px; line-height: 1.4; }
+        .receipt-title { font-size: 13px; font-weight: bold; margin: 2mm 0; }
+        .divider { border-top: 1px dashed #000; margin: 2mm 0; }
+        .item { margin-bottom: 1.5mm; }
+        .item-name { font-weight: bold; }
+        .item-line, .total-line, .meta-line {
+          display: flex;
+          justify-content: space-between;
+          gap: 8px;
         }
-        #thermal-print h2 {
-          font-size: 18px;
-        }
-        #thermal-print table th, #thermal-print table td {
-          font-size: 10px;
-        }
+        .total-line { font-size: 14px; font-weight: bold; margin-top: 1mm; }
+        .thank-you { text-align: center; margin-top: 3mm; font-size: 12px; }
+        .no-return { text-align: center; margin-top: 2mm; font-size: 10px; font-weight: bold; }
       </style>
     </head>
     <body>
-      <div id="thermal-print">
-        <h2 style="font-weight: bold;">Pak Home and Kitchen Appliances</h2>
-        <h2>Receipt</h2>
-
-        <table>
-          <thead>
-            <tr>
-              <th>Sale ID</th>
-              <th>Product ID</th>
-              <th>Product Name</th>
-              <th>Price</th>
-              <th>Quantity</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${
-              salesData.length > 0
-                ? salesData
-                    .map(
-                      (sale) => `
-              <tr>
-              <td>${sale.id}</td>
-                <td>${sale.product_id}</td>
-                <td>${sale.productname}</td>
-                <td>${sale.selling_price}</td>
-                <td>${sale.quantity}</td>
-                <td>Rs.${(sale.selling_price * sale.quantity).toFixed(2)}</td>
-              </tr>
-              `
-                    )
-                    .join("") // Join all rows into a single string
-                : `<tr><td colspan="5" class="text-center">No sale data available</td></tr>`
-            }
-          </tbody>
-        </table>
-        <h4>Total Amount: Rs.${totalAmount.toFixed(2)}</h4>
-        <p class="thank-you">Thank you for your purchase!</p>
-        <p class="no-return">No purchased item will be returned or exchanged.</p>
-        <p class="no-return">خریدا ہوا مال واپسی یہ تبدیل نہیں ہوگا۔</p>
+      <div class="center">
+        ${company.company_logo ? `<img class="logo" src="${company.company_logo}" alt="" />` : ""}
+        <div class="company-name">${esc(company.company_name || "Company Name")}</div>
+        <div class="company-meta">
+          ${company.company_ntn ? `<div>NTN: ${esc(company.company_ntn)}</div>` : ""}
+          ${company.company_address ? `<div>${esc(company.company_address)}</div>` : ""}
+          ${company.company_phone ? `<div>${esc(company.company_phone)}</div>` : ""}
+        </div>
+        <div class="receipt-title">RECEIPT</div>
       </div>
+
+      <div class="meta-line"><span>${esc(now)}</span></div>
+      <div class="divider"></div>
+
+      ${itemRows}
+
+      <div class="divider"></div>
+      <div class="total-line"><span>TOTAL</span><span>Rs.${totalAmount.toFixed(2)}</span></div>
+      <div class="divider"></div>
+
+      <p class="thank-you">Thank you for your purchase!</p>
+      ${(company.receipt_terms ?? DEFAULT_RECEIPT_TERMS)
+        .split("\n")
+        .map((line) => (line.trim() ? `<p class="no-return">${esc(line)}</p>` : ""))
+        .join("")}
     </body>
   </html>
   `;
@@ -117,4 +104,39 @@ export function printReceipt(salesData, totalAmount) {
     receiptWindow.print();
     receiptWindow.close();
   }
+}
+
+// Prints directly to a connected Bluetooth/USB thermal printer when one is paired
+// (see utils/thermalPrinter/connection.js — Chromium-only, best-effort per printer model).
+// Falls back to the OS print dialog everywhere else: no printer connected, unsupported
+// browser (Safari/iOS/Firefox), or the direct write itself fails mid-print.
+export async function printReceipt(salesData, totalAmount, { onFallback } = {}) {
+  let company = {};
+  try {
+    company = await withFallback(() => apiGet("/api/settings"), getOfflineSettings);
+  } catch (error) {
+    console.error("Error fetching company settings for receipt:", error);
+  }
+
+  if (printerConnection.getStatus().type) {
+    try {
+      const bytes = await buildReceiptBytes(salesData, totalAmount, company);
+      await printerConnection.write(bytes);
+      return;
+    } catch (error) {
+      console.warn("Direct thermal print failed, falling back to print dialog:", error);
+      onFallback?.("Direct print failed — opening print dialog instead.");
+    }
+  }
+
+  printViaBrowserDialog(salesData, totalAmount, company);
+}
+
+// Lets the Company page's "Test Print" button confirm a newly-paired printer actually
+// works, without needing a real sale on hand.
+export async function printTestReceipt() {
+  const dummy = [
+    { id: "test", productname: "Test Item", selling_price: 100, quantity: 1 },
+  ];
+  await printReceipt(dummy, 100);
 }

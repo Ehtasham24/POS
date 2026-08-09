@@ -13,162 +13,98 @@ const {
   deleteDebitByName,
   settleDebit,
 } = require("../Sevices/creditDebitServies");
+const asyncHandler = require("../utils/asyncHandler");
 
-const getAllRecords = async (req, res) => {
-  try {
-    const result = await fetchAllRecords();
-    res.send(result);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+const getAllRecords = asyncHandler(async (req, res) => {
+  const result = await fetchAllRecords();
+  res.send(result);
+});
 
-const getCreditByname = async (req, res) => {
+const getCreditByname = asyncHandler(async (req, res) => {
   const { name } = req.body;
-  try {
-    const result = await fetchCreditByName(name);
-    res.send(result.rows);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await fetchCreditByName(name);
+  res.send(result.rows);
+});
 
-const postCredit = async (req, res) => {
+const postCredit = asyncHandler(async (req, res) => {
   const { name, amount_due, amount_received, contact_id } = req.body;
-  try {
-    const result = await insertCredit(name, amount_due, amount_received, contact_id);
-    res.send(`new entry inserted ${result.rows}`);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await insertCredit(name, amount_due, amount_received, contact_id);
+  res.status(201).json(result.rows[0]);
+});
 
-const updateCreditByname = async (req, res) => {
+const updateCreditByname = asyncHandler(async (req, res) => {
   const { name, amountdue, amountrecieved, total_amount } = req.body;
-  try {
-    const result = await updateCreditByName(
-      name,
-      amountdue,
-      amountrecieved,
-      total_amount
-    );
-    res.send(`entry updated ${result.rows}`);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await updateCreditByName(
+    name,
+    amountdue,
+    amountrecieved,
+    total_amount
+  );
+  res.json(result.rows[0]);
+});
 
-const deleteCreditByname = async (req, res) => {
+const deleteCreditByname = asyncHandler(async (req, res) => {
   const { name } = req.body;
-  try {
-    const result = await deleteCreditByName(name);
-    res.send(`Item with name${name} deleted ${result.rows}`);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await deleteCreditByName(name);
+  res.json({ message: `Item with name ${name} deleted`, deleted: result.rows });
+});
 
-const updateCreditByIdController = async (req, res) => {
+const updateCreditByIdController = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { contact_id, amount_due, amount_received } = req.body;
-  try {
-    const result = await updateCreditById(id, contact_id, amount_due, amount_received);
-    res.send(result.rows[0]);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await updateCreditById(id, contact_id, amount_due, amount_received);
+  res.send(result.rows[0]);
+});
 
-const settleCreditController = async (req, res) => {
+const settleCreditController = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { amountPaid } = req.body;
-  try {
-    const result = await settleCredit(id, amountPaid);
-    res.send(result.rows[0]);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await settleCredit(id, amountPaid);
+  res.send(result.rows[0]);
+});
 
-const getDebitByname = async (req, res) => {
+const getDebitByname = asyncHandler(async (req, res) => {
   const { name } = req.body;
-  try {
-    const result = await fetchDebitByName(name);
-    res.send(result.rows);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await fetchDebitByName(name);
+  res.send(result.rows);
+});
 
-const postDebit = async (req, res) => {
+const postDebit = asyncHandler(async (req, res) => {
   const { name, amount_due, amount_received, contact_id } = req.body;
-  try {
-    const result = await insertDebit(name, amount_due, amount_received, contact_id);
-    res.send(`New entry inserted: ${result.rows}`);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await insertDebit(name, amount_due, amount_received, contact_id);
+  res.status(201).json(result.rows[0]);
+});
 
-const updateDebitByname = async (req, res) => {
+const updateDebitByname = asyncHandler(async (req, res) => {
   const { name, amount_due, amount_received, total_amount } = req.body;
-  try {
-    const result = await updateDebitByName(
-      name,
-      amount_due,
-      amount_received,
-      total_amount
-    );
-    res.send(`Entry updated: ${result.rows}`);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await updateDebitByName(
+    name,
+    amount_due,
+    amount_received,
+    total_amount
+  );
+  res.json(result.rows[0]);
+});
 
-const deleteDebitByname = async (req, res) => {
+const deleteDebitByname = asyncHandler(async (req, res) => {
   const { name } = req.body;
-  try {
-    const result = await deleteDebitByName(name);
-    res.send(`Item with name ${name} deleted: ${result.rows}`);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await deleteDebitByName(name);
+  res.json({ message: `Item with name ${name} deleted`, deleted: result.rows });
+});
 
-const updateDebitByIdController = async (req, res) => {
+const updateDebitByIdController = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { contact_id, amount_due, amount_received } = req.body;
-  try {
-    const result = await updateDebitById(id, contact_id, amount_due, amount_received);
-    res.send(result.rows[0]);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await updateDebitById(id, contact_id, amount_due, amount_received);
+  res.send(result.rows[0]);
+});
 
-const settleDebitController = async (req, res) => {
+const settleDebitController = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { amountPaid } = req.body;
-  try {
-    const result = await settleDebit(id, amountPaid);
-    res.send(result.rows[0]);
-  } catch (err) {
-    console.log(err);
-    res.status(400).send(err);
-  }
-};
+  const result = await settleDebit(id, amountPaid);
+  res.send(result.rows[0]);
+});
 
 module.exports = {
   getAllRecords,

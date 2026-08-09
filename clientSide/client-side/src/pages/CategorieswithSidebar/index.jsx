@@ -4,7 +4,6 @@ import { useNavigate } from "react-router-dom";
 import {
   HiOutlinePlusCircle,
   HiOutlineTag,
-  HiOutlineTrash,
   HiOutlinePencil,
   HiOutlineSquares2X2,
   HiOutlineArrowRight,
@@ -20,9 +19,11 @@ import AppShell from "components/AppShell";
 import { Modal } from "components";
 import AddProductModal from "categoriesComponents/addProductModel";
 import AddCategoryModal from "categoriesComponents/addCategoryModal";
-import DeleteProductModal from "categoriesComponents/deleteProductModal";
 import UpdateProductModal from "categoriesComponents/updateProductModal";
-import CartPanel from "categoriesComponents/CartPanel";
+import CartDock from "categoriesComponents/CartDock";
+import { useToast } from "components/Toast/ToastContext";
+import { apiGet } from "utils/api";
+import * as offlineCache from "offline/cache";
 
 const toolbarButtonClass =
   "inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-semibold transition-colors";
@@ -31,11 +32,12 @@ export default function CategorieswithSidebarPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const { t } = useLanguage();
+  const toast = useToast();
   const [categories, setCategories] = useState([]);
+  const [loading, setLoading] = useState(true);
 
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
-  const [isDeleteProductOpen, setIsDeleteProductOpen] = useState(false);
   const [isUpdateProductOpen, setIsUpdateProductOpen] = useState(false);
 
   // --- Sell search (name or lot code) ---
@@ -53,17 +55,20 @@ export default function CategorieswithSidebarPage() {
 
   const fetchData = async () => {
     try {
-      const response = await fetch("http://localhost:4000/categories");
-      if (!response.ok) throw new Error("Failed to fetch categories: " + response.status);
-      const data = await response.json();
-      setCategories(data);
+      setCategories(
+        await offlineCache.withFallback(() => apiGet("/categories"), offlineCache.getCategories)
+      );
     } catch (error) {
       console.error("Error fetching categories:", error);
+      toast.error("Couldn't load categories — check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     fetchData();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -75,21 +80,23 @@ export default function CategorieswithSidebarPage() {
     let cancelled = false;
     (async () => {
       try {
-        const response = await fetch(
-          `http://localhost:4000/api/search?q=${encodeURIComponent(trimmed)}`
+        const data = await offlineCache.withFallback(
+          () => apiGet(`/api/search?q=${encodeURIComponent(trimmed)}`),
+          () => offlineCache.searchProducts(trimmed)
         );
-        const data = await response.json();
         if (!cancelled) {
           setResults(data);
           setHighlightedIndex(data.length > 0 ? 0 : -1);
         }
       } catch (error) {
         console.error("Error searching:", error);
+        toast.error("Search failed — check your connection and try again.");
       }
     })();
     return () => {
       cancelled = true;
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [debouncedQuery]);
 
   const productsPage = (prodNum) => navigate(`/categories/${prodNum}`);
@@ -137,13 +144,14 @@ export default function CategorieswithSidebarPage() {
     if (result.batch_tracked) {
       setLotPickProduct(result);
       try {
-        const response = await fetch(
-          `http://localhost:4000/api/products/${result.product_id}/lots`
+        const lots = await offlineCache.withFallback(
+          () => apiGet(`/api/products/${result.product_id}/lots`),
+          () => offlineCache.getProductLots(result.product_id)
         );
-        const lots = await response.json();
         setAvailableLots(lots.filter((lot) => lot.qty_remaining > 0));
       } catch (error) {
         console.error("Error fetching lots:", error);
+        toast.error("Couldn't load lots — check your connection and try again.");
         setAvailableLots([]);
       }
       return;
@@ -199,7 +207,6 @@ export default function CategorieswithSidebarPage() {
         onClose={() => setIsAddCategoryOpen(false)}
         onCategoryAdded={fetchData}
       />
-      <DeleteProductModal isOpen={isDeleteProductOpen} onClose={() => setIsDeleteProductOpen(false)} />
       <UpdateProductModal isOpen={isUpdateProductOpen} onClose={() => setIsUpdateProductOpen(false)} />
 
       {/* Lot picker (batch-tracked products) */}
@@ -354,20 +361,12 @@ export default function CategorieswithSidebarPage() {
               <HiOutlinePencil className="text-lg" />
               {t("pos.update")}
             </button>
-            <button
-              type="button"
-              onClick={() => setIsDeleteProductOpen(true)}
-              className={`${toolbarButtonClass} bg-danger-50 text-danger-600 hover:bg-danger-100 dark:bg-danger-500/10 dark:hover:bg-danger-500/20`}
-            >
-              <HiOutlineTrash className="text-lg" />
-              {t("pos.delete")}
-            </button>
           </>
         }
       >
-        <div className="flex items-start gap-6 md:flex-col">
+        <div className="cartDock:pr-96 pb-16 cartDock:pb-0">
           {/* Main column: sell search + category grid */}
-          <div className="min-w-0 flex-1">
+          <div className="min-w-0">
             <div className="relative mb-6">
               <input
                 type="text"
@@ -420,7 +419,19 @@ export default function CategorieswithSidebarPage() {
               )}
             </div>
 
-            {categories.length === 0 ? (
+            {loading ? (
+              <div className="grid grid-cols-3 gap-5 md:grid-cols-2 sm:grid-cols-1 sm:gap-2.5">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    key={i}
+                    className="animate-pulse rounded-2xl border border-surface-border bg-white-A700 p-6 dark:border-gray-700 dark:bg-gray-800"
+                  >
+                    <div className="mb-4 h-14 w-14 rounded-2xl bg-surface-muted dark:bg-gray-700" />
+                    <div className="h-4 w-2/3 rounded bg-surface-muted dark:bg-gray-700" />
+                  </div>
+                ))}
+              </div>
+            ) : categories.length === 0 ? (
               <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-surface-border py-24 text-center dark:border-gray-700">
                 <HiOutlineSquares2X2 className="text-4xl text-gray-400" />
                 <p className="text-gray-500 dark:text-gray-400">{t("pos.noCategories")}</p>
@@ -455,21 +466,10 @@ export default function CategorieswithSidebarPage() {
               </div>
             )}
           </div>
-
-          {/* Always-visible live cart — only on genuinely wide screens (>=1400px).
-              Narrower widths (incl. portrait monitors, tablets, phones) don't have room
-              to spare for a reserved cart column, so they get the floating icon instead
-              (rendered globally by AppShell). */}
-          <div className="hidden cartRail:block sticky top-24 w-96 shrink-0 rounded-2xl border border-surface-border bg-white-A700 shadow-card dark:border-gray-700 dark:bg-gray-800">
-            <div className="border-b border-surface-border px-4 py-3 font-poppins font-bold text-gray-800 dark:border-gray-700 dark:text-gray-100">
-              {t("cart.title")}
-            </div>
-            <div className="h-[70vh] max-h-[560px]">
-              <CartPanel />
-            </div>
-          </div>
         </div>
       </AppShell>
+
+      <CartDock />
     </>
   );
 }

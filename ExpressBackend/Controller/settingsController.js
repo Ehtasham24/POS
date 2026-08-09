@@ -1,27 +1,18 @@
 const { getSettings, updateSetting } = require("../Sevices/settingsService");
+const asyncHandler = require("../utils/asyncHandler");
 
-const GetSettings = async (req, res) => {
-  try {
-    const settings = await getSettings();
-    res.send(settings);
-  } catch (err) {
-    console.log(err);
-    res.status(500).send({ message: "Controller error" });
-  }
-};
+const GetSettings = asyncHandler(async (req, res) => {
+  const settings = await getSettings();
+  res.send(settings);
+});
 
-const UpdateSettings = async (req, res) => {
+const UpdateSettings = asyncHandler(async (req, res) => {
   const { key, value } = req.body;
   if (!key || value === undefined) {
     return res.status(400).send({ message: "key and value are required" });
   }
-  try {
-    const updated = await updateSetting(key, value);
-    res.send(updated);
-  } catch (err) {
-    console.log(err);
-    res.status(500).send({ message: "Controller error" });
-  }
-};
+  const updated = await updateSetting(key, value);
+  res.send(updated);
+});
 
 module.exports = { GetSettings, UpdateSettings };

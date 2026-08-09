@@ -5,6 +5,7 @@ import { HiOutlineBars3, HiOutlineXMark, HiOutlineBuildingStorefront } from "rea
 import SidebarContent from "./SidebarContent";
 import GlobalSearch from "components/GlobalSearch";
 import LowStockBell from "./LowStockBell";
+import OfflineStatusBadge from "./OfflineStatusBadge";
 import CartCheckout from "categoriesComponents/cartCheckout";
 
 export default function AppShell({ title, actions, hideSearch, children }) {
@@ -62,7 +63,10 @@ export default function AppShell({ title, actions, hideSearch, children }) {
               </span>
             </Link>
           </div>
-          <LowStockBell />
+          <div className="flex items-center gap-2">
+            <OfflineStatusBadge />
+            <LowStockBell />
+          </div>
         </header>
 
         {/* Page top bar */}
@@ -73,6 +77,7 @@ export default function AppShell({ title, actions, hideSearch, children }) {
             </h1>
             <div className="flex items-center gap-2">
               {!hideSearch && <GlobalSearch />}
+              <OfflineStatusBadge />
               <LowStockBell />
             </div>
           </div>

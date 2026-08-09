@@ -9,19 +9,25 @@ import {
   HiOutlineShoppingCart,
   HiOutlineQrCode,
 } from "react-icons/hi2";
-import EditProductModal from "categoriesComponents/editProductModal";
 import AppShell from "components/AppShell";
+import { SkeletonRows, EmptyState } from "components";
+import CartDock from "categoriesComponents/CartDock";
+import { useToast } from "components/Toast/ToastContext";
+import { useLanguage } from "i18n/LanguageContext";
+import { apiGet } from "utils/api";
+import * as offlineCache from "offline/cache";
 
 export default function ProductListPage() {
+  const toast = useToast();
+  const { t } = useLanguage();
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [searchValue, setSearchValue] = useState("");
   const [showPopup, setShowPopup] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [sellingPrice, setSellingPrice] = useState("");
   const [sellQuantity, setSellQuantity] = useState("1");
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [productToEdit, setProductToEdit] = useState(null);
 
   // Lot picker for batch-tracked products
   const [lotPickProduct, setLotPickProduct] = useState(null);
@@ -33,36 +39,36 @@ export default function ProductListPage() {
   useEffect(() => {
     const fetchCategories = async () => {
       try {
-        const response = await fetch("http://localhost:4000/categories");
-        if (!response.ok) {
-          throw new Error("Failed to fetch categories: " + response.status);
-        }
-        const data = await response.json();
-        setCategories(data);
+        setCategories(
+          await offlineCache.withFallback(() => apiGet("/categories"), offlineCache.getCategories)
+        );
       } catch (error) {
         console.error("Error fetching categories:", error);
+        toast.error("Couldn't load categories — check your connection and try again.");
       }
     };
 
     fetchCategories();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const fetchProducts = async () => {
     if (!prodNum) return; // Don't fetch products if no category is selected
+    setLoading(true);
     try {
-      const response = await fetch(
-        `http://localhost:4000/categories/${prodNum}`
+      const data = await offlineCache.withFallback(
+        () => apiGet(`/categories/${prodNum}`),
+        () => offlineCache.getProductsForCategory(prodNum)
       );
-      if (!response.ok) {
-        throw new Error("Failed to fetch products: " + response.status);
-      }
-      const data = await response.json();
       const filteredProducts = data.filter((product) =>
         product.productname.toLowerCase().includes(searchValue.toLowerCase())
       );
       setProducts(filteredProducts);
     } catch (error) {
       console.error("Error fetching products:", error);
+      toast.error("Couldn't load products — check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -70,11 +76,6 @@ export default function ProductListPage() {
     fetchProducts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prodNum, searchValue]);
-
-  const handleEditClick = (product) => {
-    setProductToEdit(product);
-    setShowEditModal(true);
-  };
 
   const handleSearchInputChange = (event) => {
     setSearchValue(event.target.value);
@@ -91,11 +92,14 @@ export default function ProductListPage() {
 
     setLotPickProduct(product);
     try {
-      const response = await fetch(`http://localhost:4000/api/products/${product.id}/lots`);
-      const lots = await response.json();
+      const lots = await offlineCache.withFallback(
+        () => apiGet(`/api/products/${product.id}/lots`),
+        () => offlineCache.getProductLots(product.id)
+      );
       setAvailableLots(lots.filter((lot) => lot.qty_remaining > 0));
     } catch (error) {
       console.error("Error fetching lots:", error);
+      toast.error("Couldn't load lots — check your connection and try again.");
       setAvailableLots([]);
     }
   };
@@ -141,20 +145,21 @@ export default function ProductListPage() {
   return (
     <>
       <AppShell
-        title="Product List"
+        title={t("productList.title")}
         actions={
           <div className="relative w-72 max-w-full">
             <input
               type="text"
               value={searchValue}
               onChange={handleSearchInputChange}
-              placeholder="Filter this category..."
+              placeholder={t("productList.filterPlaceholder")}
               className="h-10 w-full rounded-xl border border-surface-border bg-surface-subtle pl-4 pr-10 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
             />
             <HiOutlineMagnifyingGlass className="pointer-events-none absolute inset-y-0 right-3 my-auto text-lg text-gray-500 dark:text-gray-400" />
           </div>
         }
       >
+        <div className="cartDock:pr-96 pb-16 cartDock:pb-0">
         {/* Category pill filter */}
         <div className="mb-6 flex flex-wrap gap-2">
           {categories.map((category) => {
@@ -181,22 +186,28 @@ export default function ProductListPage() {
               <thead className="sticky top-0 bg-surface-subtle dark:bg-gray-800">
                 <tr>
                   <th className="pl-5 pr-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Product
+                    {t("inventory.product")}
                   </th>
                   <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Quantity
+                    {t("productList.quantity")}
                   </th>
                   <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    Buying Price
+                    {t("productList.buyingPrice")}
                   </th>
                   <th></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-border dark:divide-gray-800">
-                {visibleProducts.length === 0 ? (
+                {loading ? (
                   <tr>
-                    <td colSpan={4} className="py-16 text-center text-gray-500 dark:text-gray-400">
-                      No products found.
+                    <td colSpan={4}>
+                      <SkeletonRows count={5} />
+                    </td>
+                  </tr>
+                ) : visibleProducts.length === 0 ? (
+                  <tr>
+                    <td colSpan={4} className="py-4">
+                      <EmptyState icon={HiOutlineCube} title={t("productList.empty")} />
                     </td>
                   </tr>
                 ) : (
@@ -222,7 +233,7 @@ export default function ProductListPage() {
                       </td>
                       <td className="px-3 py-3">
                         <span className="inline-flex rounded-full bg-surface-muted px-2.5 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
-                          {product.quantity} in stock
+                          {product.quantity} {t("sell.inStock").toLowerCase()}
                         </span>
                       </td>
                       <td className="px-3 py-3 text-gray-800 dark:text-gray-100">
@@ -230,17 +241,11 @@ export default function ProductListPage() {
                       </td>
                       <td className="py-3 pr-5 text-right whitespace-nowrap space-x-2">
                         <button
-                          onClick={() => handleEditClick(product)}
-                          className="rounded-lg bg-surface-muted px-3.5 py-2 text-xs font-bold uppercase text-gray-800 transition-colors hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
-                        >
-                          Edit
-                        </button>
-                        <button
                           onClick={() => handleSellClick(product)}
                           className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3.5 py-2 text-xs font-bold uppercase text-white-A700 transition-colors hover:bg-primary-700"
                         >
                           {product.batch_tracked ? <HiOutlineQrCode /> : <HiOutlineShoppingCart />}
-                          {product.batch_tracked ? "Pick lot" : "Add"}
+                          {product.batch_tracked ? t("productList.pickLot") : t("sell.addToCart")}
                         </button>
                       </td>
                     </tr>
@@ -250,7 +255,10 @@ export default function ProductListPage() {
             </table>
           </div>
         </div>
+        </div>
       </AppShell>
+
+      <CartDock />
 
       {/* Lot picker (batch-tracked products) */}
       <Modal
@@ -274,7 +282,7 @@ export default function ProductListPage() {
                       {lot.lot_code}
                     </span>
                     <span className="text-xs text-gray-500 dark:text-gray-400">
-                      Vendor: {lot.vendor_name || "—"}
+                      {t("inventory.vendor")}: {lot.vendor_name || "—"}
                     </span>
                   </span>
                   <span className="text-right text-sm">
@@ -293,7 +301,7 @@ export default function ProductListPage() {
       </Modal>
 
       {/* Sell detail: full product info + quantity + price, in one place */}
-      <Modal isOpen={showPopup} onClose={() => setShowPopup(false)} title="Sell Product">
+      <Modal isOpen={showPopup} onClose={() => setShowPopup(false)} title={t("sell.title")}>
         {selectedProduct && (
           <>
             <div className="mb-4 rounded-xl bg-surface-subtle p-3 dark:bg-gray-900/40">
@@ -301,21 +309,21 @@ export default function ProductListPage() {
                 {selectedProduct.productname}
               </p>
               <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-1.5 text-xs">
-                <dt className="text-gray-500 dark:text-gray-400">Category</dt>
+                <dt className="text-gray-500 dark:text-gray-400">{t("sell.category")}</dt>
                 <dd className="text-right font-medium text-gray-800 dark:text-gray-100">
                   {categories.find((c) => c.id === selectedProduct.category_id)?.category_name || "—"}
                 </dd>
                 {selectedProduct.lotCode && (
                   <>
-                    <dt className="text-gray-500 dark:text-gray-400">Lot</dt>
+                    <dt className="text-gray-500 dark:text-gray-400">{t("sell.lot")}</dt>
                     <dd className="text-right font-medium text-primary-600 dark:text-primary-400">
                       {selectedProduct.lotCode}
                     </dd>
                   </>
                 )}
-                <dt className="text-gray-500 dark:text-gray-400">In stock</dt>
+                <dt className="text-gray-500 dark:text-gray-400">{t("sell.inStock")}</dt>
                 <dd className="text-right font-medium text-gray-800 dark:text-gray-100">{sellMaxQty}</dd>
-                <dt className="text-gray-500 dark:text-gray-400">Cost price</dt>
+                <dt className="text-gray-500 dark:text-gray-400">{t("sell.costPrice")}</dt>
                 <dd className="text-right font-medium text-gray-800 dark:text-gray-100">
                   Rs.{selectedProduct.buyingprice}
                 </dd>
@@ -325,7 +333,7 @@ export default function ProductListPage() {
             <div className="mb-1 grid grid-cols-2 gap-3">
               <div>
                 <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
-                  Quantity
+                  {t("sell.quantity")}
                 </label>
                 <input
                   type="number"
@@ -338,21 +346,21 @@ export default function ProductListPage() {
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
-                  Selling price
+                  {t("sell.sellingPrice")}
                 </label>
                 <input
                   type="number"
                   value={sellingPrice}
                   onChange={(e) => setSellingPrice(e.target.value)}
                   className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                  placeholder="Enter price"
+                  placeholder={t("sell.sellingPrice")}
                   autoFocus
                 />
               </div>
             </div>
             {sellQtyInvalid && (
               <p className="mb-2 text-xs font-medium text-danger-600">
-                Enter a quantity between 1 and {sellMaxQty}.
+                {t("sell.quantityError", { max: sellMaxQty })}
               </p>
             )}
 
@@ -361,26 +369,19 @@ export default function ProductListPage() {
                 onClick={() => setShowPopup(false)}
                 className="px-4 py-2 bg-surface-muted dark:bg-gray-700 text-gray-800 dark:text-gray-100 rounded-lg hover:bg-surface-border dark:hover:bg-gray-600 transition-colors"
               >
-                Cancel
+                {t("sell.cancel")}
               </button>
               <button
                 onClick={handlePopupSubmit}
                 disabled={sellQtyInvalid || !sellingPrice}
                 className="px-4 py-2 bg-primary-600 text-white-A700 rounded-lg hover:bg-primary-700 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
               >
-                Add to Cart
+                {t("sell.addToCart")}
               </button>
             </div>
           </>
         )}
       </Modal>
-
-      <EditProductModal
-        isOpen={showEditModal}
-        onClose={() => setShowEditModal(false)}
-        product={productToEdit}
-        onUpdated={fetchProducts}
-      />
     </>
   );
 }

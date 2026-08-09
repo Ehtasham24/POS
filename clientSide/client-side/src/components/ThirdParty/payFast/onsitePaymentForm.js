@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useToast } from "components/Toast/ToastContext";
+import { apiPost } from "utils/api";
 // import { v4 as uuidv4 } from "uuid";
 
 const PaymentForm = () => {
@@ -34,22 +35,7 @@ const PaymentForm = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch("http://localhost:4000/api/payfast/onsite", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        console.error("Payment failed:", errorData.error);
-        toast.error(`Payment failed: ${errorData.error}`);
-        return;
-      }
-
-      const result = await response.json();
+      const result = await apiPost("/api/payfast/onsite", formData);
       if (result.success) {
         console.log("Payment identifier:", result.identifier);
         window.payfast_do_onsite_payment({ identifier: result.identifier });

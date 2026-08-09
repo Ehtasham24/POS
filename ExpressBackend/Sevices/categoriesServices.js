@@ -1,4 +1,5 @@
 const { pool } = require("../Db");
+const ApiError = require("../utils/ApiError");
 
 const getCategories = async () => {
   try {
@@ -19,7 +20,7 @@ const createCategory = async (category_name) => {
     return result;
   } catch (err) {
     if (err.code === "23505") {
-      throw new Error("Category already exists");
+      throw new ApiError(409, "Category already exists");
     }
     throw new Error(err.message);
   }

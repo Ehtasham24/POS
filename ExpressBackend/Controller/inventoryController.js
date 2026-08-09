@@ -1,13 +1,9 @@
 const { getInventory } = require("../Sevices/inventoryService");
+const asyncHandler = require("../utils/asyncHandler");
 
-const GetInventory = async (req, res) => {
-  try {
-    const inventory = await getInventory();
-    res.send(inventory);
-  } catch (err) {
-    console.error(err);
-    res.status(500).send({ message: "Controller error" });
-  }
-};
+const GetInventory = asyncHandler(async (req, res) => {
+  const inventory = await getInventory();
+  res.send(inventory);
+});
 
 module.exports = { GetInventory };

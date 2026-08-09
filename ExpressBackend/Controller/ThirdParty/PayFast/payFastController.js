@@ -1,47 +1,43 @@
 const {
   generateSignature,
 } = require("../../../Sevices/ThirdParty/PayFast/payFastService");
+const asyncHandler = require("../../../utils/asyncHandler");
 
-const FormSubmission = async (req, res) => {
+const FormSubmission = asyncHandler(async (req, res) => {
   console.log("Form Submission");
-  try {
-    const { firstName, lastName, email, amount, itemName } = req.body;
+  const { firstName, lastName, email, amount, itemName } = req.body;
 
-    const myData = {
-      merchant_id: process.env.PAY_FAST_MERCHANT_ID,
-      merchant_key: process.env.PAY_FAST_MERCHANT_KEY,
-      return_url: "http://www.facebook.com",
-      cancel_url: "http://www.youtube.com",
-      notify_url: " https://6fa5-101-53-236-238.ngrok-free.app/api/payfast/ITN",
-      name_first: firstName,
-      name_last: lastName,
-      email_address: email,
-      m_payment_id: Math.random().toString(36).substr(2, 9),
-      amount: amount,
-      item_name: itemName,
-    };
+  const myData = {
+    merchant_id: process.env.PAY_FAST_MERCHANT_ID,
+    merchant_key: process.env.PAY_FAST_MERCHANT_KEY,
+    return_url: "http://www.facebook.com",
+    cancel_url: "http://www.youtube.com",
+    notify_url: " https://6fa5-101-53-236-238.ngrok-free.app/api/payfast/ITN",
+    name_first: firstName,
+    name_last: lastName,
+    email_address: email,
+    m_payment_id: Math.random().toString(36).substr(2, 9),
+    amount: amount,
+    item_name: itemName,
+  };
 
-    const myPassphrase = process.env.PAY_FAST_MERCHANT_PASSPHRASE;
-    myData.signature = generateSignature(myData, myPassphrase);
+  const myPassphrase = process.env.PAY_FAST_MERCHANT_PASSPHRASE;
+  myData.signature = generateSignature(myData, myPassphrase);
 
-    // Generate HTML form
-    let htmlForm = `<form action="${process.env.PAY_FAST_URL}" method="post">`;
-    for (let key in myData) {
-      if (myData.hasOwnProperty(key)) {
-        const value = myData[key];
-        if (value !== "") {
-          htmlForm += `<input name="${key}" type="hidden" value="${value.trim()}" />`;
-        }
+  // Generate HTML form
+  let htmlForm = `<form action="${process.env.PAY_FAST_URL}" method="post">`;
+  for (let key in myData) {
+    if (myData.hasOwnProperty(key)) {
+      const value = myData[key];
+      if (value !== "") {
+        htmlForm += `<input name="${key}" type="hidden" value="${value.trim()}" />`;
       }
     }
-    htmlForm += '<input type="submit" value="Pay Now" /></form>';
-
-    res.send(htmlForm);
-  } catch (error) {
-    console.error("Error generating payment form:", error);
-    res.status(500).json({ error: "Internal Server Error" });
   }
-};
+  htmlForm += '<input type="submit" value="Pay Now" /></form>';
+
+  res.send(htmlForm);
+});
 
 //ITN handler controller function not responding while calling the relevent services function handlingITN
 

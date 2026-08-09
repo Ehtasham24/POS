@@ -6,8 +6,9 @@ const {
   fetchSalesTimeSeries,
   fetchBilledHistory,
 } = require("../Sevices/salesService");
+const asyncHandler = require("../utils/asyncHandler");
 
-const PostSales = async (req, res) => {
+const PostSales = asyncHandler(async (req, res) => {
   const { sellingPrice, quantity, productID, lotId } = req.body;
   const { messageSend, updatedQuantity } = await updateSalesRecord(
     sellingPrice,
@@ -16,60 +17,40 @@ const PostSales = async (req, res) => {
     lotId
   );
 
-  try {
-    res.status(200).json({
-      status: 200,
-      message: "Sales data received successfully",
-      data: { messageSend, updatedQuantity },
-    });
-  } catch (err) {
-    res.status(404).json({
-      status: 404,
-      message: err.message,
-    });
-  }
-};
+  res.status(200).json({
+    status: 200,
+    message: "Sales data received successfully",
+    data: { messageSend, updatedQuantity },
+  });
+});
 
-const getRecentSale = async (req, res) => {
-  try {
-    // Call the service function to fetch the recent sales at the exact same timestamp
-    const sales = await getRecentSales();
+const getRecentSale = asyncHandler(async (req, res) => {
+  const sales = await getRecentSales();
+  res.status(200).json({
+    message: "Recent sales grouped by timestamp fetched successfully",
+    data: sales,
+  });
+});
 
-    // Return the fetched sales records in the response
-    return res.status(200).json({
-      message: "Recent sales grouped by timestamp fetched successfully",
-      data: sales,
-    });
-  } catch (error) {
-    // Handle errors and return failure response
-    return res.status(500).json({
-      message: "An error occurred while fetching sales records",
-      error: error.message,
-    });
-  }
-};
+const getBilledHistory = asyncHandler(async (req, res) => {
+  const { startDate, endDate, categoryId, page, pageSize } = req.query;
+  const result = await fetchBilledHistory(
+    startDate,
+    endDate,
+    categoryId,
+    page ? parseInt(page, 10) : 1,
+    pageSize ? parseInt(pageSize, 10) : 30
+  );
+  res.status(200).send(result);
+});
 
-const getBilledHistory = async (req, res) => {
-  try {
-    const result = await fetchBilledHistory();
-    res.status(200).send(result);
-  } catch (err) {
-    console.log(err);
-    res.status(500).send({ message: err.message });
-  }
-};
-
-const getSales = async (req, res) => {
+const getSales = asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.body;
   const response = await fetchSales(startDate, endDate);
-  try {
-    res.status(200).send(response);
-  } catch (err) {
-    response.send({ error: err });
-  }
-};
+  res.status(200).send(response);
+});
 
-const getSalesByProfitLoss = async (req, res) => {
+const getSalesByProfitLoss = asyncHandler(async (req, res) => {
   const { startDate, endDate, type } = req.body;
 
   if (!type || (type !== "profit" && type !== "loss")) {
@@ -78,23 +59,15 @@ const getSalesByProfitLoss = async (req, res) => {
       .send({ error: 'Invalid type. Use "profit" or "loss".' });
   }
 
-  try {
-    const response = await fetchSalesByProfitLoss(startDate, endDate, type);
-    res.status(200).send(response);
-  } catch (err) {
-    res.status(500).send({ error: err.message });
-  }
-};
+  const response = await fetchSalesByProfitLoss(startDate, endDate, type);
+  res.status(200).send(response);
+});
 
-const getSalesTimeSeries = async (req, res) => {
+const getSalesTimeSeries = asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.body;
-  try {
-    const response = await fetchSalesTimeSeries(startDate, endDate);
-    res.status(200).send(response);
-  } catch (err) {
-    res.status(500).send({ error: err.message });
-  }
-};
+  const response = await fetchSalesTimeSeries(startDate, endDate);
+  res.status(200).send(response);
+});
 
 module.exports = {
   PostSales,

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import ContactSelect from "./ContactSelect";
+import { apiPost, apiPut } from "utils/api";
 
 const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
@@ -40,19 +41,16 @@ const AddCreditModal = ({ isOpen, onClose, onAdded, entry }) => {
       return;
     }
     try {
-      const response = await fetch(
-        isEdit ? `http://localhost:4000/api/credit/${entry.id}` : "http://localhost:4000/credit",
-        {
-          method: isEdit ? "PUT" : "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            contact_id: Number(formData.contact_id),
-            amount_due: Number(formData.amount_due),
-            amount_received: Number(formData.amount_received || 0),
-          }),
-        }
-      );
-      if (!response.ok) throw new Error(`Failed to ${isEdit ? "update" : "add"} receivable entry`);
+      const payload = {
+        contact_id: Number(formData.contact_id),
+        amount_due: Number(formData.amount_due),
+        amount_received: Number(formData.amount_received || 0),
+      };
+      if (isEdit) {
+        await apiPut(`/api/credit/${entry.id}`, payload);
+      } else {
+        await apiPost("/credit", payload);
+      }
       toast.success(isEdit ? "Receivable entry updated!" : "Receivable entry added!");
       onAdded();
       onClose();

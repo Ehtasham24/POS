@@ -3,6 +3,7 @@ import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import useDebounce from "hooks/useDebounce";
 import { HiOutlineMagnifyingGlass, HiOutlineCube, HiOutlinePlusCircle } from "react-icons/hi2";
+import { apiGet, apiPut, apiPost, apiPatch } from "utils/api";
 
 const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
@@ -30,12 +31,10 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
 
   useEffect(() => {
     if (!isOpen) return;
-    fetch("http://localhost:4000/categories")
-      .then((r) => r.json())
+    apiGet("/categories")
       .then(setCategories)
       .catch((err) => console.error("Error fetching categories:", err));
-    fetch("http://localhost:4000/api/contacts?type=vendor")
-      .then((r) => r.json())
+    apiGet("/api/contacts?type=vendor")
       .then(setVendors)
       .catch((err) => console.error("Error fetching vendors:", err));
   }, [isOpen]);
@@ -47,8 +46,7 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
       return;
     }
     let cancelled = false;
-    fetch(`http://localhost:4000/api/search?q=${encodeURIComponent(trimmed)}`)
-      .then((r) => r.json())
+    apiGet(`/api/search?q=${encodeURIComponent(trimmed)}`)
       .then((data) => {
         if (cancelled) return;
         const seen = new Set();
@@ -67,8 +65,7 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
 
   const fetchLots = async (productId) => {
     try {
-      const response = await fetch(`http://localhost:4000/api/products/${productId}/lots`);
-      const data = await response.json();
+      const data = await apiGet(`/api/products/${productId}/lots`);
       setLots(data);
     } catch (error) {
       console.error("Error fetching lots:", error);
@@ -99,17 +96,12 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
   const handleSaveSimple = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(`http://localhost:4000/products/${selectedProduct.product_id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: formData.name,
-          price: formData.buying_price,
-          Quantity: formData.quantity,
-          Category_id: formData.category_id,
-        }),
+      await apiPut(`/products/${selectedProduct.product_id}`, {
+        name: formData.name,
+        price: formData.buying_price,
+        Quantity: formData.quantity,
+        Category_id: formData.category_id,
       });
-      if (!response.ok) throw new Error("Failed to update product");
       toast.success("Product updated successfully!");
       onClose();
     } catch (error) {
@@ -120,19 +112,7 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
   const handleAddNewLot = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(
-        `http://localhost:4000/api/products/${selectedProduct.product_id}/lots`,
-        {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(newLot),
-        }
-      );
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.message || "Failed to add lot");
-      }
-      const lot = await response.json();
+      const lot = await apiPost(`/api/products/${selectedProduct.product_id}/lots`, newLot);
       toast.success(`New lot created: ${lot.lot_code}`);
       setNewLot({ vendor_id: "", buying_price: "", quantity: "" });
       setShowNewLotForm(false);
@@ -145,15 +125,7 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
   const handleAddStock = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch(`http://localhost:4000/api/lots/${addStockLotId}/add-stock`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ quantity: addStockQty }),
-      });
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.message || "Failed to add stock");
-      }
+      await apiPatch(`/api/lots/${addStockLotId}/add-stock`, { quantity: addStockQty });
       toast.success("Stock added to lot!");
       setAddStockQty("");
       fetchLots(selectedProduct.product_id);
@@ -250,6 +222,8 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
                     value={formData.buying_price}
                     onChange={handleChange}
                     className={inputClass}
+                    min="0"
+                    step="0.01"
                     required
                   />
                 </div>
@@ -264,6 +238,8 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
                     value={formData.quantity}
                     onChange={handleChange}
                     className={inputClass}
+                    min="0"
+                    step="1"
                     required
                   />
                 </div>
@@ -361,6 +337,8 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
                   onChange={(e) => setAddStockQty(e.target.value)}
                   placeholder="Quantity to add"
                   className={inputClass}
+                  min="1"
+                  step="1"
                   required
                 />
                 <button
@@ -406,6 +384,8 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
                     onChange={(e) => setNewLot((prev) => ({ ...prev, buying_price: e.target.value }))}
                     placeholder="Buying price"
                     className={inputClass}
+                    min="0"
+                    step="0.01"
                     required
                   />
                   <input
@@ -414,6 +394,8 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
                     onChange={(e) => setNewLot((prev) => ({ ...prev, quantity: e.target.value }))}
                     placeholder="Quantity"
                     className={inputClass}
+                    min="1"
+                    step="1"
                     required
                   />
                   <div className="mt-2 flex gap-2">

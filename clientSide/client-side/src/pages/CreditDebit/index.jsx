@@ -10,36 +10,40 @@ import AddDebitModal from "creditDebitComponents/addDebitModal";
 import AddCreditModal from "creditDebitComponents/addCreditModal";
 import SettleModal from "creditDebitComponents/settleModal";
 import AppShell from "components/AppShell";
+import { SkeletonRows, EmptyState } from "components";
+import { useToast } from "components/Toast/ToastContext";
+import { useLanguage } from "i18n/LanguageContext";
+import { apiGet, apiPost } from "utils/api";
 
 const pendingBadge = (amount) =>
   Number(amount) > 0
     ? "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-400"
     : "bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-500";
 
-const statCards = (totalProfitLoss, pendingDebitTotal, pendingCreditTotal, netEarnings) => [
+const statCards = (t, totalProfitLoss, pendingDebitTotal, pendingCreditTotal, netEarnings) => [
   {
-    label: "Total Profit (all-time)",
+    label: t("creditDebit.totalProfit"),
     value: `Rs.${Number(totalProfitLoss).toFixed(2)}`,
     icon: HiOutlineArrowTrendingUp,
     tint: "bg-primary-50 text-primary-600 dark:bg-gray-700 dark:text-primary-400",
     valueClass: "text-gray-800 dark:text-gray-100",
   },
   {
-    label: "Pending Payables",
+    label: t("creditDebit.pendingPayables"),
     value: `Rs.${pendingDebitTotal.toFixed(2)}`,
     icon: HiOutlineExclamationTriangle,
     tint: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
     valueClass: "text-danger-600",
   },
   {
-    label: "Pending Receivables",
+    label: t("creditDebit.pendingReceivables"),
     value: `Rs.${pendingCreditTotal.toFixed(2)}`,
     icon: HiOutlineBanknotes,
     tint: "bg-primary-50 text-primary-600 dark:bg-gray-700 dark:text-primary-400",
     valueClass: "text-primary-600 dark:text-primary-400",
   },
   {
-    label: "Net Earnings",
+    label: t("creditDebit.netEarnings"),
     value: `Rs.${netEarnings.toFixed(2)}`,
     icon: HiOutlineBanknotes,
     tint:
@@ -50,7 +54,8 @@ const statCards = (totalProfitLoss, pendingDebitTotal, pendingCreditTotal, netEa
   },
 ];
 
-function LedgerTable({ rows, personLabel, emptyLabel, onSettle, onEdit }) {
+function LedgerTable({ rows, personLabel, emptyLabel, onSettle, onEdit, loading }) {
+  const { t } = useLanguage();
   return (
     <div className="overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
       <div className="overflow-x-auto">
@@ -61,22 +66,31 @@ function LedgerTable({ rows, personLabel, emptyLabel, onSettle, onEdit }) {
                 {personLabel}
               </th>
               <th className="text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                Due
+                {t("creditDebit.due")}
               </th>
               <th className="text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                Paid
+                {t("creditDebit.paid")}
               </th>
               <th className="text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                Pending
+                {t("creditDebit.pending")}
               </th>
               <th></th>
             </tr>
           </thead>
+          {loading ? (
+            <tbody>
+              <tr>
+                <td colSpan={5}>
+                  <SkeletonRows count={3} />
+                </td>
+              </tr>
+            </tbody>
+          ) : (
           <tbody className="divide-y divide-surface-border dark:divide-gray-800">
             {rows.length === 0 ? (
               <tr>
-                <td colSpan={5} className="text-center py-8 text-gray-500 dark:text-gray-400">
-                  {emptyLabel}
+                <td colSpan={5} className="py-2">
+                  <EmptyState icon={HiOutlineBanknotes} title={emptyLabel} />
                 </td>
               </tr>
             ) : (
@@ -99,14 +113,14 @@ function LedgerTable({ rows, personLabel, emptyLabel, onSettle, onEdit }) {
                       className="inline-flex items-center gap-1 px-3 py-1.5 bg-surface-muted dark:bg-gray-700 hover:bg-surface-border dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-xs font-bold uppercase rounded-lg transition-colors"
                     >
                       <HiOutlinePencil className="text-sm" />
-                      Edit
+                      {t("common.edit")}
                     </button>
                     {Number(row.amount_pending) > 0 && (
                       <button
                         onClick={() => onSettle(row)}
                         className="px-3 py-1.5 bg-surface-muted dark:bg-gray-700 hover:bg-surface-border dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-xs font-bold uppercase rounded-lg transition-colors"
                       >
-                        Settle
+                        {t("creditDebit.settle")}
                       </button>
                     )}
                   </td>
@@ -114,6 +128,7 @@ function LedgerTable({ rows, personLabel, emptyLabel, onSettle, onEdit }) {
               ))
             )}
           </tbody>
+          )}
         </table>
       </div>
     </div>
@@ -121,8 +136,11 @@ function LedgerTable({ rows, personLabel, emptyLabel, onSettle, onEdit }) {
 }
 
 export default function CreditDebitPage() {
+  const toast = useToast();
+  const { t } = useLanguage();
   const [debit, setDebit] = useState([]);
   const [credit, setCredit] = useState([]);
+  const [loading, setLoading] = useState(true);
   const [totalProfitLoss, setTotalProfitLoss] = useState(0);
   const [showAddDebit, setShowAddDebit] = useState(false);
   const [showAddCredit, setShowAddCredit] = useState(false);
@@ -132,31 +150,27 @@ export default function CreditDebitPage() {
 
   const fetchLedger = async () => {
     try {
-      const response = await fetch("http://localhost:4000/creditsDebits");
-      if (!response.ok) throw new Error("Failed to fetch ledger");
-      const data = await response.json();
+      const data = await apiGet("/creditsDebits");
       setDebit(data.Debit || []);
       setCredit(data.Credit || []);
     } catch (error) {
       console.error("Error fetching credit/debit ledger:", error);
+      toast.error("Couldn't load the ledger — check your connection and try again.");
+    } finally {
+      setLoading(false);
     }
   };
 
   const fetchEarnings = async () => {
     try {
-      const response = await fetch("http://localhost:4000/api/Sales", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          startDate: "2000-01-01T00:00",
-          endDate: new Date().toISOString().slice(0, 16),
-        }),
+      const data = await apiPost("/api/Sales", {
+        startDate: "2000-01-01T00:00",
+        endDate: new Date().toISOString().slice(0, 16),
       });
-      if (!response.ok) throw new Error("Failed to fetch earnings");
-      const data = await response.json();
       setTotalProfitLoss(data.totalProfitLoss || 0);
     } catch (error) {
       console.error("Error fetching earnings:", error);
+      toast.error("Couldn't load earnings totals — check your connection and try again.");
     }
   };
 
@@ -167,6 +181,7 @@ export default function CreditDebitPage() {
 
   useEffect(() => {
     refreshAll();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const pendingDebitTotal = debit.reduce(
@@ -182,9 +197,9 @@ export default function CreditDebitPage() {
 
   return (
     <>
-      <AppShell title="Credit / Debit">
+      <AppShell title={t("creditDebit.title")}>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-1 max-w-4xl">
-          {statCards(totalProfitLoss, pendingDebitTotal, pendingCreditTotal, netEarnings).map((card) => (
+          {statCards(t, totalProfitLoss, pendingDebitTotal, pendingCreditTotal, netEarnings).map((card) => (
             <div
               key={card.label}
               className="flex items-center gap-4 rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800"
@@ -205,22 +220,23 @@ export default function CreditDebitPage() {
           <div>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
-                Payable — You owe suppliers
+                {t("creditDebit.payableTitle")}
               </h2>
               <button
                 onClick={() => setShowAddDebit(true)}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white-A700 text-xs font-bold uppercase rounded-lg transition-colors"
               >
                 <HiOutlinePlusCircle className="text-sm" />
-                Add Payable
+                {t("creditDebit.addPayable")}
               </button>
             </div>
             <LedgerTable
               rows={debit}
-              personLabel="Supplier"
-              emptyLabel="No payables recorded."
+              personLabel={t("creditDebit.supplier")}
+              emptyLabel={t("creditDebit.noPayables")}
               onSettle={(row) => setSettleTarget({ entry: row, type: "debit" })}
               onEdit={(row) => setEditDebitEntry(row)}
+              loading={loading}
             />
           </div>
 
@@ -228,22 +244,23 @@ export default function CreditDebitPage() {
           <div>
             <div className="mb-3 flex items-center justify-between">
               <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
-                Receivable — Customers owe you
+                {t("creditDebit.receivableTitle")}
               </h2>
               <button
                 onClick={() => setShowAddCredit(true)}
                 className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white-A700 text-xs font-bold uppercase rounded-lg transition-colors"
               >
                 <HiOutlinePlusCircle className="text-sm" />
-                Add Receivable
+                {t("creditDebit.addReceivable")}
               </button>
             </div>
             <LedgerTable
               rows={credit}
-              personLabel="Customer"
-              emptyLabel="No receivables recorded."
+              personLabel={t("creditDebit.customer")}
+              emptyLabel={t("creditDebit.noReceivables")}
               onSettle={(row) => setSettleTarget({ entry: row, type: "credit" })}
               onEdit={(row) => setEditCreditEntry(row)}
+              loading={loading}
             />
           </div>
         </div>

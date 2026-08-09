@@ -1,6 +1,11 @@
 import React, { useState } from "react";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
+import { apiPost } from "utils/api";
+
+const inputClass =
+  "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
+const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gray-100";
 
 const AddCategoryModal = ({ isOpen, onClose, onCategoryAdded }) => {
   const toast = useToast();
@@ -13,18 +18,7 @@ const AddCategoryModal = ({ isOpen, onClose, onCategoryAdded }) => {
   const handleSubmitCategory = async (e) => {
     e.preventDefault();
     try {
-      const response = await fetch("http://localhost:4000/categories", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ category_name: categoryName }),
-      });
-      if (!response.ok) {
-        if (response.status === 409)
-          throw new Error("Category already exists");
-        else throw new Error("Failed to add category");
-      }
+      await apiPost("/categories", { category_name: categoryName });
       toast.success("Category added successfully!");
       setCategoryName("");
       onCategoryAdded();
@@ -38,10 +32,7 @@ const AddCategoryModal = ({ isOpen, onClose, onCategoryAdded }) => {
     <Modal isOpen={isOpen} onClose={onClose} title="Add Category">
       <form className="space-y-4" onSubmit={handleSubmitCategory}>
         <div>
-          <label
-            htmlFor="category_name"
-            className="block mb-1 text-sm font-semibold text-gray-800"
-          >
+          <label htmlFor="category_name" className={labelClass}>
             Category Name
           </label>
           <input
@@ -50,7 +41,7 @@ const AddCategoryModal = ({ isOpen, onClose, onCategoryAdded }) => {
             id="category_name"
             value={categoryName}
             onChange={handleChange}
-            className="bg-white-A700 border border-surface-border mt-2 text-gray-900 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5"
+            className={inputClass}
             placeholder="Enter category name"
             required
           />

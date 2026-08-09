@@ -1,5 +1,6 @@
 const { pool } = require("../Db");
 const { createLot } = require("./lotService");
+const ApiError = require("../utils/ApiError");
 
 const getItems = async () => {
   try {
@@ -69,12 +70,12 @@ const postItems = async (name, buying_price, quantity, category_id, batchOptions
     return { rows: result.rows, lot }; // Return rows (+ the created first lot, if batch-tracked)
   } catch (err) {
     if (err.code === "23505" && err.constraint === "products_productname_key") {
-      throw new Error("Cannot enter duplicate products!");
+      throw new ApiError(409, "Cannot enter duplicate products!");
     } else if (
       err.message ===
       `duplicate key value violates unique constraint "unique_productname_lower"`
     ) {
-      throw new Error("Duplicate product name");
+      throw new ApiError(409, "Duplicate product name");
     } else throw new Error(err.message);
   }
 };
@@ -152,7 +153,7 @@ const deleteItemsByName = async (name) => {
     );
 
     if (productResult.rowCount === 0) {
-      throw new Error(`No item with name ${name} found`);
+      throw new ApiError(409, `No item with name ${name} found`);
     }
 
     const productId = productResult.rows[0].id;
@@ -180,6 +181,7 @@ const deleteItemsByName = async (name) => {
     return deleteResult; // Return result
   } catch (err) {
     console.error(err);
+    if (err instanceof ApiError) throw err;
     throw new Error(`${err.message}`);
   }
 };

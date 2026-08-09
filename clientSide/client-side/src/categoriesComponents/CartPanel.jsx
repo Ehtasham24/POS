@@ -11,6 +11,9 @@ import {
   setQuantity,
   clearCart,
 } from "cartRedux/cartSlice";
+import { apiPost } from "utils/api";
+import { enqueueOfflineSale } from "offline/syncManager";
+import { decrementLocalStock } from "offline/cache";
 
 // Cash amounts customers commonly hand over — used to build one-tap tender suggestions.
 const CASH_DENOMINATIONS = [50, 100, 500, 1000, 5000];
@@ -95,24 +98,33 @@ export default function CartPanel({ onCheckedOut }) {
       lotId: item.lotId,
     }));
 
+    let wentOffline = false;
+
     try {
       const results = await Promise.all(
         salesData.map(async (sale, index) => {
-          const response = await fetch("http://localhost:4000/sales", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(sale),
-          });
-          if (!response.ok) throw new Error("Failed to sell product");
-          const json = await response.json();
-          return { item: cart[index], messageSend: json.data?.messageSend };
+          try {
+            const json = await apiPost("/sales", sale);
+            return { item: cart[index], messageSend: json.data?.messageSend };
+          } catch (error) {
+            // A real rejection from the server (e.g. "insufficient stock") must surface to
+            // the cashier as-is, not be queued for a retry that would just fail again.
+            // Only an actual dropped connection falls back to the offline outbox.
+            if (!error.isNetworkError) throw error;
+            wentOffline = true;
+            await enqueueOfflineSale(sale);
+            await decrementLocalStock(sale.productID, sale.quantity, sale.lotId);
+            return { item: cart[index], messageSend: undefined };
+          }
         })
       );
 
       dispatch(clearCart());
       setShowPayment(false);
       toast.success(
-        paymentMethod === "cash" && changeDue > 0
+        wentOffline
+          ? `Saved offline — will sync automatically once connection is back. Total: PKR ${subtotal}.`
+          : paymentMethod === "cash" && changeDue > 0
           ? `Sold for PKR ${subtotal}. Change due: PKR ${changeDue.toFixed(0)}.`
           : `Sold for PKR ${subtotal}. Products sold successfully!`
       );

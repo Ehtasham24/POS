@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
+import { apiPost, apiPut } from "utils/api";
 
 const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
@@ -37,15 +38,11 @@ export default function ContactModal({ isOpen, onClose, contact, onSaved }) {
       return;
     }
     try {
-      const url = isEditing
-        ? `http://localhost:4000/api/contacts/${contact.id}`
-        : "http://localhost:4000/api/contacts";
-      const response = await fetch(url, {
-        method: isEditing ? "PUT" : "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-      if (!response.ok) throw new Error("Failed to save contact");
+      if (isEditing) {
+        await apiPut(`/api/contacts/${contact.id}`, formData);
+      } else {
+        await apiPost("/api/contacts", formData);
+      }
       toast.success(isEditing ? "Contact updated!" : "Contact added!");
       onSaved();
       onClose();

@@ -1,18 +1,113 @@
 import React, { useEffect, useState } from "react";
-import { HiOutlineCog6Tooth, HiOutlineExclamationTriangle, HiOutlineLanguage } from "react-icons/hi2";
+import {
+  HiOutlineCog6Tooth,
+  HiOutlineExclamationTriangle,
+  HiOutlineLanguage,
+  HiOutlinePrinter,
+  HiOutlineDocumentText,
+} from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
+import { apiGet, apiPut } from "utils/api";
+import { printTestReceipt } from "utils/printReceipt";
+import useThermalPrinterStatus from "hooks/useThermalPrinterStatus";
+import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
 
-const updateSetting = async (key, value) => {
-  const response = await fetch("http://localhost:4000/api/settings", {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key, value: String(value) }),
+const updateSetting = (key, value) => apiPut("/api/settings", { key, value: String(value) });
+
+function PrinterCard() {
+  const toast = useToast();
+  const { t } = useLanguage();
+  const { type, name, bluetoothSupported, usbSupported, connectBluetooth, connectUsb, disconnect } =
+    useThermalPrinterStatus();
+  const [busy, setBusy] = useState(false);
+
+  const withBusy = (fn) => async () => {
+    setBusy(true);
+    try {
+      await fn();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleTestPrint = withBusy(async () => {
+    await printTestReceipt();
+    toast.success("Test print sent");
   });
-  if (!response.ok) throw new Error("Failed to update setting");
-  return response.json();
-};
+
+  return (
+    <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
+      <div className="flex items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
+          <HiOutlinePrinter className="text-xl text-primary-600 dark:text-primary-400" />
+        </div>
+        <div className="flex-1">
+          <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
+            {t("settings.receiptPrinterTitle")}
+          </h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+            {type
+              ? `Connected: ${name} (${type === "bluetooth" ? "Bluetooth" : "USB"}) — receipts print directly, no dialog.`
+              : "Not connected — receipts will open the print dialog instead."}
+          </p>
+
+          {!bluetoothSupported && !usbSupported && (
+            <p className="mt-3 rounded-lg bg-surface-subtle px-3 py-2.5 text-xs text-gray-500 dark:bg-gray-900 dark:text-gray-400">
+              Direct printing isn't supported in this browser (Bluetooth/USB printing only
+              works in Chrome or Edge). Receipts will use the print dialog — set that
+              printer as default there for the closest experience.
+            </p>
+          )}
+
+          <div className="mt-3 flex flex-wrap gap-2">
+            {bluetoothSupported && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={withBusy(connectBluetooth)}
+                className="rounded-lg border border-surface-border px-3.5 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-surface-subtle disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                {t("settings.connectBluetooth")}
+              </button>
+            )}
+            {usbSupported && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={withBusy(connectUsb)}
+                className="rounded-lg border border-surface-border px-3.5 py-2 text-sm font-semibold text-gray-700 transition-colors hover:bg-surface-subtle disabled:opacity-50 dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
+              >
+                {t("settings.connectUsb")}
+              </button>
+            )}
+            {type && (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={withBusy(disconnect)}
+                className="rounded-lg px-3.5 py-2 text-sm font-semibold text-danger-600 transition-colors hover:bg-danger-50 disabled:opacity-50 dark:hover:bg-danger-500/10"
+              >
+                {t("settings.disconnect")}
+              </button>
+            )}
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleTestPrint}
+              className="rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
+            >
+              {t("settings.testPrint")}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function SettingsPage() {
   const toast = useToast();
@@ -20,20 +115,24 @@ export default function SettingsPage() {
   const [settings, setSettings] = useState(null);
   const [threshold, setThreshold] = useState("10");
   const [savingThreshold, setSavingThreshold] = useState(false);
+  const [terms, setTerms] = useState("");
+  const [savingTerms, setSavingTerms] = useState(false);
 
   const fetchSettings = async () => {
     try {
-      const response = await fetch("http://localhost:4000/api/settings");
-      const data = await response.json();
+      const data = await apiGet("/api/settings");
       setSettings(data);
       setThreshold(data.low_stock_threshold || "10");
+      setTerms(data.receipt_terms ?? DEFAULT_RECEIPT_TERMS);
     } catch (error) {
       console.error("Error fetching settings:", error);
+      toast.error("Couldn't load settings — check your connection and try again.");
     }
   };
 
   useEffect(() => {
     fetchSettings();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSaveThreshold = async () => {
@@ -46,6 +145,19 @@ export default function SettingsPage() {
       toast.error(error.message);
     } finally {
       setSavingThreshold(false);
+    }
+  };
+
+  const handleSaveTerms = async () => {
+    setSavingTerms(true);
+    try {
+      await updateSetting("receipt_terms", terms);
+      setSettings((prev) => ({ ...prev, receipt_terms: terms }));
+      toast.success("Receipt terms updated");
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setSavingTerms(false);
     }
   };
 
@@ -127,6 +239,41 @@ export default function SettingsPage() {
                   className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
                 >
                   {savingThreshold ? t("common.saving") : t("common.save")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <PrinterCard />
+
+        <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
+          <div className="flex items-start gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
+              <HiOutlineDocumentText className="text-xl text-primary-600 dark:text-primary-400" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
+                {t("settings.receiptTermsTitle")}
+              </h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {t("settings.receiptTermsDesc")}
+              </p>
+              <div className="mt-3 flex flex-col gap-3">
+                <textarea
+                  rows={4}
+                  value={terms}
+                  onChange={(e) => setTerms(e.target.value)}
+                  placeholder="e.g. No purchased item will be returned or exchanged."
+                  className="w-full resize-y rounded-lg border border-surface-border bg-white-A700 p-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveTerms}
+                  disabled={savingTerms}
+                  className="self-start rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {savingTerms ? t("common.saving") : t("common.save")}
                 </button>
               </div>
             </div>

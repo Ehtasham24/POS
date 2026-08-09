@@ -2,6 +2,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { HiOutlineMagnifyingGlass, HiOutlineCube } from "react-icons/hi2";
 import useDebounce from "hooks/useDebounce";
+import { apiGet } from "utils/api";
 
 export default function GlobalSearch() {
   const [query, setQuery] = useState("");
@@ -20,10 +21,7 @@ export default function GlobalSearch() {
     let cancelled = false;
     (async () => {
       try {
-        const response = await fetch(
-          `http://localhost:4000/api/search?q=${encodeURIComponent(trimmed)}`
-        );
-        const data = await response.json();
+        const data = await apiGet(`/api/search?q=${encodeURIComponent(trimmed)}`);
         if (!cancelled) {
           setResults(data);
           setIsOpen(true);
