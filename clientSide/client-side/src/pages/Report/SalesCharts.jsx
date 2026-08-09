@@ -29,6 +29,11 @@ const TOOLTIP_STYLE = {
 // (the tooltip itself is always dark, regardless of theme). Set explicitly rather than
 // relying on inheritance.
 const TOOLTIP_LABEL_STYLE = { color: "#f3f4f6", fontWeight: 600, marginBottom: 4 };
+// Same problem for the item value line (e.g. "Profit : 29700"): recharts colors it from
+// the series' resolved stroke/fill, but the Bar here only sets fill per-point via <Cell>,
+// not on <Bar> itself, so recharts has nothing to resolve and falls back to its own
+// default — plain black, same unreadable-on-dark issue as the label.
+const TOOLTIP_ITEM_STYLE = { color: "#f3f4f6" };
 
 const PIE_COLORS = ["#4f46e5", "#0ea5e9", "#16a34a", "#f59e0b", "#e11d48", "#8b5cf6", "#14b8a6"];
 
@@ -108,7 +113,11 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
                   fontSize={12}
                   tick={{ fill: AXIS_COLOR }}
                 />
-                <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
+                  itemStyle={TOOLTIP_ITEM_STYLE}
+                />
                 <Bar dataKey="profit" name="Profit" radius={[0, 4, 4, 0]}>
                   {topProducts.map((entry, index) => (
                     <Cell key={index} fill={entry.profit >= 0 ? "#16a34a" : "#dc2626"} />
@@ -128,7 +137,11 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
                 free for the pie. */}
             <ResponsiveContainer width="100%" height={240}>
               <PieChart>
-                <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} />
+                <Tooltip
+                  contentStyle={TOOLTIP_STYLE}
+                  labelStyle={TOOLTIP_LABEL_STYLE}
+                  itemStyle={TOOLTIP_ITEM_STYLE}
+                />
                 <Pie data={categoryShare} dataKey="revenue" nameKey="name" outerRadius={90}>
                   {categoryShare.map((entry, index) => (
                     <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
