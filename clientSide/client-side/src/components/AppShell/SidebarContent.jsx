@@ -1,6 +1,6 @@
 import React from "react";
 import { NavLink, Link } from "react-router-dom";
-import { HiOutlineBuildingStorefront, HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
+import { HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import useTheme from "hooks/useTheme";
 import { useLanguage } from "i18n/LanguageContext";
 import { navItems } from "./navItems";
@@ -12,9 +12,11 @@ export default function SidebarContent({ onNavigate = () => {} }) {
   return (
     <div className="flex h-full flex-col bg-gray-900 text-gray-300">
       <Link to="/" onClick={onNavigate} className="flex items-center gap-2.5 px-6 py-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-primary-400 to-primary-600 shadow-lg shadow-primary-900/40">
-          <HiOutlineBuildingStorefront className="text-xl text-white-A700" />
-        </div>
+        <img
+          src="/logo192.png"
+          alt="POS System"
+          className="h-9 w-9 rounded-xl shadow-lg shadow-primary-900/40"
+        />
         <span className="font-poppins text-lg font-bold tracking-tight text-white-A700">
           POS System
         </span>
