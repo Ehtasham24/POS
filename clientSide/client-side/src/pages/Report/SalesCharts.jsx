@@ -37,6 +37,16 @@ const TOOLTIP_ITEM_STYLE = { color: "#f3f4f6" };
 
 const PIE_COLORS = ["#4f46e5", "#0ea5e9", "#16a34a", "#f59e0b", "#e11d48", "#8b5cf6", "#14b8a6"];
 
+// Recharts animates every chart open on mount (an arc/line/bar sweeping in over ~1.5s).
+// Printing (both the print preview pane and the final render) re-measures this page's
+// width — .print-area switches to position:absolute/width:100% under @media print — which
+// makes ResponsiveContainer's ResizeObserver fire and remount the chart, restarting that
+// animation. Whatever moment the browser happens to rasterize the page for print/PDF then
+// catches the animation at a random, unfinished point — a pie chart frozen mid-sweep looks
+// like a slice is missing, and it comes out different on every print. Disabling animation
+// makes every chart render instantly and identically, print or screen, every time.
+const NO_ANIMATION = { isAnimationActive: false };
+
 const formatDay = (iso) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
@@ -102,8 +112,8 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
               <YAxis stroke={AXIS_COLOR} fontSize={12} />
               <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} labelFormatter={formatDay} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#4f46e5" strokeWidth={2} dot={false} />
-              <Line type="monotone" dataKey="profit" name="Profit" stroke="#16a34a" strokeWidth={2} dot={false} />
+              <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#4f46e5" strokeWidth={2} dot={false} {...NO_ANIMATION} />
+              <Line type="monotone" dataKey="profit" name="Profit" stroke="#16a34a" strokeWidth={2} dot={false} {...NO_ANIMATION} />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -129,7 +139,7 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
                   labelStyle={TOOLTIP_LABEL_STYLE}
                   itemStyle={TOOLTIP_ITEM_STYLE}
                 />
-                <Bar dataKey="profit" name="Profit" radius={[0, 4, 4, 0]}>
+                <Bar dataKey="profit" name="Profit" radius={[0, 4, 4, 0]} {...NO_ANIMATION}>
                   {topProducts.map((entry, index) => (
                     <Cell key={index} fill={entry.profit >= 0 ? "#16a34a" : "#dc2626"} />
                   ))}
@@ -163,7 +173,7 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
                   labelStyle={TOOLTIP_LABEL_STYLE}
                   itemStyle={TOOLTIP_ITEM_STYLE}
                 />
-                <Pie data={categoryShare} dataKey="revenue" nameKey="name" outerRadius={90}>
+                <Pie data={categoryShare} dataKey="revenue" nameKey="name" outerRadius={90} {...NO_ANIMATION}>
                   {categoryShare.map((entry, index) => (
                     <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                   ))}
