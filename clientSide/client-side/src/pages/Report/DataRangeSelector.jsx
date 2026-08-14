@@ -47,24 +47,6 @@ const DateRangeSelector = ({
           <option value="loss">Loss-Making Products</option>
         </select>
       </div>
-
-      {/* Hidden print version */}
-      <div className="hidden print:block mt-4 w-full">
-        <p>
-          <strong>Start Date:</strong> {startDate}
-        </p>
-        <p>
-          <strong>End Date:</strong> {endDate}
-        </p>
-        <p>
-          <strong>Filter by:</strong>{" "}
-          {filterType === "all"
-            ? "All Products"
-            : filterType === "profit"
-            ? "Profitable Products"
-            : "Loss-Making Products"}
-        </p>
-      </div>
     </div>
   );
 };

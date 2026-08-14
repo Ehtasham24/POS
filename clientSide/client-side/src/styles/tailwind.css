@@ -46,122 +46,24 @@
     border-color: "#393d46";
   }
 }
+/* "Print just this div" — used by Sales Report's Print button (the only window.print()
+   call site in the app; receipt printing opens its own separate window with its own
+   inline styles, so it's unaffected by this). Hiding everything and un-hiding only
+   .print-area is a blanket approach specifically so it doesn't need every page/AppShell
+   chrome element (sidebar, header, buttons, inputs...) individually marked — anything
+   not inside .print-area simply won't appear on the printed page. */
 @media print {
-  /* Hide elements like buttons, inputs, etc., during printing */
-  button,
-  input,
-  select {
-    display: none;
+  body * {
+    visibility: hidden !important;
   }
-
-  /* Ensure the printable content section is visible */
-  .printable-content {
-    display: block;
-    margin: 20px;
-    padding: 20px;
-    border: 1px solid #000; /* Optional: Add a border for clarity */
+  .print-area,
+  .print-area * {
+    visibility: visible !important;
   }
-
-  /* Style paragraphs for printing */
-  .printable-content p {
-    font-size: 14px;
-    margin-bottom: 10px;
-  }
-
-  /* Style the table for printing */
-  table {
+  .print-area {
+    position: absolute;
+    left: 0;
+    top: 0;
     width: 100%;
-    border-collapse: collapse;
-  }
-
-  th,
-  td {
-    border: 1px solid black;
-    padding: 8px;
-    text-align: left; /* Align text to the left */
-  }
-
-  /* Headers for the bill */
-  h1 {
-    text-align: center;
-    font-size: 20px;
-    margin-bottom: 20px;
-  }
-
-  /* Style for item list */
-  .item-list {
-    margin-top: 20px;
-    margin-bottom: 20px;
-  }
-
-  /* Optionally, remove background colors for cleaner print */
-  body {
-    background: white !important;
-    margin: 0; /* Remove default margin */
-  }
-
-  /* Prevent items from splitting across pages */
-  .item-list li {
-    page-break-inside: avoid; /* Prevent page break inside list items */
-  }
-
-  /* Total section at the bottom */
-  .total {
-    margin-top: 20px;
-    font-weight: bold;
-    font-size: 16px;
-  }
-
-  /* Optional: Adjust the spacing for better readability */
-  .printable-content {
-    line-height: 1.5; /* Improve readability */
-  }
-
-  /* Thermal Printer Specific Styles */
-  #thermal-print {
-    width: 58mm; /* Width specific to thermal printer */
-    font-size: 12px;
-    padding: 10px;
-  }
-
-  #thermal-print h2 {
-    font-size: 18px; /* Smaller font size for thermal printer */
-    text-align: center;
-    margin-bottom: 10px;
-  }
-
-  #thermal-print h3 {
-    font-size: 16px;
-    text-align: center;
-    margin-bottom: 5px;
-  }
-
-  #thermal-print table {
-    width: 100%;
-    border-collapse: collapse;
-    margin-top: 10px;
-  }
-
-  #thermal-print th,
-  #thermal-print td {
-    font-size: 10px;
-    border: 1px solid black;
-    padding: 5px;
-  }
-
-  #thermal-print th {
-    background-color: #f4f4f4;
-  }
-
-  #thermal-print .thank-you {
-    font-size: 12px;
-    text-align: center;
-    margin-top: 15px;
-  }
-
-  #thermal-print h4 {
-    text-align: center;
-    margin-top: 10px;
-    font-size: 14px;
   }
 }
