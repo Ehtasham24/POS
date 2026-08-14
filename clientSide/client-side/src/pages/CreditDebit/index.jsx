@@ -169,26 +169,30 @@ function LedgerTable({
   return (
     <div className="overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
       <div className="overflow-x-auto">
-        {/* No min-w here (unlike other tables in the app) — the row content is compact
-            (name, three short amounts, a single icon-button menu) and a wide floor was
-            forcing a horizontal scrollbar even on containers that already fit it. */}
-        <table className="w-full border-collapse">
+        {/* table-fixed + a min-w floor: percentage widths on an auto-layout table are only
+            a hint, so on a phone-narrow container the browser was shrinking columns below
+            what "Rs.1234.00"-style amounts actually need — text didn't wrap (nowrap) or
+            scroll, it just visually overflowed each cell into the next one. Fixed-width
+            columns sized to what the content genuinely needs, plus letting the table go
+            below its min-w via horizontal scroll (same pattern Inventory's table already
+            uses), replaces that overlap with an ordinary, legible scroll on small screens. */}
+        <table className="w-full min-w-[580px] table-fixed border-collapse">
           <thead className="bg-surface-subtle dark:bg-gray-800">
             <tr>
               <th className="w-8"></th>
-              <th className="w-[30%] text-left pr-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <th className="text-left pr-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {personLabel}
               </th>
-              <th className="w-[18%] text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <th className="w-24 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t("creditDebit.due")}
               </th>
-              <th className="w-[18%] text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <th className="w-24 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t("creditDebit.paid")}
               </th>
-              <th className="w-[18%] text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <th className="w-28 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t("creditDebit.pending")}
               </th>
-              <th className="w-20"></th>
+              <th className="w-32"></th>
             </tr>
           </thead>
           {loading ? (
@@ -222,21 +226,21 @@ function LedgerTable({
                           {isExpanded ? <HiOutlineChevronDown /> : <HiOutlineChevronRight />}
                         </button>
                       </td>
-                      <td className="pr-2 py-3 whitespace-nowrap font-medium text-gray-800 dark:text-gray-100">
+                      <td className="pr-2 py-3 truncate font-medium text-gray-800 dark:text-gray-100" title={row.name}>
                         {row.name}
                       </td>
-                      <td className="px-2 py-3 text-gray-800 dark:text-gray-100">
+                      <td className="truncate px-2 py-3 text-gray-800 dark:text-gray-100">
                         Rs.{Number(row.total_charged).toFixed(2)}
                       </td>
-                      <td className="px-2 py-3 text-gray-800 dark:text-gray-100">
+                      <td className="truncate px-2 py-3 text-gray-800 dark:text-gray-100">
                         Rs.{Number(row.total_paid).toFixed(2)}
                       </td>
                       <td className="px-2 py-3">
-                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${pendingBadge(row.balance, direction)}`}>
+                        <span className={`inline-flex max-w-full truncate rounded-full px-2.5 py-1 text-xs font-semibold ${pendingBadge(row.balance, direction)}`}>
                           Rs.{Number(row.balance).toFixed(2)}
                         </span>
                       </td>
-                      <td className="py-3 pr-5 text-right whitespace-nowrap">
+                      <td className="py-3 pr-3 text-right whitespace-nowrap">
                         <PartyActionsMenu
                           balance={row.balance}
                           otherBalance={otherBalances[row.contact_id] || 0}
@@ -365,7 +369,7 @@ export default function CreditDebitPage() {
         <div className="mt-8 flex max-w-4xl flex-col gap-8">
           {/* Payable / Debit */}
           <div>
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
                 {t("creditDebit.payableTitle")}
               </h2>
@@ -397,7 +401,7 @@ export default function CreditDebitPage() {
 
           {/* Receivable / Credit */}
           <div>
-            <div className="mb-3 flex items-center justify-between">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
               <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
                 {t("creditDebit.receivableTitle")}
               </h2>

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { useLocation } from "react-router-dom";
 import { HiOutlineShoppingCart, HiChevronDown } from "react-icons/hi2";
@@ -11,6 +11,29 @@ import CartPanel from "./CartPanel";
 // instead render the always-visible CartDock, so this component steps aside there
 // entirely to avoid a redundant duplicate cart affordance. Every other page has no such
 // alternative, so it always shows.
+
+const POSITION_STORAGE_KEY = "cartFabPosition";
+const DRAG_THRESHOLD = 8; // px of pointer movement before a press counts as a drag, not a tap
+const BUTTON_SIZE = 56; // h-14/w-14
+const EDGE_MARGIN = 8;
+
+function loadSavedPosition() {
+  try {
+    const raw = localStorage.getItem(POSITION_STORAGE_KEY);
+    const pos = raw && JSON.parse(raw);
+    if (typeof pos?.x === "number" && typeof pos?.y === "number") return pos;
+  } catch {
+    // corrupt/unavailable storage — just fall back to the default corner
+  }
+  return null;
+}
+
+function clampToViewport(x, y) {
+  const maxX = Math.max(EDGE_MARGIN, window.innerWidth - BUTTON_SIZE - EDGE_MARGIN);
+  const maxY = Math.max(EDGE_MARGIN, window.innerHeight - BUTTON_SIZE - EDGE_MARGIN);
+  return { x: Math.min(Math.max(x, EDGE_MARGIN), maxX), y: Math.min(Math.max(y, EDGE_MARGIN), maxY) };
+}
+
 function CartCheckout() {
   const [expanded, setExpanded] = useState(false);
   const cart = useSelector((state) => state.cart.carts);
@@ -19,15 +42,87 @@ function CartCheckout() {
   const isSellingPage = pathname === "/" || pathname.startsWith("/categories/");
   const { t } = useLanguage();
 
+  // Draggable on any pointer device (touch/mouse/pen) so it can be pulled out of the way
+  // when it happens to sit on top of other floating/fixed UI — e.g. Credit/Debit's legend
+  // tooltips near the bottom-right of a phone screen. null = default bottom-right corner
+  // (plain CSS, no inline position needed); once dragged, the chosen spot is remembered
+  // across pages/sessions via localStorage instead of snapping back on every navigation.
+  const [position, setPosition] = useState(loadSavedPosition);
+  const buttonRef = useRef(null);
+  const dragRef = useRef(null); // { startX, startY, originX, originY, moved }
+  const suppressClickRef = useRef(false);
+
+  // A saved position from a previous, differently-sized viewport (rotated phone, resized
+  // window) could now sit off-screen — pull it back on-screen rather than leaving the
+  // button unreachable.
+  useEffect(() => {
+    if (!position) return;
+    const clamped = clampToViewport(position.x, position.y);
+    if (clamped.x !== position.x || clamped.y !== position.y) setPosition(clamped);
+    const onResize = () => setPosition((prev) => (prev ? clampToViewport(prev.x, prev.y) : prev));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const handlePointerDown = (e) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    const rect = buttonRef.current.getBoundingClientRect();
+    dragRef.current = { startX: e.clientX, startY: e.clientY, originX: rect.left, originY: rect.top, moved: false };
+    buttonRef.current.setPointerCapture(e.pointerId);
+  };
+
+  const handlePointerMove = (e) => {
+    const drag = dragRef.current;
+    if (!drag) return;
+    const dx = e.clientX - drag.startX;
+    const dy = e.clientY - drag.startY;
+    if (!drag.moved && Math.hypot(dx, dy) > DRAG_THRESHOLD) drag.moved = true;
+    if (drag.moved) setPosition(clampToViewport(drag.originX + dx, drag.originY + dy));
+  };
+
+  const handlePointerUp = () => {
+    const drag = dragRef.current;
+    dragRef.current = null;
+    if (!drag?.moved) return;
+    suppressClickRef.current = true;
+    setPosition((prev) => {
+      if (prev) {
+        try {
+          localStorage.setItem(POSITION_STORAGE_KEY, JSON.stringify(prev));
+        } catch {
+          // storage full/unavailable — the position just won't persist, not fatal
+        }
+      }
+      return prev;
+    });
+  };
+
+  const handleClick = () => {
+    // A drag ends with a pointerup that the browser follows with a click event on the
+    // same element — without this, releasing a drag would also pop the cart panel open.
+    if (suppressClickRef.current) {
+      suppressClickRef.current = false;
+      return;
+    }
+    setExpanded(true);
+  };
+
   if (isSellingPage) return null;
 
   return (
     <>
       <button
+        ref={buttonRef}
         type="button"
-        onClick={() => setExpanded(true)}
-        aria-label="Open cart"
-        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 items-center justify-center rounded-full bg-primary-600 text-white-A700 shadow-modal transition-colors hover:bg-primary-700"
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={handlePointerUp}
+        onPointerCancel={handlePointerUp}
+        onClick={handleClick}
+        style={position ? { left: position.x, top: position.y, right: "auto", bottom: "auto" } : undefined}
+        aria-label="Open cart (drag to move)"
+        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 touch-none items-center justify-center rounded-full bg-primary-600 text-white-A700 shadow-modal transition-colors hover:bg-primary-700"
       >
         <HiOutlineShoppingCart className="text-2xl" />
         {itemCount > 0 && (
