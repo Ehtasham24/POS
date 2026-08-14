@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   HiOutlineBanknotes,
   HiOutlineExclamationTriangle,
@@ -6,7 +6,6 @@ import {
   HiOutlinePlusCircle,
   HiOutlineChevronDown,
   HiOutlineChevronRight,
-  HiOutlineEllipsisVertical,
   HiOutlineCreditCard,
 } from "react-icons/hi2";
 import AddDebitModal from "creditDebitComponents/addDebitModal";
@@ -59,61 +58,48 @@ const statCards = (t, totalProfitLoss, pendingDebitTotal, pendingCreditTotal, ne
   },
 ];
 
-// Two actions (Add Charge + Settle) as separate buttons forced the table wider than its
-// scroll container, so reaching Settle needed a horizontal scroll — collapsed into one
-// compact dropdown instead, matching pages/Inventory/index.jsx's RowActionsMenu pattern.
+// Icon-only, no dropdown — the meaning of each icon is spelled out once in the small
+// legend below both tables (LedgerLegend) rather than repeated as a text label on every
+// row, which is what was pushing the table wider than its scroll container.
 function PartyActionsMenu({ balance, onAddCharge, onSettle }) {
-  const { t } = useLanguage();
-  const [open, setOpen] = useState(false);
-  const containerRef = useRef(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleClickOutside = (e) => {
-      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, [open]);
-
   return (
-    <div className="relative inline-block" ref={containerRef}>
+    <div className="inline-flex items-center gap-1">
       <button
         type="button"
-        onClick={() => setOpen((prev) => !prev)}
-        aria-label="Row actions"
+        onClick={onAddCharge}
+        aria-label="Add charge"
         className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
       >
-        <HiOutlineEllipsisVertical className="text-lg" />
+        <HiOutlinePlusCircle className="text-lg" />
       </button>
-      {open && (
-        <div className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-xl border border-surface-border bg-white-A700 shadow-modal dark:border-gray-700 dark:bg-gray-800">
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onAddCharge();
-            }}
-            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-gray-800 transition-colors hover:bg-surface-subtle dark:text-gray-100 dark:hover:bg-gray-700"
-          >
-            <HiOutlinePlusCircle className="text-base" />
-            {t("creditDebit.addCharge")}
-          </button>
-          {Number(balance) > 0 && (
-            <button
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onSettle();
-              }}
-              className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-500/10"
-            >
-              <HiOutlineCreditCard className="text-base" />
-              {t("creditDebit.settle")}
-            </button>
-          )}
-        </div>
+      {Number(balance) > 0 && (
+        <button
+          type="button"
+          onClick={onSettle}
+          aria-label="Settle"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-primary-600 hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-500/10"
+        >
+          <HiOutlineCreditCard className="text-lg" />
+        </button>
       )}
+    </div>
+  );
+}
+
+// Explains what the icon-only row actions mean — once, instead of repeating a text label
+// on every row (which is what forced the table wider than its scroll container).
+function LedgerLegend() {
+  const { t } = useLanguage();
+  return (
+    <div className="mt-3 flex flex-wrap items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
+      <span className="flex items-center gap-1.5">
+        <HiOutlinePlusCircle className="text-sm" />
+        {t("creditDebit.addCharge")}
+      </span>
+      <span className="flex items-center gap-1.5">
+        <HiOutlineCreditCard className="text-sm text-primary-600 dark:text-primary-400" />
+        {t("creditDebit.settle")}
+      </span>
     </div>
   );
 }
@@ -158,7 +144,7 @@ function LedgerTable({
               <th className="w-[18%] text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t("creditDebit.pending")}
               </th>
-              <th className="w-12"></th>
+              <th className="w-20"></th>
             </tr>
           </thead>
           {loading ? (
@@ -392,6 +378,8 @@ export default function CreditDebitPage() {
               onDeleteTransaction={setDeleteTx}
             />
           </div>
+
+          <LedgerLegend />
         </div>
       </AppShell>
 
