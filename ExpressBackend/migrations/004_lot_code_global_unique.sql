@@ -1,0 +1,12 @@
+-- lot_code is looked up globally (scan-to-sell search, getLotByCode) with no product_id
+-- to disambiguate — it must be unique across ALL products, not just per-product. The old
+-- UNIQUE(product_id, lot_code) constraint from 002_contacts_batch_lots.sql allowed two
+-- different products to end up with the identical lot_code, which happened in practice
+-- (two products both generated "MAAZ-TST-001"). The app-level fix (lotService.js's
+-- generateLotCode now checks for a global collision before returning a code) prevents new
+-- ones; this constraint is the DB-level backstop against races/regressions.
+--
+-- Run once against the live DB after de-duplicating any existing collisions (see the
+-- one-off fix applied alongside this migration — no rows should violate this by the time
+-- it runs).
+ALTER TABLE lots ADD CONSTRAINT lots_lot_code_key UNIQUE (lot_code);

@@ -42,6 +42,17 @@ const nextLotSerial = async (vendorId, productId) => {
 };
 
 // Vendor + product coded, e.g. vendor "Aslam", product "Slippers" -> "ASLAM-SLP-001".
+//
+// generatePrefix only looks at a product name's first 3 consonants, so two differently
+// named products that merely *start* the same way (e.g. "test product" and "test category
+// product") collapse to the same 3-letter prefix. Combined with each (vendor, product)
+// pair keeping its own independent serial counter starting at 1, that means two entirely
+// different products could each land on the exact same code, e.g. both "MAAZ-TST-001" —
+// which actually happened. lot_code must be globally unique (it's looked up on its own in
+// getLotByCode, with no product_id to disambiguate — scan-to-sell would resolve to the
+// wrong product), so after building a candidate, re-check it against every lot, not just
+// this product's own, and keep advancing this pair's serial until the code is actually
+// free.
 const generateLotCode = async (vendorId, productId) => {
   const [{ rows: vendorRows }, { rows: productRows }] = await Promise.all([
     pool.query(`SELECT name FROM contacts WHERE id = $1`, [vendorId]),
@@ -50,10 +61,19 @@ const generateLotCode = async (vendorId, productId) => {
   if (!vendorRows[0]) throw new Error("Vendor not found");
   if (!productRows[0]) throw new Error("Product not found");
 
-  const serial = await nextLotSerial(vendorId, productId);
-  return `${vendorPrefix(vendorRows[0].name)}-${generatePrefix(productRows[0].productname)}-${String(
-    serial
-  ).padStart(3, "0")}`;
+  const vPrefix = vendorPrefix(vendorRows[0].name);
+  const pPrefix = generatePrefix(productRows[0].productname);
+
+  const MAX_ATTEMPTS = 50;
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    const serial = await nextLotSerial(vendorId, productId);
+    const candidate = `${vPrefix}-${pPrefix}-${String(serial).padStart(3, "0")}`;
+    const { rows: existing } = await pool.query(`SELECT 1 FROM lots WHERE lot_code = $1`, [candidate]);
+    if (existing.length === 0) return candidate;
+    // Taken by some other product — loop and pull the next serial for this (vendor,
+    // product) pair instead.
+  }
+  throw new Error("Could not generate a unique lot code — too many collisions");
 };
 
 // Creates the first (or an additional) lot for a product from a vendor and syncs the
