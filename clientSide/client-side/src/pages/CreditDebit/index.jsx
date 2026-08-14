@@ -15,7 +15,7 @@ import EditTransactionModal from "creditDebitComponents/editTransactionModal";
 import NetOffModal from "creditDebitComponents/netOffModal";
 import PartyHistoryRow from "creditDebitComponents/PartyHistoryRow";
 import AppShell from "components/AppShell";
-import { Modal, SkeletonRows, EmptyState } from "components";
+import { Modal, SkeletonRows, EmptyState, InfoTooltip } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiGet, apiDelete } from "utils/api";
@@ -42,6 +42,7 @@ const statCards = (t, pendingDebitTotal, pendingCreditTotal) => {
   return [
     {
       label: t("creditDebit.pendingPayables"),
+      info: t("creditDebit.pendingPayablesInfo"),
       value: `Rs.${pendingDebitTotal.toFixed(2)}`,
       icon: HiOutlineExclamationTriangle,
       tint: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
@@ -49,6 +50,7 @@ const statCards = (t, pendingDebitTotal, pendingCreditTotal) => {
     },
     {
       label: t("creditDebit.pendingReceivables"),
+      info: t("creditDebit.pendingReceivablesInfo"),
       value: `Rs.${pendingCreditTotal.toFixed(2)}`,
       icon: HiOutlineBanknotes,
       tint: "bg-primary-50 text-primary-600 dark:bg-gray-700 dark:text-primary-400",
@@ -58,6 +60,7 @@ const statCards = (t, pendingDebitTotal, pendingCreditTotal) => {
       // Receivables minus payables — if every party settled up today, would you net
       // receive or net pay.
       label: t("creditDebit.netPosition"),
+      info: t("creditDebit.netPositionInfo"),
       value: `Rs.${netPosition.toFixed(2)}`,
       icon: HiOutlineArrowsRightLeft,
       tint:
@@ -69,6 +72,7 @@ const statCards = (t, pendingDebitTotal, pendingCreditTotal) => {
     {
       // Payables + receivables combined — total size of the ledger currently in flux.
       label: t("creditDebit.totalOutstanding"),
+      info: t("creditDebit.totalOutstandingInfo"),
       value: `Rs.${totalOutstanding.toFixed(2)}`,
       icon: HiOutlineCreditCard,
       tint: "bg-surface-muted text-gray-600 dark:bg-gray-700 dark:text-gray-300",
@@ -126,14 +130,17 @@ function LedgerLegend() {
       <span className="flex items-center gap-1.5">
         <HiOutlinePlusCircle className="text-sm" />
         {t("creditDebit.addCharge")}
+        <InfoTooltip text={t("creditDebit.addChargeInfo")} />
       </span>
       <span className="flex items-center gap-1.5">
         <HiOutlineCreditCard className="text-sm text-primary-600 dark:text-primary-400" />
         {t("creditDebit.settle")}
+        <InfoTooltip text={t("creditDebit.settleInfo")} />
       </span>
       <span className="flex items-center gap-1.5">
         <HiOutlineArrowsRightLeft className="text-sm text-amber-600 dark:text-amber-400" />
         {t("creditDebit.netOff")}
+        <InfoTooltip text={t("creditDebit.netOffInfo")} />
       </span>
     </div>
   );
@@ -345,7 +352,10 @@ export default function CreditDebitPage() {
                 <card.icon className="text-xl" />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="truncate text-sm text-gray-500 dark:text-gray-400">{card.label}</p>
+                <div className="flex min-w-0 items-center gap-1">
+                  <p className="truncate text-sm text-gray-500 dark:text-gray-400">{card.label}</p>
+                  <InfoTooltip text={card.info} />
+                </div>
                 <p className={`truncate font-poppins text-xl font-bold ${card.valueClass}`}>{card.value}</p>
               </div>
             </div>

@@ -114,9 +114,15 @@ const translations = {
     creditDebit: {
       title: "Credit / Debit",
       pendingPayables: "Pending Payables",
+      pendingPayablesInfo: "Total amount you currently owe, combined across all suppliers.",
       pendingReceivables: "Pending Receivables",
+      pendingReceivablesInfo: "Total amount currently owed to you, combined across all customers.",
       netPosition: "Net Position",
+      netPositionInfo:
+        "Receivables minus payables. If everyone settled up today, this is what you'd net receive (positive) or net pay (negative).",
       totalOutstanding: "Total Outstanding",
+      totalOutstandingInfo:
+        "Payables plus receivables — the total amount currently outstanding across your whole ledger.",
       payableTitle: "Payable — You owe suppliers",
       receivableTitle: "Receivable — Customers owe you",
       addPayable: "Add Payable",
@@ -159,6 +165,11 @@ const translations = {
       entryUpdated: "Entry updated!",
       entryDeleted: "Entry deleted!",
       confirmDeleteEntry: "Delete this entry? This can't be undone.",
+      addChargeInfo:
+        "Records new money owed — you owe a supplier more (Payable), or a customer owes you more (Receivable).",
+      settleInfo: "Records a payment — full or partial — that reduces what's owed on this side.",
+      netOffInfo:
+        "For a party who both owes you and is owed by you — books this amount as settled on both sides at once, without moving actual cash.",
     },
     inventory: {
       title: "Inventory",
@@ -332,9 +343,14 @@ const translations = {
     creditDebit: {
       title: "کریڈٹ / ڈیبٹ",
       pendingPayables: "زیر التواء قابل ادا",
+      pendingPayablesInfo: "وہ کل رقم جو آپ نے فی الحال تمام سپلائرز کو ملا کر ادا کرنی ہے۔",
       pendingReceivables: "زیر التواء قابل وصول",
+      pendingReceivablesInfo: "وہ کل رقم جو تمام کسٹمرز پر فی الحال آپ کی واجب الادا ہے۔",
       netPosition: "خالص پوزیشن",
+      netPositionInfo:
+        "قابل وصول مائنس قابل ادا۔ اگر آج سب کا حساب برابر ہو جائے تو یہ بتاتا ہے کہ آپ کو خالص کتنا ملے گا (مثبت) یا دینا ہوگا (منفی)۔",
       totalOutstanding: "کل زیر التواء رقم",
+      totalOutstandingInfo: "قابل ادا جمع قابل وصول — آپ کے پورے لیجر میں فی الحال کل زیر التواء رقم۔",
       payableTitle: "قابل ادا — آپ سپلائرز کے مقروض ہیں",
       receivableTitle: "قابل وصول — کسٹمرز آپ کے مقروض ہیں",
       addPayable: "قابل ادا شامل کریں",
@@ -377,6 +393,11 @@ const translations = {
       entryUpdated: "اندراج اپڈیٹ ہو گیا!",
       entryDeleted: "اندراج حذف ہو گیا!",
       confirmDeleteEntry: "یہ اندراج حذف کریں؟ یہ واپس نہیں ہو سکتا۔",
+      addChargeInfo:
+        "نئی واجب الادا رقم درج کرتا ہے — یا تو آپ نے سپلائر کو مزید دینا ہے (قابل ادا)، یا کسٹمر نے آپ کو مزید دینا ہے (قابل وصول)۔",
+      settleInfo: "ادائیگی درج کرتا ہے — مکمل یا جزوی — جو اس طرف واجب الادا رقم کم کر دیتی ہے۔",
+      netOffInfo:
+        "ایسے فریق کے لیے جس پر آپ کا حق بھی ہے اور جس کا آپ پر حق بھی ہے — یہ رقم دونوں طرف ادا شدہ کے طور پر درج کر دیتا ہے، بغیر اصل نقدی کی منتقلی کے۔",
     },
     inventory: {
       title: "انوینٹری",

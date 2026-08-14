@@ -4,4 +4,5 @@ import { Modal } from "./Modal";
 import EmptyState from "./EmptyState";
 import { Skeleton, SkeletonCards, SkeletonRows } from "./Skeleton";
 import Pagination from "./Pagination";
-export { Text, Heading, Modal, EmptyState, Skeleton, SkeletonCards, SkeletonRows, Pagination };
+import InfoTooltip from "./InfoTooltip";
+export { Text, Heading, Modal, EmptyState, Skeleton, SkeletonCards, SkeletonRows, Pagination, InfoTooltip };
