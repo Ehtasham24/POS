@@ -2,7 +2,6 @@ import React, { useEffect, useState } from "react";
 import {
   HiOutlineBanknotes,
   HiOutlineExclamationTriangle,
-  HiOutlineArrowTrendingUp,
   HiOutlinePlusCircle,
   HiOutlineChevronDown,
   HiOutlineChevronRight,
@@ -19,46 +18,64 @@ import AppShell from "components/AppShell";
 import { Modal, SkeletonRows, EmptyState } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
-import { apiGet, apiPost, apiDelete } from "utils/api";
+import { apiGet, apiDelete } from "utils/api";
 
-const pendingBadge = (amount) =>
-  Number(amount) > 0
+// Payable and receivable both used the same red-when-pending color, which made a party
+// showing up in both tables (see Net Off) look identically "bad" in either — red only
+// means "you owe" (payable); a receivable pending balance is neutral/positive for you, so
+// it gets the same blue used for "Pending Receivables" in the stat cards above.
+const pendingBadge = (amount, direction) => {
+  if (Number(amount) <= 0) {
+    return "bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-500";
+  }
+  return direction === "payable"
     ? "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-400"
-    : "bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-500";
+    : "bg-primary-50 text-primary-600 dark:bg-gray-700 dark:text-primary-400";
+};
 
-const statCards = (t, totalProfitLoss, pendingDebitTotal, pendingCreditTotal, netEarnings) => [
-  {
-    label: t("creditDebit.totalProfit"),
-    value: `Rs.${Number(totalProfitLoss).toFixed(2)}`,
-    icon: HiOutlineArrowTrendingUp,
-    tint: "bg-primary-50 text-primary-600 dark:bg-gray-700 dark:text-primary-400",
-    valueClass: "text-gray-800 dark:text-gray-100",
-  },
-  {
-    label: t("creditDebit.pendingPayables"),
-    value: `Rs.${pendingDebitTotal.toFixed(2)}`,
-    icon: HiOutlineExclamationTriangle,
-    tint: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
-    valueClass: "text-danger-600",
-  },
-  {
-    label: t("creditDebit.pendingReceivables"),
-    value: `Rs.${pendingCreditTotal.toFixed(2)}`,
-    icon: HiOutlineBanknotes,
-    tint: "bg-primary-50 text-primary-600 dark:bg-gray-700 dark:text-primary-400",
-    valueClass: "text-primary-600 dark:text-primary-400",
-  },
-  {
-    label: t("creditDebit.netEarnings"),
-    value: `Rs.${netEarnings.toFixed(2)}`,
-    icon: HiOutlineBanknotes,
-    tint:
-      netEarnings >= 0
-        ? "bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-500"
-        : "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-400",
-    valueClass: netEarnings >= 0 ? "text-success-600" : "text-danger-600",
-  },
-];
+// Deliberately ledger-only metrics — this page used to also show overall sales profit
+// ("Total Profit"/"Net Earnings"), which doesn't belong here: it's not a credit/debit
+// number, and it already duplicates what the Sales Report page shows.
+const statCards = (t, pendingDebitTotal, pendingCreditTotal) => {
+  const netPosition = pendingCreditTotal - pendingDebitTotal;
+  const totalOutstanding = pendingDebitTotal + pendingCreditTotal;
+  return [
+    {
+      label: t("creditDebit.pendingPayables"),
+      value: `Rs.${pendingDebitTotal.toFixed(2)}`,
+      icon: HiOutlineExclamationTriangle,
+      tint: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
+      valueClass: "text-danger-600",
+    },
+    {
+      label: t("creditDebit.pendingReceivables"),
+      value: `Rs.${pendingCreditTotal.toFixed(2)}`,
+      icon: HiOutlineBanknotes,
+      tint: "bg-primary-50 text-primary-600 dark:bg-gray-700 dark:text-primary-400",
+      valueClass: "text-primary-600 dark:text-primary-400",
+    },
+    {
+      // Receivables minus payables — if every party settled up today, would you net
+      // receive or net pay.
+      label: t("creditDebit.netPosition"),
+      value: `Rs.${netPosition.toFixed(2)}`,
+      icon: HiOutlineArrowsRightLeft,
+      tint:
+        netPosition >= 0
+          ? "bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-500"
+          : "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-400",
+      valueClass: netPosition >= 0 ? "text-success-600" : "text-danger-600",
+    },
+    {
+      // Payables + receivables combined — total size of the ledger currently in flux.
+      label: t("creditDebit.totalOutstanding"),
+      value: `Rs.${totalOutstanding.toFixed(2)}`,
+      icon: HiOutlineCreditCard,
+      tint: "bg-surface-muted text-gray-600 dark:bg-gray-700 dark:text-gray-300",
+      valueClass: "text-gray-800 dark:text-gray-100",
+    },
+  ];
+};
 
 // Icon-only, no dropdown — the meaning of each icon is spelled out once in the small
 // legend below both tables (LedgerLegend) rather than repeated as a text label on every
@@ -208,7 +225,7 @@ function LedgerTable({
                         Rs.{Number(row.total_paid).toFixed(2)}
                       </td>
                       <td className="px-2 py-3">
-                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${pendingBadge(row.balance)}`}>
+                        <span className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${pendingBadge(row.balance, direction)}`}>
                           Rs.{Number(row.balance).toFixed(2)}
                         </span>
                       </td>
@@ -250,7 +267,6 @@ export default function CreditDebitPage() {
   const [payableParties, setPayableParties] = useState([]);
   const [receivableParties, setReceivableParties] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [totalProfitLoss, setTotalProfitLoss] = useState(0);
   const [showAddDebit, setShowAddDebit] = useState(false);
   const [showAddCredit, setShowAddCredit] = useState(false);
   const [settleTarget, setSettleTarget] = useState(null); // { entry, type }
@@ -282,22 +298,8 @@ export default function CreditDebitPage() {
     }
   };
 
-  const fetchEarnings = async () => {
-    try {
-      const data = await apiPost("/api/Sales", {
-        startDate: "2000-01-01T00:00",
-        endDate: new Date().toISOString().slice(0, 16),
-      });
-      setTotalProfitLoss(data.totalProfitLoss || 0);
-    } catch (error) {
-      console.error("Error fetching earnings:", error);
-      toast.error("Couldn't load earnings totals — check your connection and try again.");
-    }
-  };
-
   const refreshAll = () => {
     fetchLedger();
-    fetchEarnings();
     setHistoryRefreshKey((k) => k + 1);
   };
 
@@ -308,8 +310,6 @@ export default function CreditDebitPage() {
 
   const pendingDebitTotal = payableParties.reduce((sum, p) => sum + Number(p.balance), 0);
   const pendingCreditTotal = receivableParties.reduce((sum, p) => sum + Number(p.balance), 0);
-  // Profit realized so far, minus what we still owe suppliers, plus what customers still owe us.
-  const netEarnings = totalProfitLoss - pendingDebitTotal + pendingCreditTotal;
 
   // contact_id -> balance lookups so each table can tell whether a given party also has a
   // balance on the *other* side (needed to show/hide the Net Off action).
@@ -336,7 +336,7 @@ export default function CreditDebitPage() {
     <>
       <AppShell title={t("creditDebit.title")}>
         <div className="grid grid-cols-2 gap-4 sm:grid-cols-1 max-w-4xl">
-          {statCards(t, totalProfitLoss, pendingDebitTotal, pendingCreditTotal, netEarnings).map((card) => (
+          {statCards(t, pendingDebitTotal, pendingCreditTotal).map((card) => (
             <div
               key={card.label}
               className="flex items-center gap-4 rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800"
