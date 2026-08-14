@@ -40,6 +40,17 @@ const PIE_COLORS = ["#4f46e5", "#0ea5e9", "#16a34a", "#f59e0b", "#e11d48", "#8b5
 const formatDay = (iso) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
+// SVG, not a CSS background-color swatch — browsers only print background colors when
+// "print background graphics" is on (often off by default), so a plain
+// <span style={{backgroundColor}}/> silently vanishes in a printed/PDF report while the
+// chart's own SVG-filled shapes (and recharts' built-in <Legend>, which is also SVG) print
+// fine. This is what was making the pie/bar legends unreadable on paper.
+const ColorDot = ({ color }) => (
+  <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0">
+    <circle cx="5" cy="5" r="5" fill={color} />
+  </svg>
+);
+
 const ChartCard = ({ title, children }) => (
   <div className="rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-800 dark:bg-gray-900">
     <h3 className="mb-4 font-poppins text-base font-bold text-gray-800 dark:text-gray-100">
@@ -125,6 +136,16 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
+            <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
+              <span className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                <ColorDot color="#16a34a" />
+                Profit
+              </span>
+              <span className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
+                <ColorDot color="#dc2626" />
+                Loss
+              </span>
+            </div>
           </ChartCard>
         )}
 
@@ -152,10 +173,7 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
             <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
               {categoryShare.map((entry, index) => (
                 <span key={entry.name} className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-                  <span
-                    className="h-2.5 w-2.5 rounded-full"
-                    style={{ backgroundColor: PIE_COLORS[index % PIE_COLORS.length] }}
-                  />
+                  <ColorDot color={PIE_COLORS[index % PIE_COLORS.length]} />
                   {entry.name}
                 </span>
               ))}
