@@ -10,10 +10,12 @@ import {
   HiOutlineEllipsisVertical,
   HiOutlinePencil,
   HiOutlineTrash,
+  HiOutlineArchiveBoxArrowDown,
 } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { Modal, Skeleton, SkeletonRows, EmptyState } from "components";
 import EditProductModal from "categoriesComponents/editProductModal";
+import UpdateProductModal from "categoriesComponents/updateProductModal";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiGet, apiDelete } from "utils/api";
@@ -31,7 +33,7 @@ const statusLabelKeys = {
   out_of_stock: "inventory.outOfStock",
 };
 
-function RowActionsMenu({ onEdit, onDelete }) {
+function RowActionsMenu({ onEdit, onUpdate, onDelete }) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
@@ -67,6 +69,17 @@ function RowActionsMenu({ onEdit, onDelete }) {
           >
             <HiOutlinePencil className="text-base" />
             {t("common.edit")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onUpdate();
+            }}
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-gray-800 transition-colors hover:bg-surface-subtle dark:text-gray-100 dark:hover:bg-gray-700"
+          >
+            <HiOutlineArchiveBoxArrowDown className="text-base" />
+            {t("pos.update")}
           </button>
           <button
             type="button"
@@ -185,6 +198,7 @@ export default function InventoryPage() {
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState(null);
   const [editItem, setEditItem] = useState(null);
+  const [updateItem, setUpdateItem] = useState(null);
   const [deleteItem, setDeleteItem] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -424,6 +438,7 @@ export default function InventoryPage() {
                       <td className="px-2 py-3 pr-3">
                         <RowActionsMenu
                           onEdit={() => setEditItem(item)}
+                          onUpdate={() => setUpdateItem(item)}
                           onDelete={() => setDeleteItem(item)}
                         />
                       </td>
@@ -446,6 +461,22 @@ export default function InventoryPage() {
         setEditItem(null);
         fetchInventory();
       }}
+    />
+
+    <UpdateProductModal
+      isOpen={!!updateItem}
+      onClose={() => setUpdateItem(null)}
+      initialProduct={
+        updateItem && {
+          product_id: updateItem.id,
+          productname: updateItem.productname,
+          category_id: updateItem.category_id,
+          batch_tracked: updateItem.batch_tracked,
+          buyingprice: updateItem.buyingprice,
+          quantity: updateItem.quantity,
+        }
+      }
+      onChanged={fetchInventory}
     />
 
     <Modal isOpen={!!deleteItem} onClose={() => setDeleteItem(null)} title={t("common.delete")}>

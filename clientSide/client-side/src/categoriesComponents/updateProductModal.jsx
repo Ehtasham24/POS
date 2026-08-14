@@ -10,12 +10,17 @@ const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
 const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gray-100";
 
-const UpdateProductModal = ({ isOpen, onClose }) => {
+// `initialProduct` (shape: {product_id, productname, category_id, batch_tracked,
+// buyingprice, quantity}) skips the search step — used when opened for a specific,
+// already-known product (e.g. Inventory's row menu) instead of the general "find any
+// product" entry point (Categories toolbar's Update button).
+const UpdateProductModal = ({ isOpen, onClose, initialProduct, onChanged }) => {
   const toast = useToast();
 
   // --- Searchable product picker ---
   const [query, setQuery] = useState("");
   const debouncedQuery = useDebounce(query, 250);
+  const [categoryFilter, setCategoryFilter] = useState(""); // "" = all categories
   const [results, setResults] = useState([]);
   const [selectedProduct, setSelectedProduct] = useState(null); // {product_id, productname, category_id, batch_tracked, buyingprice, quantity}
 
@@ -40,29 +45,56 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
       .catch((err) => console.error("Error fetching vendors:", err));
   }, [isOpen]);
 
+  // Search narrows by category when one's picked (matches by name/lot code, then keeps
+  // only that category's hits); with no query at all, picking a category browses that
+  // category's full product list instead of requiring the user to type something first.
   useEffect(() => {
     const trimmed = debouncedQuery.trim();
-    if (!trimmed) {
-      setResults([]);
-      return;
-    }
     let cancelled = false;
-    apiGet(`/api/search?q=${encodeURIComponent(trimmed)}`)
-      .then((data) => {
-        if (cancelled) return;
-        const seen = new Set();
-        const unique = data.filter((r) => {
-          if (seen.has(r.product_id)) return false;
-          seen.add(r.product_id);
-          return true;
-        });
-        setResults(unique);
-      })
-      .catch((err) => console.error("Error searching:", err));
+
+    const dedupeByProduct = (rows) => {
+      const seen = new Set();
+      return rows.filter((r) => {
+        if (seen.has(r.product_id)) return false;
+        seen.add(r.product_id);
+        return true;
+      });
+    };
+
+    if (trimmed) {
+      apiGet(`/api/search?q=${encodeURIComponent(trimmed)}`)
+        .then((data) => {
+          if (cancelled) return;
+          const filtered = categoryFilter
+            ? data.filter((r) => String(r.category_id) === categoryFilter)
+            : data;
+          setResults(dedupeByProduct(filtered));
+        })
+        .catch((err) => console.error("Error searching:", err));
+    } else if (categoryFilter) {
+      apiGet(`/categories/${categoryFilter}`)
+        .then((data) => {
+          if (cancelled) return;
+          setResults(
+            data.map((p) => ({
+              product_id: p.id,
+              productname: p.productname,
+              category_id: p.category_id,
+              batch_tracked: p.batch_tracked,
+              buyingprice: p.buyingprice,
+              quantity: p.quantity,
+            }))
+          );
+        })
+        .catch((err) => console.error("Error fetching category products:", err));
+    } else {
+      setResults([]);
+    }
+
     return () => {
       cancelled = true;
     };
-  }, [debouncedQuery]);
+  }, [debouncedQuery, categoryFilter]);
 
   const fetchLots = async (productId) => {
     try {
@@ -89,6 +121,11 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
     if (result.batch_tracked) fetchLots(result.product_id);
   };
 
+  useEffect(() => {
+    if (isOpen && initialProduct) handleSelectProduct(initialProduct);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, initialProduct]);
+
   const handleChange = (e) => {
     const { name, value } = e.target;
     setFormData((prev) => ({ ...prev, [name]: value }));
@@ -104,6 +141,7 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
         Category_id: formData.category_id,
       });
       toast.success("Product updated successfully!");
+      onChanged?.();
       onClose();
     } catch (error) {
       toast.error(error.message);
@@ -118,6 +156,7 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
       setNewLot({ vendor_id: "", buying_price: "", quantity: "" });
       setShowNewLotForm(false);
       fetchLots(selectedProduct.product_id);
+      onChanged?.();
     } catch (error) {
       toast.error(error.message);
     }
@@ -130,6 +169,7 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
       toast.success("Stock added to lot!");
       setAddStockQty("");
       fetchLots(selectedProduct.product_id);
+      onChanged?.();
     } catch (error) {
       toast.error(error.message);
     }
@@ -138,6 +178,7 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
   const handleClose = () => {
     setSelectedProduct(null);
     setQuery("");
+    setCategoryFilter("");
     setResults([]);
     onClose();
   };
@@ -160,6 +201,21 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
             />
             <HiOutlineMagnifyingGlass className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-gray-400" />
           </div>
+
+          {/* Narrows search to one category, or — with the search box left empty —
+              browses that category's full product list on its own. */}
+          <select
+            value={categoryFilter}
+            onChange={(e) => setCategoryFilter(e.target.value)}
+            className={inputClass}
+          >
+            <option value="">All categories</option>
+            {categories.map((category) => (
+              <option key={category.id} value={String(category.id)}>
+                {category.category_name}
+              </option>
+            ))}
+          </select>
           {results.length > 0 && (
             <ul className="mt-2 max-h-64 overflow-y-auto rounded-lg border border-surface-border dark:border-gray-700">
               {results.map((result) => (
