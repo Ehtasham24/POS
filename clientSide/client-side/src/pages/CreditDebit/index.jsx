@@ -139,23 +139,26 @@ function LedgerTable({
   return (
     <div className="overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[560px] border-collapse">
+        {/* No min-w here (unlike other tables in the app) — the row content is compact
+            (name, three short amounts, a single icon-button menu) and a wide floor was
+            forcing a horizontal scrollbar even on containers that already fit it. */}
+        <table className="w-full border-collapse">
           <thead className="bg-surface-subtle dark:bg-gray-800">
             <tr>
               <th className="w-8"></th>
-              <th className="text-left pr-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <th className="w-[30%] text-left pr-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {personLabel}
               </th>
-              <th className="text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <th className="w-[18%] text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t("creditDebit.due")}
               </th>
-              <th className="text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <th className="w-[18%] text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t("creditDebit.paid")}
               </th>
-              <th className="text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+              <th className="w-[18%] text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                 {t("creditDebit.pending")}
               </th>
-              <th></th>
+              <th className="w-12"></th>
             </tr>
           </thead>
           {loading ? (
