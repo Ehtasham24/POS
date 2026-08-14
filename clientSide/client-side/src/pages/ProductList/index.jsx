@@ -8,10 +8,12 @@ import {
   HiOutlineCube,
   HiOutlineShoppingCart,
   HiOutlineQrCode,
+  HiOutlinePlusCircle,
 } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { SkeletonRows, EmptyState } from "components";
 import CartDock from "categoriesComponents/CartDock";
+import AddProductModal from "categoriesComponents/addProductModel";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiGet } from "utils/api";
@@ -28,6 +30,7 @@ export default function ProductListPage() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [sellingPrice, setSellingPrice] = useState("");
   const [sellQuantity, setSellQuantity] = useState("1");
+  const [isAddProductOpen, setIsAddProductOpen] = useState(false);
 
   // Lot picker for batch-tracked products
   const [lotPickProduct, setLotPickProduct] = useState(null);
@@ -147,15 +150,25 @@ export default function ProductListPage() {
       <AppShell
         title={t("productList.title")}
         actions={
-          <div className="relative w-72 max-w-full">
-            <input
-              type="text"
-              value={searchValue}
-              onChange={handleSearchInputChange}
-              placeholder={t("productList.filterPlaceholder")}
-              className="h-10 w-full rounded-xl border border-surface-border bg-surface-subtle pl-4 pr-10 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
-            />
-            <HiOutlineMagnifyingGlass className="pointer-events-none absolute inset-y-0 right-3 my-auto text-lg text-gray-500 dark:text-gray-400" />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-72 max-w-full">
+              <input
+                type="text"
+                value={searchValue}
+                onChange={handleSearchInputChange}
+                placeholder={t("productList.filterPlaceholder")}
+                className="h-10 w-full rounded-xl border border-surface-border bg-surface-subtle pl-4 pr-10 text-sm focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100"
+              />
+              <HiOutlineMagnifyingGlass className="pointer-events-none absolute inset-y-0 right-3 my-auto text-lg text-gray-500 dark:text-gray-400" />
+            </div>
+            <button
+              type="button"
+              onClick={() => setIsAddProductOpen(true)}
+              className="inline-flex h-10 items-center gap-2 rounded-xl bg-primary-600 px-4 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700"
+            >
+              <HiOutlinePlusCircle className="text-lg" />
+              {t("pos.addProduct")}
+            </button>
           </div>
         }
       >
@@ -259,6 +272,13 @@ export default function ProductListPage() {
       </AppShell>
 
       <CartDock />
+
+      <AddProductModal
+        isOpen={isAddProductOpen}
+        onClose={() => setIsAddProductOpen(false)}
+        defaultCategoryId={prodNum}
+        onAdded={fetchProducts}
+      />
 
       {/* Lot picker (batch-tracked products) */}
       <Modal

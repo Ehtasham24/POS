@@ -16,12 +16,21 @@ const initialFormData = {
   vendor_id: "",
 };
 
-const AddProductModal = ({ isOpen, onClose }) => {
+const AddProductModal = ({ isOpen, onClose, defaultCategoryId, onAdded }) => {
   const toast = useToast();
   const [formData, setFormData] = useState(initialFormData);
   const [categories, setCategories] = useState([]);
   const [vendors, setVendors] = useState([]);
   const [batchTracked, setBatchTracked] = useState(false);
+
+  // Opened from inside a category (Product List page) — start with that category already
+  // selected instead of making the user pick it again.
+  useEffect(() => {
+    if (isOpen && defaultCategoryId) {
+      setFormData((prev) => ({ ...prev, category_id: String(defaultCategoryId) }));
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, defaultCategoryId]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -73,6 +82,7 @@ const AddProductModal = ({ isOpen, onClose }) => {
       }
       setFormData(initialFormData);
       setBatchTracked(false);
+      onAdded?.();
       onClose();
     } catch (error) {
       toast.error(error.message);
