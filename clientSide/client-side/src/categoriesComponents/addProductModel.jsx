@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Link } from "react-router-dom";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
+import PriceEntryField from "./PriceEntryField";
 import { apiGet, apiPost } from "utils/api";
 
 const inputClass =
@@ -156,24 +157,6 @@ const AddProductModal = ({ isOpen, onClose, defaultCategoryId, onAdded }) => {
         )}
 
         <div>
-          <label htmlFor="buying_price" className={labelClass}>
-            Buying Price
-          </label>
-          <input
-            type="number"
-            name="buying_price"
-            id="buying_price"
-            value={formData.buying_price}
-            placeholder="Enter buying price"
-            onChange={handleChange}
-            className={inputClass}
-            min="0"
-            step="0.01"
-            required
-          />
-        </div>
-
-        <div>
           <label htmlFor="quantity" className={labelClass}>
             Quantity
           </label>
@@ -190,6 +173,16 @@ const AddProductModal = ({ isOpen, onClose, defaultCategoryId, onAdded }) => {
             required
           />
         </div>
+
+        <PriceEntryField
+          idPrefix="add_product"
+          quantity={formData.quantity}
+          price={formData.buying_price}
+          onPriceChange={(value) => setFormData((prev) => ({ ...prev, buying_price: value }))}
+          inputClassName={inputClass}
+          labelClassName={labelClass}
+        />
+
         <div>
           <label htmlFor="category_id" className={labelClass}>
             Category
@@ -215,7 +208,8 @@ const AddProductModal = ({ isOpen, onClose, defaultCategoryId, onAdded }) => {
 
         <button
           type="submit"
-          className="w-full text-white-A700 bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:outline-none focus:ring-primary-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center transition-colors"
+          disabled={!formData.buying_price}
+          className="w-full text-white-A700 bg-primary-600 hover:bg-primary-700 focus:ring-4 focus:outline-none focus:ring-primary-300 font-medium rounded-lg text-sm px-5 py-2.5 text-center transition-colors disabled:cursor-not-allowed disabled:opacity-50"
         >
           Submit
         </button>

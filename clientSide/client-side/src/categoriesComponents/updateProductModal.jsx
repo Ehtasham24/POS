@@ -3,6 +3,7 @@ import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import useDebounce from "hooks/useDebounce";
 import { HiOutlineMagnifyingGlass, HiOutlineCube, HiOutlinePlusCircle } from "react-icons/hi2";
+import PriceEntryField from "./PriceEntryField";
 import { apiGet, apiPut, apiPost, apiPatch } from "utils/api";
 
 const inputClass =
@@ -380,16 +381,6 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
                   </select>
                   <input
                     type="number"
-                    value={newLot.buying_price}
-                    onChange={(e) => setNewLot((prev) => ({ ...prev, buying_price: e.target.value }))}
-                    placeholder="Buying price"
-                    className={inputClass}
-                    min="0"
-                    step="0.01"
-                    required
-                  />
-                  <input
-                    type="number"
                     value={newLot.quantity}
                     onChange={(e) => setNewLot((prev) => ({ ...prev, quantity: e.target.value }))}
                     placeholder="Quantity"
@@ -398,6 +389,17 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
                     step="1"
                     required
                   />
+                  <div className="mt-3">
+                    <PriceEntryField
+                      idPrefix="new_lot"
+                      quantity={newLot.quantity}
+                      price={newLot.buying_price}
+                      onPriceChange={(value) => setNewLot((prev) => ({ ...prev, buying_price: value }))}
+                      label="Buying price"
+                      inputClassName={inputClass}
+                      labelClassName={labelClass}
+                    />
+                  </div>
                   <div className="mt-2 flex gap-2">
                     <button
                       type="button"
@@ -408,7 +410,8 @@ const UpdateProductModal = ({ isOpen, onClose }) => {
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 rounded-lg bg-primary-600 py-2 text-sm font-medium text-white-A700 hover:bg-primary-700"
+                      disabled={!newLot.buying_price}
+                      className="flex-1 rounded-lg bg-primary-600 py-2 text-sm font-medium text-white-A700 hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
                     >
                       Create Lot
                     </button>
