@@ -7,11 +7,13 @@ import {
   HiOutlineChevronDown,
   HiOutlineChevronRight,
   HiOutlineCreditCard,
+  HiOutlineArrowsRightLeft,
 } from "react-icons/hi2";
 import AddDebitModal from "creditDebitComponents/addDebitModal";
 import AddCreditModal from "creditDebitComponents/addCreditModal";
 import SettleModal from "creditDebitComponents/settleModal";
 import EditTransactionModal from "creditDebitComponents/editTransactionModal";
+import NetOffModal from "creditDebitComponents/netOffModal";
 import PartyHistoryRow from "creditDebitComponents/PartyHistoryRow";
 import AppShell from "components/AppShell";
 import { Modal, SkeletonRows, EmptyState } from "components";
@@ -61,7 +63,7 @@ const statCards = (t, totalProfitLoss, pendingDebitTotal, pendingCreditTotal, ne
 // Icon-only, no dropdown — the meaning of each icon is spelled out once in the small
 // legend below both tables (LedgerLegend) rather than repeated as a text label on every
 // row, which is what was pushing the table wider than its scroll container.
-function PartyActionsMenu({ balance, onAddCharge, onSettle }) {
+function PartyActionsMenu({ balance, otherBalance, onAddCharge, onSettle, onNetOff }) {
   return (
     <div className="inline-flex items-center gap-1">
       <button
@@ -82,6 +84,18 @@ function PartyActionsMenu({ balance, onAddCharge, onSettle }) {
           <HiOutlineCreditCard className="text-lg" />
         </button>
       )}
+      {/* Only shown when this party has a balance on BOTH sides — nothing to net off
+          otherwise. User-triggered only; the app never nets these off on its own. */}
+      {Number(balance) > 0 && Number(otherBalance) > 0 && (
+        <button
+          type="button"
+          onClick={onNetOff}
+          aria-label="Net off"
+          className="flex h-8 w-8 items-center justify-center rounded-lg text-amber-600 hover:bg-amber-50 dark:text-amber-400 dark:hover:bg-amber-500/10"
+        >
+          <HiOutlineArrowsRightLeft className="text-lg" />
+        </button>
+      )}
     </div>
   );
 }
@@ -100,6 +114,10 @@ function LedgerLegend() {
         <HiOutlineCreditCard className="text-sm text-primary-600 dark:text-primary-400" />
         {t("creditDebit.settle")}
       </span>
+      <span className="flex items-center gap-1.5">
+        <HiOutlineArrowsRightLeft className="text-sm text-amber-600 dark:text-amber-400" />
+        {t("creditDebit.netOff")}
+      </span>
     </div>
   );
 }
@@ -114,6 +132,8 @@ function LedgerTable({
   direction,
   onAddPayment,
   onAddCharge,
+  onNetOff,
+  otherBalances,
   loading,
   historyRefreshKey,
   onEditTransaction,
@@ -195,8 +215,10 @@ function LedgerTable({
                       <td className="py-3 pr-5 text-right whitespace-nowrap">
                         <PartyActionsMenu
                           balance={row.balance}
+                          otherBalance={otherBalances[row.contact_id] || 0}
                           onAddCharge={() => onAddCharge(row)}
                           onSettle={() => onAddPayment(row)}
+                          onNetOff={() => onNetOff(row, otherBalances[row.contact_id] || 0)}
                         />
                       </td>
                     </tr>
@@ -235,6 +257,7 @@ export default function CreditDebitPage() {
   // Per-row "Add Charge" — same Add Payable/Receivable modal, opened with the contact
   // already known instead of the page-level button's blank picker.
   const [chargeTarget, setChargeTarget] = useState(null); // { row, direction }
+  const [netOffTarget, setNetOffTarget] = useState(null); // { row, payableBalance, receivableBalance }
   const [editTx, setEditTx] = useState(null);
   const [deleteTx, setDeleteTx] = useState(null);
   const [deletingTx, setDeletingTx] = useState(false);
@@ -287,6 +310,13 @@ export default function CreditDebitPage() {
   const pendingCreditTotal = receivableParties.reduce((sum, p) => sum + Number(p.balance), 0);
   // Profit realized so far, minus what we still owe suppliers, plus what customers still owe us.
   const netEarnings = totalProfitLoss - pendingDebitTotal + pendingCreditTotal;
+
+  // contact_id -> balance lookups so each table can tell whether a given party also has a
+  // balance on the *other* side (needed to show/hide the Net Off action).
+  const payableBalanceByContact = Object.fromEntries(payableParties.map((p) => [p.contact_id, p.balance]));
+  const receivableBalanceByContact = Object.fromEntries(
+    receivableParties.map((p) => [p.contact_id, p.balance])
+  );
 
   const handleDeleteTx = async () => {
     setDeletingTx(true);
@@ -344,6 +374,10 @@ export default function CreditDebitPage() {
               direction="payable"
               onAddPayment={(row) => setSettleTarget({ entry: row, type: "debit" })}
               onAddCharge={(row) => setChargeTarget({ row, direction: "payable" })}
+              onNetOff={(row, receivableBalance) =>
+                setNetOffTarget({ row, payableBalance: row.balance, receivableBalance })
+              }
+              otherBalances={receivableBalanceByContact}
               loading={loading}
               historyRefreshKey={historyRefreshKey}
               onEditTransaction={setEditTx}
@@ -372,6 +406,10 @@ export default function CreditDebitPage() {
               direction="receivable"
               onAddPayment={(row) => setSettleTarget({ entry: row, type: "credit" })}
               onAddCharge={(row) => setChargeTarget({ row, direction: "receivable" })}
+              onNetOff={(row, payableBalance) =>
+                setNetOffTarget({ row, payableBalance, receivableBalance: row.balance })
+              }
+              otherBalances={payableBalanceByContact}
               loading={loading}
               historyRefreshKey={historyRefreshKey}
               onEditTransaction={setEditTx}
@@ -413,6 +451,14 @@ export default function CreditDebitPage() {
         onClose={() => setEditTx(null)}
         transaction={editTx}
         onUpdated={refreshAll}
+      />
+      <NetOffModal
+        isOpen={!!netOffTarget}
+        onClose={() => setNetOffTarget(null)}
+        entry={netOffTarget?.row}
+        payableBalance={netOffTarget?.payableBalance}
+        receivableBalance={netOffTarget?.receivableBalance}
+        onNetOff={refreshAll}
       />
 
       <Modal isOpen={!!deleteTx} onClose={() => setDeleteTx(null)} title={t("common.delete")}>

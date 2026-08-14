@@ -4,6 +4,7 @@ const {
   addTransaction,
   updateTransaction,
   deleteTransaction,
+  netOffParty,
 } = require("../Sevices/partyLedgerService");
 const asyncHandler = require("../utils/asyncHandler");
 
@@ -44,10 +45,17 @@ const removeTransaction = asyncHandler(async (req, res) => {
   res.send(result);
 });
 
+const postNetOff = asyncHandler(async (req, res) => {
+  const { contactId, amount, occurredOn, note } = req.body;
+  const result = await netOffParty(contactId, amount, occurredOn, note);
+  res.status(201).json(result);
+});
+
 module.exports = {
   getParties,
   getTransactions,
   postTransaction,
   putTransaction,
   removeTransaction,
+  postNetOff,
 };

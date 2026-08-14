@@ -142,10 +142,65 @@ const deleteTransaction = async (id) => {
   return rows[0];
 };
 
+// A party can owe you (receivable) and be owed by you (payable) at the same time — e.g. a
+// vendor you also returned stock to. Rather than move real cash both ways, net-off books a
+// negative 'adjustment' on each side for the same amount ("owes less" on both), reducing
+// both balances by exactly that much without touching total_charged/total_paid (which stay
+// a record of actual charges/cash, not book adjustments). This is the one place two related
+// writes must both succeed or neither does — the only real DB transaction in this codebase,
+// deliberately: a half-applied net-off (one side adjusted, the other not) would silently
+// corrupt both balances, which is worse than anything the old credit/debit design did.
+const netOffParty = async (contactId, amount, occurredOn, note) => {
+  if (!contactId) throw new ApiError(400, "A contact is required");
+  const amountNum = Number(amount);
+  if (!Number.isFinite(amountNum) || amountNum <= 0) {
+    throw new ApiError(400, "Amount must be greater than 0");
+  }
+
+  await assertContactExists(contactId);
+
+  const [payableBalance, receivableBalance] = await Promise.all([
+    getBalance(contactId, "payable"),
+    getBalance(contactId, "receivable"),
+  ]);
+  const maxNet = Math.min(payableBalance, receivableBalance);
+  if (amountNum > maxNet) {
+    throw new ApiError(
+      400,
+      `Net-off amount (${amountNum}) can't exceed the smaller of the two balances (${maxNet})`
+    );
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const payableResult = await client.query(
+      `INSERT INTO party_transactions (contact_id, direction, kind, amount, occurred_on, note)
+       VALUES ($1, 'payable', 'adjustment', $2, COALESCE($3, NOW()), $4)
+       RETURNING *`,
+      [contactId, -amountNum, occurredOn || null, note || "Net off against receivable balance"]
+    );
+    const receivableResult = await client.query(
+      `INSERT INTO party_transactions (contact_id, direction, kind, amount, occurred_on, note)
+       VALUES ($1, 'receivable', 'adjustment', $2, COALESCE($3, NOW()), $4)
+       RETURNING *`,
+      [contactId, -amountNum, occurredOn || null, note || "Net off against payable balance"]
+    );
+    await client.query("COMMIT");
+    return { payable: payableResult.rows[0], receivable: receivableResult.rows[0] };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   listParties,
   getPartyTransactions,
   addTransaction,
   updateTransaction,
   deleteTransaction,
+  netOffParty,
 };
