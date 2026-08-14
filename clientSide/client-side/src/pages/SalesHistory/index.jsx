@@ -1,10 +1,8 @@
 import React, { useEffect, useState } from "react";
-import { Text, EmptyState } from "components";
+import { Text, EmptyState, Pagination } from "components";
 import {
   HiOutlineClipboardDocumentList,
   HiOutlinePrinter,
-  HiChevronLeft,
-  HiChevronRight,
   HiChevronDown,
 } from "react-icons/hi2";
 import { printReceipt } from "utils/printReceipt";
@@ -42,23 +40,6 @@ const defaultEndDate = () => {
   const d = new Date();
   d.setHours(23, 59, 0, 0);
   return formatLocal(d);
-};
-
-// Windowed page numbers with ellipses, e.g. 1 ... 4 5 [6] 7 8 ... 12
-const getPageNumbers = (current, total) => {
-  const pages = [];
-  const window = 1;
-  const add = (p) => pages.push(p);
-
-  add(1);
-  if (current - window > 2) add("...");
-  for (let p = Math.max(2, current - window); p <= Math.min(total - 1, current + window); p++) {
-    add(p);
-  }
-  if (current + window < total - 1) add("...");
-  if (total > 1) add(total);
-
-  return pages;
 };
 
 export default function SalesHistoryPage() {
@@ -324,44 +305,7 @@ export default function SalesHistoryPage() {
             <Text as="p" className="text-sm !text-gray-500 dark:!text-gray-400">
               {totalCount} transaction{totalCount === 1 ? "" : "s"} · Page {page} of {totalPages}
             </Text>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => goToPage(page - 1)}
-                disabled={page <= 1 || loading}
-                className="p-2 rounded-lg border border-surface-border dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-surface-subtle dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                aria-label="Previous page"
-              >
-                <HiChevronLeft />
-              </button>
-              {getPageNumbers(page, totalPages).map((p, i) =>
-                p === "..." ? (
-                  <span key={`ellipsis-${i}`} className="px-2 text-gray-400 select-none">
-                    …
-                  </span>
-                ) : (
-                  <button
-                    key={p}
-                    onClick={() => goToPage(p)}
-                    disabled={loading}
-                    className={`min-w-[2.25rem] px-2 py-2 text-sm font-semibold rounded-lg transition-colors ${
-                      p === page
-                        ? "bg-primary-600 text-white-A700"
-                        : "border border-surface-border dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-surface-subtle dark:hover:bg-gray-800"
-                    }`}
-                  >
-                    {p}
-                  </button>
-                )
-              )}
-              <button
-                onClick={() => goToPage(page + 1)}
-                disabled={page >= totalPages || loading}
-                className="p-2 rounded-lg border border-surface-border dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-surface-subtle dark:hover:bg-gray-800 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                aria-label="Next page"
-              >
-                <HiChevronRight />
-              </button>
-            </div>
+            <Pagination page={page} totalPages={totalPages} onPageChange={goToPage} loading={loading} />
           </div>
         )}
       </AppShell>

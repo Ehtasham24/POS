@@ -6,7 +6,7 @@ require("dotenv").config({ path: path.join(__dirname, "Development.env") });
 const routesProducts = require("./Routes/API/productsRoutes");
 const routesCategories = require("./Routes/API/categoriesRoutes");
 const routesSales = require("./Routes/API/salesRoutes");
-const routesCreditDebit = require("./Routes/API/creditDebitRoutes");
+const routesPartyLedger = require("./Routes/API/partyLedgerRoutes");
 const routesSettings = require("./Routes/API/settingsRoutes");
 const routesSearch = require("./Routes/API/searchRoutes");
 const routesInventory = require("./Routes/API/inventoryRoutes");
@@ -36,7 +36,7 @@ const Server = async () => {
   server.use(routesProducts);
   server.use(routesCategories);
   server.use(routesSales);
-  server.use(routesCreditDebit);
+  server.use(routesPartyLedger);
   server.use(routesSettings);
   server.use(routesSearch);
   server.use(routesInventory);
