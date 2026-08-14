@@ -10,8 +10,8 @@ const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
 const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gray-100";
 
-const initialFormData = () => ({
-  contact_id: "",
+const initialFormData = (presetContactId) => ({
+  contact_id: presetContactId ? String(presetContactId) : "",
   amount: "",
   occurredOn: todayDateInputValue(),
   note: "",
@@ -20,14 +20,18 @@ const initialFormData = () => ({
 // Records a new "customer took credit" entry — one row in the append-only party ledger
 // (see ExpressBackend/migrations/005_party_ledger.sql), not an editable running total.
 // Correcting a past entry happens from the party's expanded history row instead.
-const AddCreditModal = ({ isOpen, onClose, onAdded }) => {
+//
+// presetContactId: opened from an existing party's row ("Add Charge") — skips picking the
+// customer again, since it's already known. Left undefined when opened from the page-level
+// "Add Receivable" button, which still needs the full picker.
+const AddCreditModal = ({ isOpen, onClose, onAdded, presetContactId }) => {
   const toast = useToast();
   const { t } = useLanguage();
-  const [formData, setFormData] = useState(initialFormData);
+  const [formData, setFormData] = useState(() => initialFormData(presetContactId));
 
   useEffect(() => {
-    if (isOpen) setFormData(initialFormData());
-  }, [isOpen]);
+    if (isOpen) setFormData(initialFormData(presetContactId));
+  }, [isOpen, presetContactId]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -58,7 +62,7 @@ const AddCreditModal = ({ isOpen, onClose, onAdded }) => {
   };
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={t("creditDebit.addReceivable")}>
+    <Modal isOpen={isOpen} onClose={onClose} title={presetContactId ? t("creditDebit.addCharge") : t("creditDebit.addReceivable")}>
       <form className="space-y-4" onSubmit={handleSubmit}>
         <ContactSelect
           type="customer"

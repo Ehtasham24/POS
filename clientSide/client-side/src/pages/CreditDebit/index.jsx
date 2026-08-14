@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   HiOutlineBanknotes,
   HiOutlineExclamationTriangle,
@@ -6,6 +6,8 @@ import {
   HiOutlinePlusCircle,
   HiOutlineChevronDown,
   HiOutlineChevronRight,
+  HiOutlineEllipsisVertical,
+  HiOutlineCreditCard,
 } from "react-icons/hi2";
 import AddDebitModal from "creditDebitComponents/addDebitModal";
 import AddCreditModal from "creditDebitComponents/addCreditModal";
@@ -57,6 +59,65 @@ const statCards = (t, totalProfitLoss, pendingDebitTotal, pendingCreditTotal, ne
   },
 ];
 
+// Two actions (Add Charge + Settle) as separate buttons forced the table wider than its
+// scroll container, so reaching Settle needed a horizontal scroll — collapsed into one
+// compact dropdown instead, matching pages/Inventory/index.jsx's RowActionsMenu pattern.
+function PartyActionsMenu({ balance, onAddCharge, onSettle }) {
+  const { t } = useLanguage();
+  const [open, setOpen] = useState(false);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const handleClickOutside = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false);
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  return (
+    <div className="relative inline-block" ref={containerRef}>
+      <button
+        type="button"
+        onClick={() => setOpen((prev) => !prev)}
+        aria-label="Row actions"
+        className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+      >
+        <HiOutlineEllipsisVertical className="text-lg" />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full z-20 mt-1 w-40 overflow-hidden rounded-xl border border-surface-border bg-white-A700 shadow-modal dark:border-gray-700 dark:bg-gray-800">
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onAddCharge();
+            }}
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-gray-800 transition-colors hover:bg-surface-subtle dark:text-gray-100 dark:hover:bg-gray-700"
+          >
+            <HiOutlinePlusCircle className="text-base" />
+            {t("creditDebit.addCharge")}
+          </button>
+          {Number(balance) > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onSettle();
+              }}
+              className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-500/10"
+            >
+              <HiOutlineCreditCard className="text-base" />
+              {t("creditDebit.settle")}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Rows here are *parties* (one per contact with ≥1 transaction in this direction), with
 // balances derived server-side from party_balances — not the old mutable per-row totals.
 // The chevron expands into PartyHistoryRow, that party's actual transaction history.
@@ -66,6 +127,7 @@ function LedgerTable({
   emptyLabel,
   direction,
   onAddPayment,
+  onAddCharge,
   loading,
   historyRefreshKey,
   onEditTransaction,
@@ -142,14 +204,11 @@ function LedgerTable({
                         </span>
                       </td>
                       <td className="py-3 pr-5 text-right whitespace-nowrap">
-                        {Number(row.balance) > 0 && (
-                          <button
-                            onClick={() => onAddPayment(row)}
-                            className="px-3 py-1.5 bg-surface-muted dark:bg-gray-700 hover:bg-surface-border dark:hover:bg-gray-600 text-gray-800 dark:text-gray-100 text-xs font-bold uppercase rounded-lg transition-colors"
-                          >
-                            {t("creditDebit.settle")}
-                          </button>
-                        )}
+                        <PartyActionsMenu
+                          balance={row.balance}
+                          onAddCharge={() => onAddCharge(row)}
+                          onSettle={() => onAddPayment(row)}
+                        />
                       </td>
                     </tr>
                     {isExpanded && (
@@ -184,6 +243,9 @@ export default function CreditDebitPage() {
   const [showAddDebit, setShowAddDebit] = useState(false);
   const [showAddCredit, setShowAddCredit] = useState(false);
   const [settleTarget, setSettleTarget] = useState(null); // { entry, type }
+  // Per-row "Add Charge" — same Add Payable/Receivable modal, opened with the contact
+  // already known instead of the page-level button's blank picker.
+  const [chargeTarget, setChargeTarget] = useState(null); // { row, direction }
   const [editTx, setEditTx] = useState(null);
   const [deleteTx, setDeleteTx] = useState(null);
   const [deletingTx, setDeletingTx] = useState(false);
@@ -292,6 +354,7 @@ export default function CreditDebitPage() {
               emptyLabel={t("creditDebit.noPayables")}
               direction="payable"
               onAddPayment={(row) => setSettleTarget({ entry: row, type: "debit" })}
+              onAddCharge={(row) => setChargeTarget({ row, direction: "payable" })}
               loading={loading}
               historyRefreshKey={historyRefreshKey}
               onEditTransaction={setEditTx}
@@ -319,6 +382,7 @@ export default function CreditDebitPage() {
               emptyLabel={t("creditDebit.noReceivables")}
               direction="receivable"
               onAddPayment={(row) => setSettleTarget({ entry: row, type: "credit" })}
+              onAddCharge={(row) => setChargeTarget({ row, direction: "receivable" })}
               loading={loading}
               historyRefreshKey={historyRefreshKey}
               onEditTransaction={setEditTx}
@@ -328,8 +392,24 @@ export default function CreditDebitPage() {
         </div>
       </AppShell>
 
-      <AddDebitModal isOpen={showAddDebit} onClose={() => setShowAddDebit(false)} onAdded={refreshAll} />
-      <AddCreditModal isOpen={showAddCredit} onClose={() => setShowAddCredit(false)} onAdded={refreshAll} />
+      <AddDebitModal
+        isOpen={showAddDebit || chargeTarget?.direction === "payable"}
+        onClose={() => {
+          setShowAddDebit(false);
+          setChargeTarget(null);
+        }}
+        onAdded={refreshAll}
+        presetContactId={chargeTarget?.direction === "payable" ? chargeTarget.row.contact_id : undefined}
+      />
+      <AddCreditModal
+        isOpen={showAddCredit || chargeTarget?.direction === "receivable"}
+        onClose={() => {
+          setShowAddCredit(false);
+          setChargeTarget(null);
+        }}
+        onAdded={refreshAll}
+        presetContactId={chargeTarget?.direction === "receivable" ? chargeTarget.row.contact_id : undefined}
+      />
       <SettleModal
         isOpen={!!settleTarget}
         onClose={() => setSettleTarget(null)}

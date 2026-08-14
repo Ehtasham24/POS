@@ -29,16 +29,20 @@ export default function ContactSelect({ type, value, onChange, id }) {
     setSelectValue(value);
   }, [value]);
 
+  // Deliberately NOT filtered by ?type= — a contact tagged is_vendor-only can still owe
+  // you money (a refund, an overpayment) and needs to be pickable from the Receivable
+  // picker too, and vice versa. Ledger direction lives on the transaction, not the
+  // contact, so the picker shouldn't pre-exclude anyone. Contacts that don't already carry
+  // this context's flag are labeled so it's still clear who's "really" a vendor/customer.
   const fetchContacts = () => {
-    apiGet(`/api/contacts?type=${type}`)
+    apiGet(`/api/contacts`)
       .then(setContacts)
-      .catch((err) => console.error(`Error fetching ${type}s:`, err));
+      .catch((err) => console.error("Error fetching contacts:", err));
   };
 
   useEffect(() => {
     fetchContacts();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type]);
+  }, []);
 
   const handleSelectChange = (e) => {
     setSelectValue(e.target.value);
@@ -85,11 +89,14 @@ export default function ContactSelect({ type, value, onChange, id }) {
         <option value="" disabled>
           Select {isVendor ? "vendor" : "customer"}
         </option>
-        {contacts.map((contact) => (
-          <option key={contact.id} value={contact.id}>
-            {contact.name}
-          </option>
-        ))}
+        {contacts.map((contact) => {
+          const matchesContext = isVendor ? contact.is_vendor : contact.is_customer;
+          return (
+            <option key={contact.id} value={contact.id}>
+              {matchesContext ? contact.name : `${contact.name} (${isVendor ? "Customer" : "Vendor"})`}
+            </option>
+          );
+        })}
         <option value={NEW_CONTACT_VALUE}>+ Add new {isVendor ? "vendor" : "customer"}...</option>
       </select>
 
@@ -137,7 +144,7 @@ export default function ContactSelect({ type, value, onChange, id }) {
 
       {contacts.length === 0 && !creating && (
         <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-          No {isVendor ? "vendors" : "customers"} yet — add one above.
+          No contacts yet — add one above.
         </p>
       )}
     </div>
