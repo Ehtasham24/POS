@@ -1,3 +1,4 @@
+import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
 import {
   ResponsiveContainer,
   LineChart,
@@ -37,16 +38,6 @@ const TOOLTIP_ITEM_STYLE = { color: "#f3f4f6" };
 
 const PIE_COLORS = ["#4f46e5", "#0ea5e9", "#16a34a", "#f59e0b", "#e11d48", "#8b5cf6", "#14b8a6"];
 
-// Recharts animates every chart open on mount (an arc/line/bar sweeping in over ~1.5s).
-// Printing (both the print preview pane and the final render) re-measures this page's
-// width — .print-area switches to position:absolute/width:100% under @media print — which
-// makes ResponsiveContainer's ResizeObserver fire and remount the chart, restarting that
-// animation. Whatever moment the browser happens to rasterize the page for print/PDF then
-// catches the animation at a random, unfinished point — a pie chart frozen mid-sweep looks
-// like a slice is missing, and it comes out different on every print. Disabling animation
-// makes every chart render instantly and identically, print or screen, every time.
-const NO_ANIMATION = { isAnimationActive: false };
-
 const formatDay = (iso) =>
   new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
@@ -73,7 +64,21 @@ const ChartCard = ({ title, children }) => (
 // Advanced view for the Sales Report: revenue/profit trend over time, top products
 // by profit contribution, and revenue share by category — all derived from the same
 // salesData/timeSeriesData the plain table already uses, no extra round-trips.
-export default function SalesCharts({ salesData, timeSeriesData }) {
+//
+// Keeps recharts' entrance animation (an arc/line/bar sweeping in over ~1.5s on mount) —
+// but exposes waitForAnimations() via ref for Report.jsx's Print button, because printing
+// *while* a chart is mid-animation can capture it in an unfinished state (most visibly a
+// pie chart frozen mid-sweep, looking like a slice is missing, different every time
+// depending on exactly when the print snapshot lands). waitForAnimations() forces every
+// chart to remount — via remountKey, rather than hoping the print layout's width change
+// happens to trigger one on its own — and resolves only once each chart's onAnimationEnd
+// has actually fired, so print always waits for the real, current animation to finish
+// instead of a guessed delay.
+const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData }, ref) {
+  const [remountKey, setRemountKey] = useState(0);
+  const pendingRef = useRef(new Set());
+  const resolveRef = useRef(null);
+
   const hasTrend = timeSeriesData && timeSeriesData.length > 0;
   const hasSales = salesData && salesData.length > 0;
 
@@ -99,21 +104,83 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
       )
     : [];
 
+  // Every series recharts will animate on the next remount — used to know exactly what
+  // waitForAnimations() needs to wait for.
+  const animatedKeys = useMemo(() => {
+    const keys = [];
+    if (hasTrend) keys.push("line-revenue", "line-profit");
+    if (topProducts.length > 0) keys.push("bar");
+    if (categoryShare.length > 0) keys.push("pie");
+    return keys;
+  }, [hasTrend, topProducts.length, categoryShare.length]);
+
+  const markDone = (key) => () => {
+    pendingRef.current.delete(key);
+    if (pendingRef.current.size === 0 && resolveRef.current) {
+      resolveRef.current();
+      resolveRef.current = null;
+    }
+  };
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      waitForAnimations: () =>
+        new Promise((resolve) => {
+          if (animatedKeys.length === 0) {
+            resolve();
+            return;
+          }
+          pendingRef.current = new Set(animatedKeys);
+          resolveRef.current = resolve;
+          // Force a fresh remount so there's always a real, current animation to wait for,
+          // instead of depending on whether the print layout's width change happens to
+          // trigger one on its own.
+          setRemountKey((k) => k + 1);
+          // Safety net — recharts should always fire onAnimationEnd, but a missed event
+          // must never hang the Print button forever.
+          setTimeout(() => {
+            if (resolveRef.current === resolve) {
+              resolveRef.current = null;
+              resolve();
+            }
+          }, 4000);
+        }),
+    }),
+    [animatedKeys]
+  );
+
   if (!hasTrend && !hasSales) return null;
 
   return (
     <div className="mb-6 flex flex-col gap-4">
       {hasTrend && (
         <ChartCard title="Revenue & Profit Trend">
-          <ResponsiveContainer width="100%" height={260}>
+          <ResponsiveContainer key={remountKey} width="100%" height={260}>
             <LineChart data={timeSeriesData} margin={{ left: 0, right: 12 }}>
               <CartesianGrid stroke={GRID_COLOR} vertical={false} />
               <XAxis dataKey="day" tickFormatter={formatDay} stroke={AXIS_COLOR} fontSize={12} />
               <YAxis stroke={AXIS_COLOR} fontSize={12} />
               <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} labelFormatter={formatDay} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Line type="monotone" dataKey="revenue" name="Revenue" stroke="#4f46e5" strokeWidth={2} dot={false} {...NO_ANIMATION} />
-              <Line type="monotone" dataKey="profit" name="Profit" stroke="#16a34a" strokeWidth={2} dot={false} {...NO_ANIMATION} />
+              <Line
+                type="monotone"
+                dataKey="revenue"
+                name="Revenue"
+                stroke="#4f46e5"
+                strokeWidth={2}
+                dot={false}
+                onAnimationEnd={markDone("line-revenue")}
+              />
+              <Line
+                type="monotone"
+                dataKey="profit"
+                name="Profit"
+                stroke="#16a34a"
+                strokeWidth={2}
+                dot={false}
+                onAnimationEnd={markDone("line-profit")}
+              />
             </LineChart>
           </ResponsiveContainer>
         </ChartCard>
@@ -122,7 +189,7 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
       <div className="grid grid-cols-2 gap-4 md:grid-cols-1">
         {topProducts.length > 0 && (
           <ChartCard title="Top Products by Profit">
-            <ResponsiveContainer width="100%" height={280}>
+            <ResponsiveContainer key={remountKey} width="100%" height={280}>
               <BarChart data={topProducts} layout="vertical" margin={{ left: 12, right: 12 }}>
                 <CartesianGrid stroke={GRID_COLOR} horizontal={false} />
                 <XAxis type="number" stroke={AXIS_COLOR} fontSize={12} />
@@ -139,7 +206,7 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
                   labelStyle={TOOLTIP_LABEL_STYLE}
                   itemStyle={TOOLTIP_ITEM_STYLE}
                 />
-                <Bar dataKey="profit" name="Profit" radius={[0, 4, 4, 0]} {...NO_ANIMATION}>
+                <Bar dataKey="profit" name="Profit" radius={[0, 4, 4, 0]} onAnimationEnd={markDone("bar")}>
                   {topProducts.map((entry, index) => (
                     <Cell key={index} fill={entry.profit >= 0 ? "#16a34a" : "#dc2626"} />
                   ))}
@@ -166,14 +233,20 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
                 fixed height it was shrinking the circle's usable radius unevenly and
                 clipping it into a half-moon. A plain HTML legend keeps the full height
                 free for the pie. */}
-            <ResponsiveContainer width="100%" height={240}>
+            <ResponsiveContainer key={remountKey} width="100%" height={240}>
               <PieChart>
                 <Tooltip
                   contentStyle={TOOLTIP_STYLE}
                   labelStyle={TOOLTIP_LABEL_STYLE}
                   itemStyle={TOOLTIP_ITEM_STYLE}
                 />
-                <Pie data={categoryShare} dataKey="revenue" nameKey="name" outerRadius={90} {...NO_ANIMATION}>
+                <Pie
+                  data={categoryShare}
+                  dataKey="revenue"
+                  nameKey="name"
+                  outerRadius={90}
+                  onAnimationEnd={markDone("pie")}
+                >
                   {categoryShare.map((entry, index) => (
                     <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
                   ))}
@@ -193,4 +266,6 @@ export default function SalesCharts({ salesData, timeSeriesData }) {
       </div>
     </div>
   );
-}
+});
+
+export default SalesCharts;

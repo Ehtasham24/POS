@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import DateRangeSelector from "./DataRangeSelector";
 import PrintButton from "./PrintBtn";
 import GroupedSalesData from "./GroupedSalesData";
@@ -40,6 +40,7 @@ const SalesDataComponent = () => {
   const [error, setError] = useState(null);
   const [startDate, setStartDate] = useState(startOfToday);
   const [endDate, setEndDate] = useState(endOfToday);
+  const chartsRef = useRef(null);
 
   const fetchTimeSeries = async () => {
     try {
@@ -84,15 +85,31 @@ const SalesDataComponent = () => {
   // print as white-on-white (or worse) instead of respecting .print-area's fixed
   // black/gray palette. afterprint (not code immediately following window.print()) is
   // what reliably fires once the print dialog is dismissed, in every major browser.
-  const handlePrint = () => {
+  //
+  // The charts keep their entrance animation (SalesCharts.jsx), so before printing we:
+  // 1. Add "is-printing" — the same layout switch @media print applies (see tailwind.css)
+  //    — right now, while script can still wait on it, instead of only implicitly inside
+  //    the blocking window.print() call.
+  // 2. Await waitForAnimations(), which forces the charts to remount at that print layout
+  //    and resolves once they've actually finished animating.
+  // 3. Only then call window.print() — the page is already sized/settled for print, so
+  //    nothing changes again mid-print to restart an animation and get caught unfinished.
+  const handlePrint = async () => {
     const root = document.documentElement;
     const wasDark = root.classList.contains("dark");
     if (wasDark) root.classList.remove("dark");
     const restoreTheme = () => {
+      root.classList.remove("is-printing");
       if (wasDark) root.classList.add("dark");
       window.removeEventListener("afterprint", restoreTheme);
     };
     window.addEventListener("afterprint", restoreTheme);
+
+    root.classList.add("is-printing");
+    if (chartsRef.current) {
+      await chartsRef.current.waitForAnimations();
+    }
+
     window.print();
   };
 
@@ -142,7 +159,7 @@ const SalesDataComponent = () => {
               </span>
             </div>
 
-            <SalesCharts salesData={salesData} timeSeriesData={timeSeriesData} />
+            <SalesCharts ref={chartsRef} salesData={salesData} timeSeriesData={timeSeriesData} />
 
             <GroupedSalesData groupedData={groupedData} />
           </div>

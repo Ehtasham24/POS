@@ -67,3 +67,24 @@
     width: 100%;
   }
 }
+
+/* Mirrors the @media print rules above exactly, but toggled by JS (Report.jsx's
+   handlePrint, via a class on <html>) *before* window.print() is called instead of only
+   implicitly once the browser applies @media print. This lets the resulting layout switch
+   — and the chart remount/re-animation it triggers, since ResponsiveContainer reacts to
+   the width change — happen and fully settle while script can still await it. By the time
+   window.print() actually runs, the page is already in this exact state, so nothing shifts
+   again mid-print. See SalesCharts.jsx's waitForAnimations(). */
+.is-printing body * {
+  visibility: hidden !important;
+}
+.is-printing .print-area,
+.is-printing .print-area * {
+  visibility: visible !important;
+}
+.is-printing .print-area {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+}
