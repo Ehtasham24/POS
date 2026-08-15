@@ -275,28 +275,39 @@ export default function InventoryPage() {
     return true;
   });
 
+  // Derived from filteredItems, not inventory.summary (the server's unfiltered totals) —
+  // the stat cards used to always show every category's numbers even with a category (or
+  // status/search) filter active below them, which read as if the filter wasn't doing
+  // anything up top.
+  const summary = {
+    totalSkus: filteredItems.length,
+    totalStockValue: filteredItems.reduce((sum, item) => sum + Number(item.stock_value), 0),
+    lowStockCount: filteredItems.filter((item) => item.status === "low_stock").length,
+    outOfStockCount: filteredItems.filter((item) => item.status === "out_of_stock").length,
+  };
+
   const statCards = [
     {
       label: t("inventory.totalSkus"),
-      value: inventory.summary.totalSkus,
+      value: summary.totalSkus,
       icon: HiOutlineArchiveBox,
       tint: "bg-primary-50 text-primary-600 dark:bg-gray-700 dark:text-primary-400",
     },
     {
       label: t("inventory.totalStockValue"),
-      value: `Rs.${Number(inventory.summary.totalStockValue).toLocaleString()}`,
+      value: `Rs.${summary.totalStockValue.toLocaleString()}`,
       icon: HiOutlineBanknotes,
       tint: "bg-primary-50 text-primary-600 dark:bg-gray-700 dark:text-primary-400",
     },
     {
       label: t("inventory.lowStock"),
-      value: inventory.summary.lowStockCount,
+      value: summary.lowStockCount,
       icon: HiOutlineExclamationTriangle,
       tint: "bg-amber-50 text-amber-600 dark:bg-amber-500/10 dark:text-amber-400",
     },
     {
       label: t("inventory.outOfStock"),
-      value: inventory.summary.outOfStockCount,
+      value: summary.outOfStockCount,
       icon: HiOutlineXCircle,
       tint: "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-400",
     },
