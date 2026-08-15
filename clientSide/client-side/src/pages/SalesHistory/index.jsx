@@ -228,23 +228,30 @@ export default function SalesHistoryPage() {
 
         <div className="w-full max-w-4xl overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
           <div className="w-full overflow-x-auto">
-            <table className="w-full min-w-[560px] border-collapse">
+            {/* Explicit px widths on every column — table-layout:fixed is a global rule
+                (styles/index.css) that otherwise splits leftover space evenly across
+                however many columns exist, regardless of what each actually needs; adding
+                the Status column without these pushed DATE/TIME too narrow for its own
+                text ("15/08/2026, 18:55:40"), which then visually overlapped the Items
+                badge next to it. min-w raised to fit all six comfortably — same
+                min-w+overflow-x-auto pattern already used for narrower screens. */}
+            <table className="w-full min-w-[720px] table-fixed border-collapse">
               <thead className="bg-surface-subtle dark:bg-gray-800">
                 <tr>
                   <th className="w-10 pl-5"></th>
-                  <th className="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <th className="w-44 text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("salesHistory.dateTime")}
                   </th>
-                  <th className="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <th className="w-24 text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("salesHistory.items")}
                   </th>
-                  <th className="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <th className="w-36 text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("salesHistory.status")}
                   </th>
-                  <th className="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <th className="w-32 text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("salesHistory.total")}
                   </th>
-                  <th></th>
+                  <th className="w-28"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-border dark:divide-gray-800">
@@ -273,7 +280,7 @@ export default function SalesHistoryPage() {
                               }`}
                             />
                           </td>
-                          <td className="px-3 py-3 whitespace-nowrap text-gray-800 dark:text-gray-100">
+                          <td className="truncate px-3 py-3 text-gray-800 dark:text-gray-100">
                             {new Date(batch[0].sale_time).toLocaleString()}
                           </td>
                           <td className="px-3 py-3">
