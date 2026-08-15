@@ -265,6 +265,10 @@ const translations = {
       voidReasonLabel: "Reason (optional)",
       voidReasonPlaceholder: "e.g. Customer returned the item",
       voidConfirmButton: "Void Sale",
+      status: "Status",
+      statusAll: "All",
+      statusConfirmed: "Confirmed",
+      statusVoided: "Voided",
     },
     report: {
       title: "Sales Report",
@@ -545,6 +549,10 @@ const translations = {
       voidReasonLabel: "وجہ (اختیاری)",
       voidReasonPlaceholder: "مثلاً کسٹمر نے آئٹم واپس کر دیا",
       voidConfirmButton: "سیل منسوخ کریں",
+      status: "حالت",
+      statusAll: "تمام",
+      statusConfirmed: "تصدیق شدہ",
+      statusVoided: "منسوخ شدہ",
     },
     report: {
       title: "سیلز رپورٹ",

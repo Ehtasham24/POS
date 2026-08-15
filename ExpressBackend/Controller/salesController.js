@@ -35,7 +35,7 @@ const getRecentSale = asyncHandler(async (req, res) => {
 });
 
 const getBilledHistory = asyncHandler(async (req, res) => {
-  const { startDate, endDate, categoryId, page, pageSize } = req.query;
+  const { startDate, endDate, categoryId, page, pageSize, voidStatus } = req.query;
   // A Cashier only ever sees their own sales from today — same route as Owner's full
   // history, just pre-filtered server-side (see salesService.js's fetchBilledHistory).
   const viewerFilter = req.user.role === "cashier" ? { soldBy: req.user.id } : null;
@@ -45,7 +45,8 @@ const getBilledHistory = asyncHandler(async (req, res) => {
     categoryId,
     page ? parseInt(page, 10) : 1,
     pageSize ? parseInt(pageSize, 10) : 30,
-    viewerFilter
+    viewerFilter,
+    voidStatus
   );
   res.status(200).send(result);
 });

@@ -212,7 +212,11 @@ const fetchBilledHistory = async (
   categoryId,
   page = 1,
   pageSize = DEFAULT_HISTORY_PAGE_SIZE,
-  viewerFilter = null // { soldBy } — when set, restricts to that user's sales from today
+  viewerFilter = null, // { soldBy } — when set, restricts to that user's sales from today
+  voidStatus = "all" // 'all' | 'voided' | 'confirmed' — a transaction matches if ANY of
+  // its line items does (see below), same as the category filter's "any item matches"
+  // semantics, so a mixed transaction (one voided line + one active line) shows up under
+  // both filters rather than getting hidden from either.
 ) => {
   try {
     const hasDateFilter =
@@ -237,6 +241,11 @@ const fetchBilledHistory = async (
       params.push(viewerFilter.soldBy);
       conditions.push(`s.sold_by = $${params.length}`);
       conditions.push(`s.sale_time >= CURRENT_DATE`);
+    }
+    if (voidStatus === "voided") {
+      conditions.push(`s.is_voided = true`);
+    } else if (voidStatus === "confirmed") {
+      conditions.push(`s.is_voided = false`);
     }
     const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const joinClause = hasCategoryFilter

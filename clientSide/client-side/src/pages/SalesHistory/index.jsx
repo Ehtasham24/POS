@@ -53,6 +53,7 @@ export default function SalesHistoryPage() {
   const [expandedIndex, setExpandedIndex] = useState(null);
   const [categories, setCategories] = useState([]);
   const [categoryId, setCategoryId] = useState("");
+  const [voidStatus, setVoidStatus] = useState("all");
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
   const [page, setPage] = useState(1);
@@ -90,6 +91,9 @@ export default function SalesHistoryPage() {
       if (categoryId) {
         params.set("categoryId", categoryId);
       }
+      if (voidStatus !== "all") {
+        params.set("voidStatus", voidStatus);
+      }
 
       const data = await apiGet(`/api/BilledHistory?${params.toString()}`);
       // Backend already returns most-recent-first, one page (30 transactions) at a time
@@ -110,7 +114,7 @@ export default function SalesHistoryPage() {
   useEffect(() => {
     fetchHistory(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startDate, endDate, categoryId]);
+  }, [startDate, endDate, categoryId, voidStatus]);
 
   const goToPage = (p) => {
     if (p < 1 || p > totalPages || p === page) return;
@@ -182,12 +186,27 @@ export default function SalesHistoryPage() {
               ))}
             </select>
           </div>
-          {(startDate || endDate || categoryId) && (
+          <div>
+            <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1 text-sm">
+              {t("salesHistory.status")}
+            </label>
+            <select
+              value={voidStatus}
+              onChange={(e) => setVoidStatus(e.target.value)}
+              className={inputClass}
+            >
+              <option value="all">{t("salesHistory.statusAll")}</option>
+              <option value="confirmed">{t("salesHistory.statusConfirmed")}</option>
+              <option value="voided">{t("salesHistory.statusVoided")}</option>
+            </select>
+          </div>
+          {(startDate || endDate || categoryId || voidStatus !== "all") && (
             <button
               onClick={() => {
                 setStartDate("");
                 setEndDate("");
                 setCategoryId("");
+                setVoidStatus("all");
               }}
               className="px-4 py-2.5 text-sm font-semibold rounded-lg border border-surface-border dark:border-gray-700 text-gray-700 dark:text-gray-200 hover:bg-surface-subtle dark:hover:bg-gray-800 transition-colors"
             >
