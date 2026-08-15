@@ -13,6 +13,7 @@ import { apiGet, apiPut } from "utils/api";
 import { printTestReceipt } from "utils/printReceipt";
 import useThermalPrinterStatus from "hooks/useThermalPrinterStatus";
 import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
+import UsersCard from "./UsersCard";
 
 const updateSetting = (key, value) => apiPut("/api/settings", { key, value: String(value) });
 
@@ -246,6 +247,8 @@ export default function SettingsPage() {
         </div>
 
         <PrinterCard />
+
+        <UsersCard />
 
         <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
           <div className="flex items-start gap-4">

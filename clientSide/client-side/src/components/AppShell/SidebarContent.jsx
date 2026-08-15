@@ -3,12 +3,19 @@ import { NavLink, Link } from "react-router-dom";
 import { HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import useTheme from "hooks/useTheme";
 import { useLanguage } from "i18n/LanguageContext";
+import { useAuth } from "auth/AuthContext";
 import Logo from "components/Logo";
 import { navItems } from "./navItems";
 
 export default function SidebarContent({ onNavigate = () => {} }) {
   const [theme, toggleTheme] = useTheme();
   const { t } = useLanguage();
+  const { user } = useAuth();
+  // Items with no `roles` are visible to anyone logged in; otherwise the current role
+  // must be listed — this is what keeps a Cashier from ever seeing a link to a page
+  // they'd just get redirected away from (App.jsx's ProtectedRoute enforces the same
+  // restriction server-adjacent; this is purely "don't show it in the first place").
+  const visibleItems = navItems.filter((item) => !item.roles || item.roles.includes(user?.role));
 
   return (
     <div className="flex h-full flex-col bg-gray-900 text-gray-300">
@@ -20,7 +27,7 @@ export default function SidebarContent({ onNavigate = () => {} }) {
       </Link>
 
       <nav className="flex-1 space-y-1 px-3 py-2">
-        {navItems.map(({ to, labelKey, icon: Icon, end }) => (
+        {visibleItems.map(({ to, labelKey, icon: Icon, end }) => (
           <NavLink
             key={to}
             to={to}

@@ -4,7 +4,13 @@
 import { apiGet } from "utils/api";
 
 const PING_INTERVAL_MS = 45000; // long interval — see Mobile performance: no aggressive polling
-const PING_PATH = "/categories"; // cheap, already-indexed, always-safe-to-call endpoint
+// Public, unauthenticated (see ExpressBackend/Routes/API/healthRoutes.js) — this used to
+// be "/categories", which worked fine right up until that route required a login: pinging
+// it while logged out (or with an expired session) would 401 and get treated as "offline"
+// here, which is wrong — the server is perfectly reachable, the session just isn't valid.
+// A health check needs to answer one question only ("can I reach the server at all"),
+// not double as an auth probe.
+const PING_PATH = "/api/health";
 
 let online = navigator.onLine;
 const listeners = new Set();

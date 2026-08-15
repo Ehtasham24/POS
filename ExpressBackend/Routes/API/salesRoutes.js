@@ -7,13 +7,22 @@ const {
   getSalesTimeSeries,
   getRecentSale,
   getBilledHistory,
+  voidSaleController,
 } = require("../../Controller/salesController");
+const requireAuth = require("../../Middleware/requireAuth");
+const requireOwner = require("../../Middleware/requireOwner");
 
-routes.get("/api/getsales", getRecentSale);
-routes.get("/api/BilledHistory", getBilledHistory);
-routes.post("/sales", PostSales);
-routes.post("/api/Sales", getSales);
-routes.post("/api/Sales/filter", getSalesByProfitLoss);
-routes.post("/api/Sales/timeseries", getSalesTimeSeries);
+// Applied per-route (see usersRoutes.js's comment for why routes.use(requireAuth) here
+// would have been wrong). Checkout, own-history, and void — any logged-in user (Cashier
+// included). Sales Report's revenue/profit endpoints (/api/Sales*) are Owner-only;
+// voidSale's own logic (not this router) enforces the finer "own sale, same day" rule
+// for non-owners.
+routes.get("/api/getsales", requireAuth, getRecentSale);
+routes.get("/api/BilledHistory", requireAuth, getBilledHistory);
+routes.post("/sales", requireAuth, PostSales);
+routes.patch("/api/sales/:id/void", requireAuth, voidSaleController);
+routes.post("/api/Sales", requireAuth, requireOwner, getSales);
+routes.post("/api/Sales/filter", requireAuth, requireOwner, getSalesByProfitLoss);
+routes.post("/api/Sales/timeseries", requireAuth, requireOwner, getSalesTimeSeries);
 
 module.exports = routes;

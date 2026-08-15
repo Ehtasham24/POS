@@ -8,12 +8,17 @@ const {
   removeTransaction,
   postNetOff,
 } = require("../../Controller/partyLedgerController");
+const requireAuth = require("../../Middleware/requireAuth");
+const requireOwner = require("../../Middleware/requireOwner");
 
-routes.get("/api/parties", getParties);
-routes.get("/api/parties/:contactId/transactions", getTransactions);
-routes.post("/api/parties/transactions", postTransaction);
-routes.put("/api/parties/transactions/:id", putTransaction);
-routes.delete("/api/parties/transactions/:id", removeTransaction);
-routes.post("/api/parties/net-off", postNetOff);
+// Applied per-route (see usersRoutes.js's comment for why routes.use(...) here would
+// have been wrong). Credit/Debit is Owner-only in full — a Cashier has no access to any
+// route in this file.
+routes.get("/api/parties", requireAuth, requireOwner, getParties);
+routes.get("/api/parties/:contactId/transactions", requireAuth, requireOwner, getTransactions);
+routes.post("/api/parties/transactions", requireAuth, requireOwner, postTransaction);
+routes.put("/api/parties/transactions/:id", requireAuth, requireOwner, putTransaction);
+routes.delete("/api/parties/transactions/:id", requireAuth, requireOwner, removeTransaction);
+routes.post("/api/parties/net-off", requireAuth, requireOwner, postNetOff);
 
 module.exports = routes;

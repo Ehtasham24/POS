@@ -5,22 +5,24 @@ const {
   fetchSalesByProfitLoss,
   fetchSalesTimeSeries,
   fetchBilledHistory,
+  voidSale,
 } = require("../Sevices/salesService");
 const asyncHandler = require("../utils/asyncHandler");
 
 const PostSales = asyncHandler(async (req, res) => {
   const { sellingPrice, quantity, productID, lotId } = req.body;
-  const { messageSend, updatedQuantity } = await updateSalesRecord(
+  const { messageSend, updatedQuantity, saleId } = await updateSalesRecord(
     sellingPrice,
     quantity,
     productID,
-    lotId
+    lotId,
+    req.user.id
   );
 
   res.status(200).json({
     status: 200,
     message: "Sales data received successfully",
-    data: { messageSend, updatedQuantity },
+    data: { messageSend, updatedQuantity, saleId },
   });
 });
 
@@ -34,14 +36,23 @@ const getRecentSale = asyncHandler(async (req, res) => {
 
 const getBilledHistory = asyncHandler(async (req, res) => {
   const { startDate, endDate, categoryId, page, pageSize } = req.query;
+  // A Cashier only ever sees their own sales from today — same route as Owner's full
+  // history, just pre-filtered server-side (see salesService.js's fetchBilledHistory).
+  const viewerFilter = req.user.role === "cashier" ? { soldBy: req.user.id } : null;
   const result = await fetchBilledHistory(
     startDate,
     endDate,
     categoryId,
     page ? parseInt(page, 10) : 1,
-    pageSize ? parseInt(pageSize, 10) : 30
+    pageSize ? parseInt(pageSize, 10) : 30,
+    viewerFilter
   );
   res.status(200).send(result);
+});
+
+const voidSaleController = asyncHandler(async (req, res) => {
+  const voided = await voidSale(req.params.id, req.user, req.body?.reason);
+  res.status(200).send(voided);
 });
 
 const getSales = asyncHandler(async (req, res) => {
@@ -76,4 +87,5 @@ module.exports = {
   getSalesTimeSeries,
   getRecentSale,
   getBilledHistory,
+  voidSaleController,
 };

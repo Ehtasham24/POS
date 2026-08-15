@@ -1,20 +1,24 @@
 import React, { useEffect, useState } from "react";
-import { Text, EmptyState, Pagination } from "components";
+import { Text, EmptyState, Pagination, Modal } from "components";
 import {
   HiOutlineClipboardDocumentList,
   HiOutlinePrinter,
+  HiOutlineNoSymbol,
   HiChevronDown,
 } from "react-icons/hi2";
 import { printReceipt } from "utils/printReceipt";
 import AppShell from "components/AppShell";
-import { apiGet } from "utils/api";
+import { apiGet, apiPatch } from "utils/api";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 
 const PAGE_SIZE = 30;
 
+// Voided lines are excluded from the collapsed row's headline total (they still show up,
+// struck through, once expanded — see the expanded item table below) — otherwise the
+// summary would keep counting a return that's already been reversed.
 const batchTotal = (batch) =>
-  batch.reduce((sum, sale) => sum + sale.selling_price * sale.quantity, 0);
+  batch.filter((sale) => !sale.is_voided).reduce((sum, sale) => sum + sale.selling_price * sale.quantity, 0);
 
 const inputClass =
   "p-2.5 border border-surface-border dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500";
@@ -55,6 +59,9 @@ export default function SalesHistoryPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  const [voidTarget, setVoidTarget] = useState(null); // the sale line item being confirmed
+  const [voidReason, setVoidReason] = useState("");
+  const [voiding, setVoiding] = useState(false);
 
   useEffect(() => {
     const fetchCategories = async () => {
@@ -108,6 +115,28 @@ export default function SalesHistoryPage() {
   const goToPage = (p) => {
     if (p < 1 || p > totalPages || p === page) return;
     fetchHistory(p);
+  };
+
+  // Void is per line item (one product from a checkout), not per whole transaction — a
+  // customer returning one thing out of a multi-item sale is the common case, and the
+  // backend's voidSale() already operates on a single sales.id. Anyone who can even *see*
+  // a given row is already allowed to void it: a Cashier's history here is server-filtered
+  // to their own sales from today only (see salesController.js's getBilledHistory), so
+  // there's nothing extra to check client-side beyond "is it already voided."
+  const handleVoid = async () => {
+    if (!voidTarget) return;
+    setVoiding(true);
+    try {
+      await apiPatch(`/api/sales/${voidTarget.id}/void`, { reason: voidReason || undefined });
+      toast.success(t("salesHistory.voided"));
+      setVoidTarget(null);
+      setVoidReason("");
+      fetchHistory(page);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setVoiding(false);
+    }
   };
 
   return (
@@ -258,12 +287,17 @@ export default function SalesHistoryPage() {
                                       <th className="text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                         {t("salesHistory.lineTotal")}
                                       </th>
+                                      <th className="w-24"></th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-surface-border dark:divide-gray-800">
                                     {batch.map((sale) => (
-                                      <tr key={sale.id}>
-                                        <td className="px-3 py-2 text-gray-800 dark:text-gray-100">
+                                      <tr key={sale.id} className={sale.is_voided ? "opacity-50" : ""}>
+                                        <td
+                                          className={`px-3 py-2 text-gray-800 dark:text-gray-100 ${
+                                            sale.is_voided ? "line-through" : ""
+                                          }`}
+                                        >
                                           {sale.productname}
                                           {sale.lot_code && (
                                             <span className="ml-2 inline-flex rounded-full bg-primary-50 dark:bg-primary-900/40 px-2 py-0.5 text-[11px] font-semibold text-primary-700 dark:text-primary-300">
@@ -282,6 +316,28 @@ export default function SalesHistoryPage() {
                                         </td>
                                         <td className="px-3 py-2 font-medium text-gray-800 dark:text-gray-100">
                                           Rs.{(sale.selling_price * sale.quantity).toFixed(2)}
+                                        </td>
+                                        <td className="px-3 py-2 text-right">
+                                          {sale.is_voided ? (
+                                            <span
+                                              className="inline-flex rounded-full bg-surface-muted px-2 py-1 text-[11px] font-semibold text-gray-500 dark:bg-gray-700 dark:text-gray-400"
+                                              title={sale.void_reason || ""}
+                                            >
+                                              {t("salesHistory.voidedBadge")}
+                                            </span>
+                                          ) : (
+                                            <button
+                                              type="button"
+                                              onClick={(e) => {
+                                                e.stopPropagation();
+                                                setVoidTarget(sale);
+                                              }}
+                                              className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-danger-600 transition-colors hover:bg-danger-50 dark:text-danger-400 dark:hover:bg-danger-500/10"
+                                            >
+                                              <HiOutlineNoSymbol className="text-sm" />
+                                              {t("salesHistory.void")}
+                                            </button>
+                                          )}
                                         </td>
                                       </tr>
                                     ))}
@@ -309,6 +365,61 @@ export default function SalesHistoryPage() {
           </div>
         )}
       </AppShell>
+
+      <Modal
+        isOpen={!!voidTarget}
+        onClose={() => {
+          setVoidTarget(null);
+          setVoidReason("");
+        }}
+        title={t("salesHistory.voidConfirmTitle")}
+      >
+        {voidTarget && (
+          <div className="space-y-4">
+            <div className="rounded-lg bg-surface-subtle p-3 text-sm dark:bg-gray-900/40">
+              <p className="font-semibold text-gray-800 dark:text-gray-100">{voidTarget.productname}</p>
+              <p className="text-gray-500 dark:text-gray-400">
+                {voidTarget.quantity} × Rs.{voidTarget.selling_price} = Rs.
+                {(voidTarget.selling_price * voidTarget.quantity).toFixed(2)}
+              </p>
+            </div>
+            <p className="text-sm text-gray-600 dark:text-gray-300">{t("salesHistory.voidConfirmBody")}</p>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+                {t("salesHistory.voidReasonLabel")}
+              </label>
+              <textarea
+                rows={2}
+                value={voidReason}
+                onChange={(e) => setVoidReason(e.target.value)}
+                placeholder={t("salesHistory.voidReasonPlaceholder")}
+                className="w-full resize-y rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+              />
+            </div>
+            <div className="flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setVoidTarget(null);
+                  setVoidReason("");
+                }}
+                disabled={voiding}
+                className="rounded-lg bg-surface-muted px-4 py-2 text-sm font-semibold text-gray-800 transition-colors hover:bg-surface-border disabled:opacity-50 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
+              >
+                {t("sell.cancel")}
+              </button>
+              <button
+                type="button"
+                onClick={handleVoid}
+                disabled={voiding}
+                className="rounded-lg bg-danger-600 px-4 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-danger-700 disabled:opacity-50"
+              >
+                {voiding ? t("salesHistory.voiding") : t("salesHistory.voidConfirmButton")}
+              </button>
+            </div>
+          </div>
+        )}
+      </Modal>
     </>
   );
 }

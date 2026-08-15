@@ -37,6 +37,18 @@ const flush = async () => {
     await refreshFromServer();
   } catch (error) {
     console.warn("Offline sync flush stopped early:", error);
+    if (error.isAuthError) {
+      // A dropped/expired session (not a dead network — connectivity.js already confirmed
+      // the server itself is reachable, via /api/health, before this ever ran) would
+      // otherwise fail silently here forever, since this runs with no user interaction at
+      // all (triggered purely by a connectivity subscription). This is a distinct signal
+      // from the generic "you're logged out, go to /login" handling in AuthContext.jsx —
+      // specifically calling out that queued sales are stuck because of it. Plain
+      // window event, not a direct toast call, since this module has no React/hook
+      // access — a listener in AuthContext.jsx (already mounted app-wide) picks it up.
+      const stillPending = await outbox.pendingCount();
+      window.dispatchEvent(new CustomEvent("sync:auth-error", { detail: { pendingCount: stillPending } }));
+    }
   } finally {
     state.syncing = false;
     await refreshPendingCount();

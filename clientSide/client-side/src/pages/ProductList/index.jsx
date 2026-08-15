@@ -16,12 +16,15 @@ import CartDock from "categoriesComponents/CartDock";
 import AddProductModal from "categoriesComponents/addProductModel";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
+import { useAuth } from "auth/AuthContext";
 import { apiGet } from "utils/api";
 import * as offlineCache from "offline/cache";
 
 export default function ProductListPage() {
   const toast = useToast();
   const { t } = useLanguage();
+  const { user } = useAuth();
+  const isOwner = user?.role === "owner";
   const [categories, setCategories] = useState([]);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -161,14 +164,16 @@ export default function ProductListPage() {
               />
               <HiOutlineMagnifyingGlass className="pointer-events-none absolute inset-y-0 right-3 my-auto text-lg text-gray-500 dark:text-gray-400" />
             </div>
-            <button
-              type="button"
-              onClick={() => setIsAddProductOpen(true)}
-              className="inline-flex h-10 items-center gap-2 rounded-xl bg-primary-600 px-4 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700"
-            >
-              <HiOutlinePlusCircle className="text-lg" />
-              {t("pos.addProduct")}
-            </button>
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setIsAddProductOpen(true)}
+                className="inline-flex h-10 items-center gap-2 rounded-xl bg-primary-600 px-4 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700"
+              >
+                <HiOutlinePlusCircle className="text-lg" />
+                {t("pos.addProduct")}
+              </button>
+            )}
           </div>
         }
       >

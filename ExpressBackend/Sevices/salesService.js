@@ -1,17 +1,22 @@
 const { pool } = require("../Db");
 const { getLotById, decrementLot } = require("./lotService");
 const { getSettings } = require("./settingsService");
+const ApiError = require("../utils/ApiError");
 
-const insertSales = async (sellingPrice, sellingQuantity, product_id, lotId, buyingPrice) => {
+// RETURNING * used to be discarded here — nothing on the client ever learned a sale's
+// id, which void needs (to reference "this specific sale" right after checkout, not just
+// ones already round-tripped through Sales History).
+const insertSales = async (sellingPrice, sellingQuantity, product_id, lotId, buyingPrice, soldBy) => {
   try {
-    await pool.query(
+    const { rows } = await pool.query(
       `
-      INSERT INTO sales (selling_price, quantity, product_id, sale_time, lot_id, buying_price)
-      VALUES ($1, $2, $3, NOW(), $4, $5)
+      INSERT INTO sales (selling_price, quantity, product_id, sale_time, lot_id, buying_price, sold_by)
+      VALUES ($1, $2, $3, NOW(), $4, $5, $6)
       RETURNING *;
     `,
-      [sellingPrice, sellingQuantity, product_id, lotId, buyingPrice]
+      [sellingPrice, sellingQuantity, product_id, lotId, buyingPrice, soldBy]
     );
+    return rows[0];
   } catch (err) {
     throw new Error(err.message);
   }
@@ -30,6 +35,7 @@ const getRecentSales = async () => {
           p.productname
       FROM public.sales s
       JOIN public.products p ON s.product_id = p.id
+      WHERE s.is_voided = false
       ORDER BY s.sale_time DESC
       LIMIT 1;  -- Get only the most recent sale
     `;
@@ -63,6 +69,7 @@ const getRecentSales = async () => {
       FROM public.sales s
       JOIN public.products p ON s.product_id = p.id
       WHERE DATE_TRUNC('second', s.sale_time) = $1  -- Match the truncated time
+        AND s.is_voided = false
       ORDER BY s.sale_time DESC;
     `;
 
@@ -102,7 +109,7 @@ const getLowStockThreshold = async () => {
 // Sale from a specific, manually-picked lot (batch-tracked products).
 // Decrements exactly that lot (and the product's cached total), and snapshots
 // the lot's buying price onto the sale so later price changes never rewrite past profit.
-const sellFromLot = async (sellingPrice, sellingQuantity, product_id, lotId) => {
+const sellFromLot = async (sellingPrice, sellingQuantity, product_id, lotId, soldBy) => {
   const lot = await getLotById(lotId);
   if (!lot) {
     return { messageSend: `Lot not found` };
@@ -118,7 +125,7 @@ const sellFromLot = async (sellingPrice, sellingQuantity, product_id, lotId) => 
     return { messageSend: err.message };
   }
 
-  await insertSales(sellingPrice, sellingQuantity, product_id, lotId, lot.buying_price);
+  const sale = await insertSales(sellingPrice, sellingQuantity, product_id, lotId, lot.buying_price, soldBy);
 
   const { rows } = await pool.query(`SELECT quantity FROM products WHERE id = $1`, [product_id]);
   const updatedQuantity = rows[0].quantity;
@@ -129,13 +136,13 @@ const sellFromLot = async (sellingPrice, sellingQuantity, product_id, lotId) => 
     messageSend = `Inventory is less than ${threshold}`;
   }
 
-  return { updatedQuantity, messageSend, lotRemaining: updatedLot.qty_remaining };
+  return { updatedQuantity, messageSend, lotRemaining: updatedLot.qty_remaining, saleId: sale.id };
 };
 
-const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id, lotId) => {
+const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id, lotId, soldBy) => {
   try {
     if (lotId) {
-      return await sellFromLot(sellingPrice, SellingQuantity, product_id, lotId);
+      return await sellFromLot(sellingPrice, SellingQuantity, product_id, lotId, soldBy);
     }
 
     const { rows } = await pool.query(
@@ -160,7 +167,7 @@ const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id, lotI
 
       return { messageSend };
     } else {
-      await insertSales(sellingPrice, SellingQuantity, product_id, null, rows[0].buyingprice);
+      const sale = await insertSales(sellingPrice, SellingQuantity, product_id, null, rows[0].buyingprice, soldBy);
 
       updatedQuantity = getQuantity - SellingQuantity;
 
@@ -179,7 +186,7 @@ const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id, lotI
           ? `Inventory is less than ${threshold}`
           : "Sale processed successfully";
 
-      return { updatedQuantity, messageSend };
+      return { updatedQuantity, messageSend, saleId: sale.id };
     }
   } catch (err) {
     throw new Error(err.message);
@@ -192,12 +199,20 @@ const DEFAULT_HISTORY_PAGE_SIZE = 30;
 // sales rows sharing the same sale_time truncated to the second (one checkout). Pagination
 // is applied at the transaction level in SQL so a page only ever pulls the rows it needs,
 // instead of loading the entire sales table into memory and grouping in JS.
+//
+// Voided sales are NOT filtered out here (unlike every other read in this file) — this is
+// the history a void is meant to preserve, so a voided sale stays visible (the frontend
+// renders it struck-through/badged), it just no longer counts in revenue/profit anywhere
+// else. viewerFilter is how a Cashier's restricted view (their own sales, today only) is
+// applied — same conditions[]/params mechanism already used for date/category, so Sales
+// History can be the same route/page for both roles instead of a separate screen.
 const fetchBilledHistory = async (
   startDate,
   endDate,
   categoryId,
   page = 1,
-  pageSize = DEFAULT_HISTORY_PAGE_SIZE
+  pageSize = DEFAULT_HISTORY_PAGE_SIZE,
+  viewerFilter = null // { soldBy } — when set, restricts to that user's sales from today
 ) => {
   try {
     const hasDateFilter =
@@ -217,6 +232,11 @@ const fetchBilledHistory = async (
     if (hasCategoryFilter) {
       params.push(parsedCategoryId);
       conditions.push(`p.category_id = $${params.length}`);
+    }
+    if (viewerFilter?.soldBy) {
+      params.push(viewerFilter.soldBy);
+      conditions.push(`s.sold_by = $${params.length}`);
+      conditions.push(`s.sale_time >= CURRENT_DATE`);
     }
     const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const joinClause = hasCategoryFilter
@@ -253,6 +273,7 @@ const fetchBilledHistory = async (
 
     const rowsResult = await pool.query(
       `SELECT s.id, s.selling_price, s.buying_price, s.quantity, s.sale_time, s.product_id,
+              s.sold_by, s.is_voided, s.voided_at, s.void_reason,
               p.productname, l.lot_code
        FROM public.sales s
        JOIN public.products p ON s.product_id = p.id
@@ -277,6 +298,10 @@ const fetchBilledHistory = async (
         productname: row.productname,
         // Which lot this unit was sold out of, when the product is lot-tracked
         lot_code: row.lot_code,
+        sold_by: row.sold_by,
+        is_voided: row.is_voided,
+        voided_at: row.voided_at,
+        void_reason: row.void_reason,
       });
     });
 
@@ -293,6 +318,75 @@ const fetchBilledHistory = async (
 
 const isValidDate = (date) => {
   return !isNaN(new Date(date).getTime());
+};
+
+// Reverses a sale: restores stock and marks it voided — never deletes or overwrites the
+// original row's own fields (same append-only philosophy as party_transactions). Who's
+// allowed to void what is enforced here, not just via route middleware, since the rule is
+// conditional (Owner: anything, any time; Cashier: only their own sale, only same-day) —
+// requireAuth/requireOwner alone can't express that.
+const voidSale = async (saleId, requestingUser, reason) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(`SELECT * FROM sales WHERE id = $1 FOR UPDATE`, [saleId]);
+    const sale = rows[0];
+    if (!sale) throw new ApiError(404, "Sale not found");
+    if (sale.is_voided) throw new ApiError(409, "This sale has already been voided");
+
+    if (requestingUser.role !== "owner") {
+      const { rows: dateCheck } = await client.query(
+        `SELECT DATE(sale_time) = CURRENT_DATE AS is_today FROM sales WHERE id = $1`,
+        [saleId]
+      );
+      const isOwnSale = String(sale.sold_by) === String(requestingUser.id);
+      const isToday = dateCheck[0]?.is_today;
+      if (!isOwnSale || !isToday) {
+        throw new ApiError(403, "You can only void your own sales from today");
+      }
+    }
+
+    // Restore stock — mirrors decrementLot/the plain-product path in reverse. Skipped
+    // (but the sale is still marked voided) if the product/lot was since deleted — can't
+    // restore stock to inventory that no longer exists.
+    if (sale.lot_id) {
+      const { rows: lotRows } = await client.query(`SELECT * FROM lots WHERE id = $1`, [sale.lot_id]);
+      if (lotRows[0]) {
+        await client.query(`UPDATE lots SET qty_remaining = qty_remaining + $2 WHERE id = $1`, [
+          sale.lot_id,
+          sale.quantity,
+        ]);
+        await client.query(`UPDATE products SET quantity = quantity + $2 WHERE id = $1`, [
+          lotRows[0].product_id,
+          sale.quantity,
+        ]);
+      }
+    } else if (sale.product_id) {
+      // A 0 rowCount here (product since deleted) is fine — nothing to restore, and the
+      // sale still gets marked voided below regardless.
+      await client.query(`UPDATE products SET quantity = quantity + $2 WHERE id = $1`, [
+        sale.product_id,
+        sale.quantity,
+      ]);
+    }
+
+    const { rows: updated } = await client.query(
+      `UPDATE sales
+       SET is_voided = true, voided_at = NOW(), void_reason = $2, voided_by = $3
+       WHERE id = $1
+       RETURNING *`,
+      [saleId, reason || null, requestingUser.id]
+    );
+
+    await client.query("COMMIT");
+    return updated[0];
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err;
+  } finally {
+    client.release();
+  }
 };
 
 const fetchSales = async (startDate, endDate) => {
@@ -326,7 +420,7 @@ const fetchSales = async (startDate, endDate) => {
        FROM Sales s
        INNER JOIN Products p ON s.product_id = p.id
        INNER JOIN Categories c ON p.category_id = c.id  -- Join with Categories table to get category name
-       WHERE s.sale_time BETWEEN $1 AND $2
+       WHERE s.sale_time BETWEEN $1 AND $2 AND s.is_voided = false
        GROUP BY p.productname, p.category_id, c.category_name  -- Group by necessary columns including category name
        ORDER BY profit_loss DESC`,
       [startDate, endDate]
@@ -388,7 +482,7 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type) => {
        FROM Sales s
        INNER JOIN Products p ON s.product_id = p.id
        INNER JOIN Categories c ON p.category_id = c.id
-       WHERE s.sale_time BETWEEN $1 AND $2
+       WHERE s.sale_time BETWEEN $1 AND $2 AND s.is_voided = false
        GROUP BY p.productname, p.category_id, c.category_name  -- Group by product name and category
        HAVING ${profitCondition} -- Apply the profit condition for profit-only items
        ORDER BY overall_profit_loss DESC`,
@@ -427,7 +521,7 @@ const fetchSalesTimeSeries = async (startDate, endDate) => {
        SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit,
        SUM(s.quantity)::BIGINT AS units
      FROM Sales s
-     WHERE s.sale_time BETWEEN $1 AND $2
+     WHERE s.sale_time BETWEEN $1 AND $2 AND s.is_voided = false
      GROUP BY day
      ORDER BY day`,
     [startDate, endDate]
@@ -443,4 +537,5 @@ module.exports = {
   fetchSalesTimeSeries,
   getRecentSales,
   fetchBilledHistory,
+  voidSale,
 };

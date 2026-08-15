@@ -7,6 +7,7 @@ import SidebarContent from "./SidebarContent";
 import GlobalSearch from "components/GlobalSearch";
 import LowStockBell from "./LowStockBell";
 import OfflineStatusBadge from "./OfflineStatusBadge";
+import UserMenu from "./UserMenu";
 import CartCheckout from "categoriesComponents/cartCheckout";
 
 export default function AppShell({ title, actions, hideSearch, children }) {
@@ -67,6 +68,7 @@ export default function AppShell({ title, actions, hideSearch, children }) {
           <div className="flex items-center gap-2">
             <OfflineStatusBadge />
             <LowStockBell />
+            <UserMenu />
           </div>
         </header>
 
@@ -80,6 +82,7 @@ export default function AppShell({ title, actions, hideSearch, children }) {
               {!hideSearch && <GlobalSearch />}
               <OfflineStatusBadge />
               <LowStockBell />
+              <UserMenu />
             </div>
           </div>
           {actions && (

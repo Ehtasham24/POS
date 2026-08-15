@@ -9,18 +9,58 @@ import {
   HiOutlineBuildingOffice2,
 } from "react-icons/hi2";
 
+// `roles` omitted = visible to everyone logged in (Owner and Cashier alike). A Cashier's
+// role is restricted to selling + their own Sales History — matches the ProtectedRoute
+// guards in App.jsx (a matching "roles" list here just keeps a Cashier from ever *seeing*
+// a link to a page they'd be redirected away from anyway).
 export const navItems = [
   { to: "/", label: "Categories", labelKey: "nav.categories", icon: HiOutlineSquares2X2, end: true },
-  { to: "/inventory", label: "Inventory", labelKey: "nav.inventory", icon: HiOutlineArchiveBox },
+  {
+    to: "/inventory",
+    label: "Inventory",
+    labelKey: "nav.inventory",
+    icon: HiOutlineArchiveBox,
+    roles: ["owner"],
+  },
   {
     to: "/sales-history",
     label: "Sales History",
     labelKey: "nav.salesHistory",
     icon: HiOutlineClipboardDocumentList,
   },
-  { to: "/credit-debit", label: "Credit / Debit", labelKey: "nav.creditDebit", icon: HiOutlineBanknotes },
-  { to: "/contacts", label: "Contacts", labelKey: "nav.contacts", icon: HiOutlineUserGroup },
-  { to: "/report", label: "Sales Report", labelKey: "nav.report", icon: HiOutlineChartBarSquare },
-  { to: "/company", label: "Company", labelKey: "nav.company", icon: HiOutlineBuildingOffice2 },
-  { to: "/settings", label: "Settings", labelKey: "nav.settings", icon: HiOutlineCog6Tooth },
+  {
+    to: "/credit-debit",
+    label: "Credit / Debit",
+    labelKey: "nav.creditDebit",
+    icon: HiOutlineBanknotes,
+    roles: ["owner"],
+  },
+  {
+    to: "/contacts",
+    label: "Contacts",
+    labelKey: "nav.contacts",
+    icon: HiOutlineUserGroup,
+    roles: ["owner"],
+  },
+  {
+    to: "/report",
+    label: "Sales Report",
+    labelKey: "nav.report",
+    icon: HiOutlineChartBarSquare,
+    roles: ["owner"],
+  },
+  {
+    to: "/company",
+    label: "Company",
+    labelKey: "nav.company",
+    icon: HiOutlineBuildingOffice2,
+    roles: ["owner"],
+  },
+  {
+    to: "/settings",
+    label: "Settings",
+    labelKey: "nav.settings",
+    icon: HiOutlineCog6Tooth,
+    roles: ["owner"],
+  },
 ];

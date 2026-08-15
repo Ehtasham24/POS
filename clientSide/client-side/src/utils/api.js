@@ -10,7 +10,11 @@
 export const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
 
 const request = async (method, path, body) => {
-  const options = { method };
+  // credentials:"include" is required for the httpOnly session cookie to round-trip in
+  // npm start's dev mode, where the CRA dev server (localhost:3000) and this API
+  // (localhost:4000) are a different origin — same-origin in production, where this is a
+  // no-op either way. Paired with Server.js's cors({credentials: true}).
+  const options = { method, credentials: "include" };
   if (body !== undefined) {
     options.headers = { "Content-Type": "application/json" };
     options.body = JSON.stringify(body);
@@ -31,7 +35,19 @@ const request = async (method, path, body) => {
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
-    throw new Error(errData.message || response.statusText || "Request failed");
+    const error = new Error(errData.message || response.statusText || "Request failed");
+    if (response.status === 401) {
+      // Distinct from isNetworkError — this means the request *did* reach the server,
+      // it just isn't (or is no longer) an authenticated one. Callers that need to tell
+      // "logged out" apart from "network down" (offline/connectivity.js,
+      // offline/syncManager.js) check this. Also broadcast globally so AuthContext can
+      // react immediately (clear the user, redirect to /login) no matter which of the
+      // dozens of call sites across the app happened to trigger it — most callers don't
+      // need to handle this themselves at all.
+      error.isAuthError = true;
+      window.dispatchEvent(new CustomEvent("auth:unauthorized"));
+    }
+    throw error;
   }
 
   if (response.status === 204) return null;

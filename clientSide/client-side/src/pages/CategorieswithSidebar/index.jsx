@@ -14,6 +14,7 @@ import {
 import { addCart } from "cartRedux/cartSlice";
 import useDebounce from "hooks/useDebounce";
 import { useLanguage } from "i18n/LanguageContext";
+import { useAuth } from "auth/AuthContext";
 
 import AppShell from "components/AppShell";
 import { Modal } from "components";
@@ -33,6 +34,8 @@ export default function CategorieswithSidebarPage() {
   const navigate = useNavigate();
   const { t } = useLanguage();
   const toast = useToast();
+  const { user } = useAuth();
+  const isOwner = user?.role === "owner";
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -335,33 +338,39 @@ export default function CategorieswithSidebarPage() {
       <AppShell
         title={t("nav.categories")}
         hideSearch
+        // Adding/editing categories and products is inventory management — Owner only,
+        // same restriction as the Inventory page itself. A Cashier's role is selling
+        // only, so this toolbar simply doesn't render for them rather than showing
+        // buttons that would 403 if clicked.
         actions={
-          <>
-            <button
-              type="button"
-              onClick={() => setIsAddProductOpen(true)}
-              className={`${toolbarButtonClass} bg-primary-600 text-white-A700 hover:bg-primary-700`}
-            >
-              <HiOutlinePlusCircle className="text-lg" />
-              {t("pos.addProduct")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsAddCategoryOpen(true)}
-              className={`${toolbarButtonClass} bg-surface-muted text-gray-800 hover:bg-surface-border dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700`}
-            >
-              <HiOutlineTag className="text-lg" />
-              {t("pos.addCategory")}
-            </button>
-            <button
-              type="button"
-              onClick={() => setIsUpdateProductOpen(true)}
-              className={`${toolbarButtonClass} bg-surface-muted text-gray-800 hover:bg-surface-border dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700`}
-            >
-              <HiOutlinePencil className="text-lg" />
-              {t("pos.update")}
-            </button>
-          </>
+          isOwner && (
+            <>
+              <button
+                type="button"
+                onClick={() => setIsAddProductOpen(true)}
+                className={`${toolbarButtonClass} bg-primary-600 text-white-A700 hover:bg-primary-700`}
+              >
+                <HiOutlinePlusCircle className="text-lg" />
+                {t("pos.addProduct")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsAddCategoryOpen(true)}
+                className={`${toolbarButtonClass} bg-surface-muted text-gray-800 hover:bg-surface-border dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700`}
+              >
+                <HiOutlineTag className="text-lg" />
+                {t("pos.addCategory")}
+              </button>
+              <button
+                type="button"
+                onClick={() => setIsUpdateProductOpen(true)}
+                className={`${toolbarButtonClass} bg-surface-muted text-gray-800 hover:bg-surface-border dark:bg-gray-800 dark:text-gray-100 dark:hover:bg-gray-700`}
+              >
+                <HiOutlinePencil className="text-lg" />
+                {t("pos.update")}
+              </button>
+            </>
+          )
         }
       >
         <div className="cartDock:pr-96 pb-16 cartDock:pb-0">
