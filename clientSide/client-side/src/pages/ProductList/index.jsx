@@ -195,19 +195,27 @@ export default function ProductListPage() {
 
         <div className="w-full overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
           <div className="max-h-[70vh] overflow-auto">
-            <table className="w-full min-w-[640px] border-collapse">
+            {/* table-fixed + fixed px widths on every column but Product (which gets the
+                remainder): auto layout was letting a long product name wrap onto several
+                lines, and since the "N lots" badge sits beside it in the same items-center
+                flex row, it ended up vertically centered against that multi-line block —
+                landing visually on top of the Quantity column's badge on a phone-narrow
+                table. Product now truncates to one line (title attr for the full name)
+                instead of wrapping, so the row height — and every badge's position — stays
+                predictable regardless of name length. */}
+            <table className="w-full min-w-[640px] table-fixed border-collapse">
               <thead className="sticky top-0 bg-surface-subtle dark:bg-gray-800">
                 <tr>
                   <th className="pl-5 pr-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("inventory.product")}
                   </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <th className="w-32 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("productList.quantity")}
                   </th>
-                  <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <th className="w-24 px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("productList.buyingPrice")}
                   </th>
-                  <th></th>
+                  <th className="w-40"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-border dark:divide-gray-800">
@@ -234,22 +242,29 @@ export default function ProductListPage() {
                           <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
                             <HiOutlineCube className="text-lg text-primary-600 dark:text-primary-400" />
                           </div>
-                          <span className="font-medium text-gray-800 dark:text-gray-100">
+                          {/* min-w-0 is what actually lets a flex child shrink below its
+                              content size — without it, truncate has no room to kick in and
+                              the name just wraps instead, dragging the "N lots" badge (kept
+                              on one line via shrink-0) down with it. */}
+                          <span
+                            className="min-w-0 flex-1 truncate font-medium text-gray-800 dark:text-gray-100"
+                            title={product.productname}
+                          >
                             {product.productname}
                           </span>
                           {product.batch_tracked && (
-                            <span className="rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
+                            <span className="shrink-0 rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
                               {product.lot_count} lot{Number(product.lot_count) === 1 ? "" : "s"}
                             </span>
                           )}
                         </div>
                       </td>
                       <td className="px-3 py-3">
-                        <span className="inline-flex rounded-full bg-surface-muted px-2.5 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
+                        <span className="inline-flex max-w-full truncate rounded-full bg-surface-muted px-2.5 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
                           {product.quantity} {t("sell.inStock").toLowerCase()}
                         </span>
                       </td>
-                      <td className="px-3 py-3 text-gray-800 dark:text-gray-100">
+                      <td className="truncate px-3 py-3 text-gray-800 dark:text-gray-100">
                         Rs.{product.buyingprice}
                       </td>
                       <td className="py-3 pr-5 text-right whitespace-nowrap space-x-2">

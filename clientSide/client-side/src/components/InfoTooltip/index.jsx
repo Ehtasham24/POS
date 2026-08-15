@@ -11,12 +11,20 @@ export default function InfoTooltip({ text, className = "" }) {
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
   const popupRef = useRef(null);
-  // How far left (px) to shift the popup from its default left-aligned position, so it
-  // stays on-screen instead of pushing the *whole page* into horizontal scroll — this
-  // component is used on triggers scattered anywhere across a row (stat cards, legends),
-  // and a fixed left-0 anchor overflows the viewport whenever the trigger sits near the
-  // right edge, confirmed on a phone with the Credit/Debit legend's rightmost icon.
-  const [shiftLeft, setShiftLeft] = useState(0);
+  // Explicit `left` (px, relative to the container) to override the default `left-0` when
+  // that would run the popup off-screen — this component is used on triggers scattered
+  // anywhere across a row (stat cards, legends), and a fixed left-0 anchor overflows the
+  // viewport whenever the trigger sits near the right edge, confirmed on a phone with the
+  // Credit/Debit legend's rightmost icon. null = use the default left-0.
+  //
+  // Deliberately a `left` offset, not a `transform: translateX` — transform only changes
+  // where a box is *painted*; the box's untransformed layout position is still what the
+  // browser uses to compute the page's scrollable width. A transform-based shift can look
+  // fine on the screen that's actually rendering it while still silently widening
+  // document.documentElement.scrollWidth, which is exactly what happened here: confirmed
+  // on a real phone (a blank strip on the right, page content shifted/scrolled left) even
+  // though an automated check of scrollWidth right after clicking hadn't caught it.
+  const [leftPx, setLeftPx] = useState(null);
 
   useEffect(() => {
     if (!open) return;
@@ -29,13 +37,20 @@ export default function InfoTooltip({ text, className = "" }) {
 
   useLayoutEffect(() => {
     if (!open) {
-      setShiftLeft(0);
+      setLeftPx(null);
       return;
     }
-    if (!popupRef.current) return;
-    const rect = popupRef.current.getBoundingClientRect();
-    const overflowRight = rect.right - (window.innerWidth - EDGE_MARGIN);
-    if (overflowRight > 0) setShiftLeft(overflowRight);
+    if (!popupRef.current || !containerRef.current) return;
+    const popupWidth = popupRef.current.getBoundingClientRect().width;
+    const containerLeft = containerRef.current.getBoundingClientRect().left;
+    const maxViewportLeft = window.innerWidth - popupWidth - EDGE_MARGIN;
+    // Natural position is containerLeft (that's what left:0 renders as); only override it
+    // when that would push the popup's right edge past the viewport.
+    if (containerLeft > maxViewportLeft) {
+      setLeftPx(Math.max(EDGE_MARGIN, maxViewportLeft) - containerLeft);
+    } else {
+      setLeftPx(null);
+    }
   }, [open]);
 
   return (
@@ -54,7 +69,7 @@ export default function InfoTooltip({ text, className = "" }) {
       {open && (
         <div
           ref={popupRef}
-          style={shiftLeft ? { transform: `translateX(-${shiftLeft}px)` } : undefined}
+          style={leftPx !== null ? { left: `${leftPx}px` } : undefined}
           // z-50, above the global floating cart button (z-40, AppShell/cartCheckout.jsx) —
           // a tooltip the user just deliberately opened must never render underneath other
           // floating chrome, which is exactly what made this unreadable on a phone.

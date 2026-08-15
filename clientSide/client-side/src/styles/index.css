@@ -1,3 +1,18 @@
+/* Hard safety net: this page should never itself scroll sideways — any table/card that
+   needs horizontal scroll (Inventory, Credit/Debit, ProductList, ...) already opts into
+   its own overflow-x:auto container, which is completely unaffected by this. This exists
+   because a stray overflowing element (a tooltip positioned a few px too far right, a
+   fixed-width child that doesn't quite fit, anything) doesn't just get clipped on its
+   own — it silently widens the *whole document's* scrollable area, and a phone's normal
+   touch-drag/elastic-scroll gesture then reveals it as the entire page sliding sideways,
+   clipping content on the left and exposing blank space on the right. Confirmed live on a
+   phone even after fixing one specific overflowing tooltip, so this net stays regardless
+   of whether every individual source of overflow has been found. */
+html,
+body {
+  overflow-x: hidden;
+  max-width: 100%;
+}
 body {
   margin: 0;
   padding: 0;
