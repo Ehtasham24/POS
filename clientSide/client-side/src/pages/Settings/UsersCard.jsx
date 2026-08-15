@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { HiOutlineUsers, HiOutlinePlusCircle } from "react-icons/hi2";
+import { HiOutlineUsers, HiOutlinePlusCircle, HiOutlinePencil } from "react-icons/hi2";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
@@ -18,6 +18,12 @@ export default function UsersCard() {
   const [showAdd, setShowAdd] = useState(false);
   const [form, setForm] = useState({ username: "", password: "", displayName: "", role: "cashier" });
   const [saving, setSaving] = useState(false);
+  // Editing name/role/password of an existing account — separate from `form` (Add User)
+  // since this one's password field means something different: blank = leave the current
+  // password unchanged, not "required, 6+ chars" like a brand-new account.
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState({ displayName: "", role: "cashier", password: "" });
+  const [editSaving, setEditSaving] = useState(false);
 
   const fetchUsers = async () => {
     try {
@@ -54,6 +60,30 @@ export default function UsersCard() {
       fetchUsers();
     } catch (error) {
       toast.error(error.message);
+    }
+  };
+
+  const openEdit = (u) => {
+    setEditTarget(u);
+    setEditForm({ displayName: u.displayName, role: u.role, password: "" });
+  };
+
+  const handleEditSave = async (e) => {
+    e.preventDefault();
+    setEditSaving(true);
+    try {
+      // Only send a password if one was actually typed — the backend leaves it unchanged
+      // when the field is omitted (usersService.js's updateUser: `password ?? current`).
+      const payload = { displayName: editForm.displayName, role: editForm.role };
+      if (editForm.password) payload.password = editForm.password;
+      await apiPatch(`/api/users/${editTarget.id}`, payload);
+      toast.success(t("auth.userUpdated"));
+      setEditTarget(null);
+      fetchUsers();
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -101,19 +131,29 @@ export default function UsersCard() {
                       </span>
                     </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => toggleActive(u)}
-                    disabled={u.id === currentUser?.id}
-                    title={u.id === currentUser?.id ? t("auth.cantDeactivateSelf") : ""}
-                    className={`shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
-                      u.isActive
-                        ? "bg-success-50 text-success-600 hover:bg-success-100 dark:bg-success-500/10 dark:text-success-500"
-                        : "bg-surface-muted text-gray-500 hover:bg-surface-border dark:bg-gray-700 dark:text-gray-400"
-                    }`}
-                  >
-                    {u.isActive ? t("auth.active") : t("auth.inactive")}
-                  </button>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => openEdit(u)}
+                      aria-label={t("common.edit")}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+                    >
+                      <HiOutlinePencil className="text-base" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => toggleActive(u)}
+                      disabled={u.id === currentUser?.id}
+                      title={u.id === currentUser?.id ? t("auth.cantDeactivateSelf") : ""}
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                        u.isActive
+                          ? "bg-success-50 text-success-600 hover:bg-success-100 dark:bg-success-500/10 dark:text-success-500"
+                          : "bg-surface-muted text-gray-500 hover:bg-surface-border dark:bg-gray-700 dark:text-gray-400"
+                      }`}
+                    >
+                      {u.isActive ? t("auth.active") : t("auth.inactive")}
+                    </button>
+                  </div>
                 </div>
               ))
             )}
@@ -195,6 +235,74 @@ export default function UsersCard() {
               className="rounded-lg bg-primary-600 px-4 py-2 text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
             >
               {saving ? t("common.saving") : t("common.save")}
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!editTarget} onClose={() => setEditTarget(null)} title={t("auth.editUser")}>
+        <form onSubmit={handleEditSave} className="space-y-3">
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+              {t("auth.displayName")}
+            </label>
+            <input
+              type="text"
+              required
+              value={editForm.displayName}
+              onChange={(e) => setEditForm((f) => ({ ...f, displayName: e.target.value }))}
+              className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+              {t("auth.role")}
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              {["cashier", "owner"].map((role) => (
+                <button
+                  key={role}
+                  type="button"
+                  onClick={() => setEditForm((f) => ({ ...f, role }))}
+                  className={`rounded-lg border px-4 py-2.5 text-sm font-semibold capitalize transition-colors ${
+                    editForm.role === role
+                      ? "border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400"
+                      : "border-surface-border text-gray-600 hover:bg-surface-subtle dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  {role === "owner" ? t("auth.roleOwner") : t("auth.roleCashier")}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+              {t("auth.newPasswordOptional")}
+            </label>
+            <input
+              type="password"
+              minLength={6}
+              placeholder={t("auth.newPasswordPlaceholder")}
+              value={editForm.password}
+              onChange={(e) => setEditForm((f) => ({ ...f, password: e.target.value }))}
+              className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+            />
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">{t("auth.newPasswordHint")}</p>
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setEditTarget(null)}
+              className="rounded-lg bg-surface-muted px-4 py-2 text-gray-800 transition-colors hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
+            >
+              {t("sell.cancel")}
+            </button>
+            <button
+              type="submit"
+              disabled={editSaving}
+              className="rounded-lg bg-primary-600 px-4 py-2 text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
+            >
+              {editSaving ? t("common.saving") : t("common.save")}
             </button>
           </div>
         </form>

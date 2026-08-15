@@ -97,6 +97,11 @@ const translations = {
       active: "Active",
       inactive: "Inactive",
       cantDeactivateSelf: "You can't deactivate your own account",
+      editUser: "Edit User",
+      userUpdated: "User updated",
+      newPasswordOptional: "New Password (optional)",
+      newPasswordPlaceholder: "Leave blank to keep current password",
+      newPasswordHint: "Only fill this in if you want to change the password.",
     },
     settings: {
       title: "Settings",
@@ -373,6 +378,11 @@ const translations = {
       active: "فعال",
       inactive: "غیر فعال",
       cantDeactivateSelf: "آپ اپنا اکاؤنٹ غیر فعال نہیں کر سکتے",
+      editUser: "یوزر میں ترمیم کریں",
+      userUpdated: "یوزر اپڈیٹ ہو گیا",
+      newPasswordOptional: "نیا پاس ورڈ (اختیاری)",
+      newPasswordPlaceholder: "موجودہ پاس ورڈ رکھنے کے لیے خالی چھوڑیں",
+      newPasswordHint: "صرف اسی صورت میں بھریں اگر پاس ورڈ تبدیل کرنا ہے۔",
     },
     settings: {
       title: "ترتیبات",
