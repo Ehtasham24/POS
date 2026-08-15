@@ -15,7 +15,7 @@ const esc = (value) =>
     "'": "&#39;",
   }[ch]));
 
-function printViaBrowserDialog(salesData, totalAmount, company) {
+function printViaBrowserDialog(salesData, totalAmount, company, existingWindow) {
   const itemRows = salesData.length
     ? salesData
         .map((sale) => {
@@ -97,7 +97,7 @@ function printViaBrowserDialog(salesData, totalAmount, company) {
   </html>
   `;
 
-  const receiptWindow = window.open("", "_blank", "width=400,height=600");
+  const receiptWindow = existingWindow || window.open("", "_blank", "width=400,height=600");
   if (receiptWindow) {
     receiptWindow.document.write(receiptContent);
     receiptWindow.document.close();
@@ -111,6 +111,16 @@ function printViaBrowserDialog(salesData, totalAmount, company) {
 // Falls back to the OS print dialog everywhere else: no printer connected, unsupported
 // browser (Safari/iOS/Firefox), or the direct write itself fails mid-print.
 export async function printReceipt(salesData, totalAmount, { onFallback } = {}) {
+  const printerConnected = !!printerConnection.getStatus().type;
+  // Pre-open the receipt window synchronously, before any `await` below, when we're
+  // going to need one — most browsers only allow window.open() to escape popup-blocking
+  // within the same synchronous continuation as the user gesture that triggered this
+  // call (a click), and everything from here down is async (fetching settings, checking
+  // out). Called right after checkout completes rather than from a plain onClick, this
+  // is a real risk, not a theoretical one — confirmed blocked in a headless-Chrome dry
+  // run before adding this.
+  const receiptWindow = printerConnected ? null : window.open("", "_blank", "width=400,height=600");
+
   let company = {};
   try {
     company = await withFallback(() => apiGet("/api/settings"), getOfflineSettings);
@@ -118,7 +128,7 @@ export async function printReceipt(salesData, totalAmount, { onFallback } = {}) 
     console.error("Error fetching company settings for receipt:", error);
   }
 
-  if (printerConnection.getStatus().type) {
+  if (printerConnected) {
     try {
       const bytes = await buildReceiptBytes(salesData, totalAmount, company);
       await printerConnection.write(bytes);
@@ -126,10 +136,15 @@ export async function printReceipt(salesData, totalAmount, { onFallback } = {}) 
     } catch (error) {
       console.warn("Direct thermal print failed, falling back to print dialog:", error);
       onFallback?.("Direct print failed — opening print dialog instead.");
+      // No pre-opened window for this path (we didn't expect to need one) — same
+      // popup-blocking exposure this fallback already had before this change, not a
+      // regression, just not newly fixed either.
+      printViaBrowserDialog(salesData, totalAmount, company);
+      return;
     }
   }
 
-  printViaBrowserDialog(salesData, totalAmount, company);
+  printViaBrowserDialog(salesData, totalAmount, company, receiptWindow);
 }
 
 // Lets the Company page's "Test Print" button confirm a newly-paired printer actually
