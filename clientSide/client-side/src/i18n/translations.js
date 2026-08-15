@@ -69,6 +69,7 @@ const translations = {
     receipt: {
       title: "Receipt",
       receiptTitle: "RECEIPT",
+      receiptNo: "Receipt No",
       noItems: "No items",
       total: "TOTAL",
       thankYou: "Thank you for your purchase!",
@@ -248,6 +249,7 @@ const translations = {
       allCategories: "All Categories",
       clearFilter: "Clear filter",
       dateTime: "Date/Time",
+      receiptNo: "Receipt No",
       items: "Items",
       total: "Total",
       loading: "Loading...",
@@ -355,6 +357,7 @@ const translations = {
     receipt: {
       title: "رسید",
       receiptTitle: "رسید",
+      receiptNo: "رسید نمبر",
       noItems: "کوئی آئٹم نہیں",
       total: "کل رقم",
       thankYou: "خریداری کا شکریہ!",
@@ -533,6 +536,7 @@ const translations = {
       allCategories: "تمام کیٹیگریز",
       clearFilter: "فلٹر ہٹائیں",
       dateTime: "تاریخ/وقت",
+      receiptNo: "رسید نمبر",
       items: "اشیاء",
       total: "کل",
       loading: "لوڈ ہو رہا ہے...",

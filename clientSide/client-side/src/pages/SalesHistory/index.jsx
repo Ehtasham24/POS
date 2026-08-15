@@ -280,8 +280,14 @@ export default function SalesHistoryPage() {
                               }`}
                             />
                           </td>
-                          <td className="truncate px-3 py-3 text-gray-800 dark:text-gray-100">
-                            {new Date(batch[0].sale_time).toLocaleString()}
+                          <td className="px-3 py-3 text-gray-800 dark:text-gray-100">
+                            <div className="truncate">{new Date(batch[0].sale_time).toLocaleString()}</div>
+                            {/* null for legacy (pre-receipt-number) batches — nothing to show there */}
+                            {batch[0].receipt_no && (
+                              <div className="truncate text-xs font-normal text-gray-400 dark:text-gray-500">
+                                {batch[0].receipt_no}
+                              </div>
+                            )}
                           </td>
                           <td className="px-3 py-3">
                             <span className="inline-flex rounded-full bg-surface-muted px-2.5 py-1 text-xs font-semibold text-gray-700 dark:bg-gray-700 dark:text-gray-200">
@@ -310,7 +316,9 @@ export default function SalesHistoryPage() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                printReceipt(batch, batchTotal(batch), { onFallback: toast.info });
+                                printReceipt(batch, batchTotal(batch), batch[0]?.receipt_no, {
+                                  onFallback: toast.info,
+                                });
                               }}
                               className="inline-flex items-center gap-1.5 px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white-A700 text-xs font-bold uppercase rounded-lg transition-colors"
                             >
@@ -432,6 +440,11 @@ export default function SalesHistoryPage() {
         {voidTarget && (
           <div className="space-y-4">
             <div className="rounded-lg bg-surface-subtle p-3 text-sm dark:bg-gray-900/40">
+              {voidTarget.receipt_no && (
+                <p className="mb-1 text-xs font-semibold text-gray-400 dark:text-gray-500">
+                  {t("salesHistory.receiptNo")}: {voidTarget.receipt_no}
+                </p>
+              )}
               <p className="font-semibold text-gray-800 dark:text-gray-100">{voidTarget.productname}</p>
               <p className="text-gray-500 dark:text-gray-400">
                 {voidTarget.quantity} × Rs.{voidTarget.selling_price} = Rs.

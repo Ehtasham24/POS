@@ -1,6 +1,7 @@
 const {
   getRecentSales,
   updateSalesRecord,
+  checkoutSale,
   fetchSales,
   fetchSalesByProfitLoss,
   fetchSalesTimeSeries,
@@ -23,6 +24,20 @@ const PostSales = asyncHandler(async (req, res) => {
     status: 200,
     message: "Sales data received successfully",
     data: { messageSend, updatedQuantity, saleId },
+  });
+});
+
+// Whole-cart checkout — see Sevices/salesService.js's checkoutSale for why this exists
+// alongside the older per-item PostSales above (receipt numbers need one atomic transaction
+// per checkout, not N independent inserts with no shared record of belonging together).
+const CheckoutSales = asyncHandler(async (req, res) => {
+  const { items, paymentMethod } = req.body;
+  const result = await checkoutSale(items, paymentMethod, req.user);
+
+  res.status(200).json({
+    status: 200,
+    message: "Checkout completed successfully",
+    data: result,
   });
 });
 
@@ -83,6 +98,7 @@ const getSalesTimeSeries = asyncHandler(async (req, res) => {
 
 module.exports = {
   PostSales,
+  CheckoutSales,
   getSales,
   getSalesByProfitLoss,
   getSalesTimeSeries,

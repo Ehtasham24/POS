@@ -193,11 +193,146 @@ const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id, lotI
   }
 };
 
+// Receipt numbers are just the sale_transactions row's SERIAL id, formatted — Postgres
+// allocates that atomically under concurrency by design (same guarantee sales.id/users.id
+// already rely on elsewhere in this file), so there's no custom counter/locking logic that
+// could produce a duplicate. Formatting is applied at read/display time only, never stored,
+// so the prefix/padding can change later without having to reformat historical receipts.
+const RECEIPT_PREFIX = "RCPT-";
+const formatReceiptNo = (transactionId) =>
+  transactionId ? `${RECEIPT_PREFIX}${String(transactionId).padStart(6, "0")}` : null;
+
+// Checkout: atomically creates one sale_transactions row (the receipt) plus one sales row
+// per cart item, all inside a single DB transaction — either the whole cart sells or none of
+// it does. Replaces the old pattern (still available via updateSalesRecord/insertSales below,
+// used by the standalone /sales route) where the frontend fired one independent request per
+// cart item with no server-side concept of "these rows are one checkout" — which left nothing
+// reliable for a receipt number to anchor to, and nothing a future refund could reference
+// unambiguously. sale_transactions IS that anchor now; a refund feature would later reference
+// its id (whole-receipt) and/or a sale's own id (single line-item) directly, no guessing at
+// which rows belong together the way fetchBilledHistory's legacy grouping still has to.
+//
+// Self-contained (doesn't call sellFromLot/updateSalesRecord/insertSales) so the existing
+// single-item /sales route and its callers are completely untouched by this — same stock-
+// check-and-decrement logic as decrementLot/updateSalesRecord, just re-expressed against this
+// transaction's client with FOR UPDATE row locks (mirrors voidSale's own inline-SQL style,
+// same reason: the mutation has to happen against `client`, not the module-level `pool`, to
+// actually be part of the same transaction).
+const checkoutSale = async (items, paymentMethod, requestingUser) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new ApiError(400, "Cart is empty");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows: txnRows } = await client.query(
+      `INSERT INTO sale_transactions (sold_by, payment_method) VALUES ($1, $2) RETURNING id`,
+      [requestingUser.id, paymentMethod || null]
+    );
+    const transactionId = txnRows[0].id;
+    const threshold = await getLowStockThreshold();
+
+    const soldItems = [];
+    for (const item of items) {
+      const { sellingPrice, quantity, productID, lotId } = item;
+      const qty = Number(quantity);
+      if (!Number.isFinite(qty) || qty <= 0) {
+        throw new ApiError(400, `Invalid quantity for product ${productID}`);
+      }
+
+      let buyingPrice;
+      if (lotId) {
+        const { rows: lotRows } = await client.query(
+          `SELECT * FROM lots WHERE id = $1 FOR UPDATE`,
+          [lotId]
+        );
+        const lot = lotRows[0];
+        if (!lot) throw new ApiError(404, `Lot not found for product ${productID}`);
+        if (String(lot.product_id) !== String(productID)) {
+          throw new ApiError(400, `That lot does not belong to product ${productID}`);
+        }
+        if (qty > lot.qty_remaining) {
+          throw new ApiError(
+            409,
+            `Insufficient stock in lot ${lot.lot_code} (${lot.qty_remaining} remaining)`
+          );
+        }
+        await client.query(`UPDATE lots SET qty_remaining = qty_remaining - $2 WHERE id = $1`, [
+          lotId,
+          qty,
+        ]);
+        await client.query(`UPDATE products SET quantity = quantity - $2 WHERE id = $1`, [
+          productID,
+          qty,
+        ]);
+        buyingPrice = lot.buying_price;
+      } else {
+        const { rows: productRows } = await client.query(
+          `SELECT quantity, buyingprice FROM products WHERE id = $1 FOR UPDATE`,
+          [productID]
+        );
+        const product = productRows[0];
+        if (!product) throw new ApiError(404, `Product ${productID} not found`);
+        if (qty > product.quantity) {
+          throw new ApiError(409, `Insufficient inventory for product ${productID}`);
+        }
+        await client.query(`UPDATE products SET quantity = quantity - $2 WHERE id = $1`, [
+          productID,
+          qty,
+        ]);
+        buyingPrice = product.buyingprice;
+      }
+
+      const { rows: saleRows } = await client.query(
+        `INSERT INTO sales (selling_price, quantity, product_id, sale_time, lot_id, buying_price, sold_by, transaction_id)
+         VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7)
+         RETURNING id`,
+        [sellingPrice, qty, productID, lotId || null, buyingPrice, requestingUser.id, transactionId]
+      );
+
+      const { rows: afterRows } = await client.query(`SELECT quantity FROM products WHERE id = $1`, [
+        productID,
+      ]);
+      const updatedQuantity = afterRows[0].quantity;
+
+      soldItems.push({
+        saleId: saleRows[0].id,
+        productID,
+        quantity: qty,
+        sellingPrice,
+        updatedQuantity,
+        lowStock: updatedQuantity < threshold,
+      });
+    }
+
+    await client.query("COMMIT");
+
+    return {
+      transactionId,
+      receiptNo: formatReceiptNo(transactionId),
+      items: soldItems,
+      total: items.reduce((sum, i) => sum + i.sellingPrice * i.quantity, 0),
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err instanceof ApiError ? err : new ApiError(500, err.message);
+  } finally {
+    client.release();
+  }
+};
+
 const DEFAULT_HISTORY_PAGE_SIZE = 30;
 
-// Paginated, optionally date-filtered billed history. A "transaction" is a group of
-// sales rows sharing the same sale_time truncated to the second (one checkout). Pagination
-// is applied at the transaction level in SQL so a page only ever pulls the rows it needs,
+// Paginated, optionally date-filtered billed history. A "transaction" (one checkout) is
+// grouped by sales.transaction_id where it's set (every sale since sale_transactions/
+// checkoutSale shipped); rows from before that migration have no transaction_id, so they
+// fall back to the old heuristic — sharing the same sale_time truncated to the second — so
+// pre-existing history keeps grouping the same way it always did rather than each of those
+// rows suddenly appearing as its own single-item "transaction". The batch_key expression
+// below implements that fallback directly in SQL (COALESCE onto the legacy grouping), so
+// pagination can stay applied at the transaction level for both old and new rows uniformly,
 // instead of loading the entire sales table into memory and grouping in JS.
 //
 // Voided sales are NOT filtered out here (unlike every other read in this file) — this is
@@ -206,6 +341,8 @@ const DEFAULT_HISTORY_PAGE_SIZE = 30;
 // else. viewerFilter is how a Cashier's restricted view (their own sales, today only) is
 // applied — same conditions[]/params mechanism already used for date/category, so Sales
 // History can be the same route/page for both roles instead of a separate screen.
+const BATCH_KEY_EXPR =
+  "COALESCE('txn-' || s.transaction_id::text, 'legacy-' || DATE_TRUNC('second', s.sale_time)::text)";
 const fetchBilledHistory = async (
   startDate,
   endDate,
@@ -253,7 +390,7 @@ const fetchBilledHistory = async (
       : "";
 
     const countResult = await pool.query(
-      `SELECT COUNT(DISTINCT DATE_TRUNC('second', s.sale_time)) AS total
+      `SELECT COUNT(DISTINCT ${BATCH_KEY_EXPR}) AS total
        FROM public.sales s
        ${joinClause}
        ${whereClause};`,
@@ -265,39 +402,48 @@ const fetchBilledHistory = async (
     const offset = (safePage - 1) * pageSize;
 
     const txnResult = await pool.query(
-      `SELECT DATE_TRUNC('second', s.sale_time) AS txn_time
+      `SELECT ${BATCH_KEY_EXPR} AS batch_key, MAX(s.sale_time) AS batch_time
        FROM public.sales s
        ${joinClause}
        ${whereClause}
-       GROUP BY txn_time
-       ORDER BY txn_time DESC
+       GROUP BY batch_key
+       ORDER BY batch_time DESC
        LIMIT $${params.length + 1} OFFSET $${params.length + 2};`,
       [...params, pageSize, offset]
     );
-    const txnTimes = txnResult.rows.map((row) => row.txn_time);
+    const batchKeys = txnResult.rows.map((row) => row.batch_key);
 
-    if (txnTimes.length === 0) {
+    if (batchKeys.length === 0) {
       return { batches: [], totalCount, totalPages, page: safePage, pageSize };
     }
 
     const rowsResult = await pool.query(
       `SELECT s.id, s.selling_price, s.buying_price, s.quantity, s.sale_time, s.product_id,
-              s.sold_by, s.is_voided, s.voided_at, s.void_reason,
+              s.sold_by, s.is_voided, s.voided_at, s.void_reason, s.transaction_id,
+              ${BATCH_KEY_EXPR} AS batch_key,
               p.productname, l.lot_code
        FROM public.sales s
        JOIN public.products p ON s.product_id = p.id
        LEFT JOIN public.lots l ON s.lot_id = l.id
-       WHERE DATE_TRUNC('second', s.sale_time) = ANY($1::timestamp[])
-       ORDER BY DATE_TRUNC('second', s.sale_time) DESC, s.id ASC;`,
-      [txnTimes]
+       WHERE ${BATCH_KEY_EXPR} = ANY($1::text[])
+       ORDER BY s.sale_time DESC, s.id ASC;`,
+      [batchKeys]
     );
 
-    // Bucket rows by their truncated sale_time, then rebuild in the same DESC order as txnTimes
-    const batchesByTime = new Map();
+    // Bucket rows by the SAME batch_key Postgres just computed above — not a JS
+    // reimplementation of that expression. A JS-side re-derivation (transaction_id where
+    // set, else re-truncating row.sale_time) looked equivalent but wasn't: pg parses
+    // `timestamp without time zone` into a JS Date by assuming the driver's local
+    // timezone, so re-serializing it in JS (toISOString(), UTC) came out shifted by
+    // whatever that offset is versus Postgres's own naive DATE_TRUNC(...)::text — every
+    // legacy batch's JS-side key silently failed to match its SQL-side key, so it never
+    // got bucketed. Reusing the one string Postgres already produced sidesteps that
+    // entirely — there's only one place batch_key is ever formatted now.
+    const batchesByKey = new Map();
     rowsResult.rows.forEach((row) => {
-      const key = row.sale_time.toISOString().slice(0, 19);
-      if (!batchesByTime.has(key)) batchesByTime.set(key, []);
-      batchesByTime.get(key).push({
+      const key = row.batch_key;
+      if (!batchesByKey.has(key)) batchesByKey.set(key, []);
+      batchesByKey.get(key).push({
         id: row.id,
         selling_price: row.selling_price,
         buying_price: row.buying_price,
@@ -311,12 +457,14 @@ const fetchBilledHistory = async (
         is_voided: row.is_voided,
         voided_at: row.voided_at,
         void_reason: row.void_reason,
+        transaction_id: row.transaction_id,
+        // null for legacy (pre-receipt-number) batches — the frontend shows nothing/a
+        // dash there rather than fabricate a number for sales that never got one.
+        receipt_no: formatReceiptNo(row.transaction_id),
       });
     });
 
-    const batches = txnTimes
-      .map((t) => batchesByTime.get(t.toISOString().slice(0, 19)))
-      .filter(Boolean);
+    const batches = batchKeys.map((key) => batchesByKey.get(key)).filter(Boolean);
 
     return { batches, totalCount, totalPages, page: safePage, pageSize };
   } catch (err) {
@@ -541,6 +689,7 @@ const fetchSalesTimeSeries = async (startDate, endDate) => {
 
 module.exports = {
   updateSalesRecord,
+  checkoutSale,
   fetchSales,
   fetchSalesByProfitLoss,
   fetchSalesTimeSeries,

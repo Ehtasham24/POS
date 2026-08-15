@@ -79,6 +79,9 @@ export default function CartPanel({ onCheckedOut }) {
   // cleared) is what lets the preview keep showing them after checkout.
   const [receiptItems, setReceiptItems] = useState(null);
   const [receiptTotal, setReceiptTotal] = useState(0);
+  // The whole-cart receipt number from POST /api/sales/checkout — null for an offline-queued
+  // sale (a real number is only assigned once it actually syncs; see syncManager.js).
+  const [receiptNo, setReceiptNo] = useState(null);
 
   const calculateSubtotal = () =>
     cart.reduce((total, item) => total + item.sellingPrice * item.sellingQuantity, 0);
@@ -105,25 +108,40 @@ export default function CartPanel({ onCheckedOut }) {
     }));
 
     let wentOffline = false;
+    let checkoutReceiptNo = null;
 
     try {
-      const results = await Promise.all(
-        salesData.map(async (sale, index) => {
-          try {
-            const json = await apiPost("/sales", sale);
-            return { item: cart[index], messageSend: json.data?.messageSend };
-          } catch (error) {
-            // A real rejection from the server (e.g. "insufficient stock") must surface to
-            // the cashier as-is, not be queued for a retry that would just fail again.
-            // Only an actual dropped connection falls back to the offline outbox.
-            if (!error.isNetworkError) throw error;
-            wentOffline = true;
-            await enqueueOfflineSale(sale);
-            await decrementLocalStock(sale.productID, sale.quantity, sale.lotId);
-            return { item: cart[index], messageSend: undefined };
-          }
-        })
-      );
+      // One request for the whole cart, not one per item — see ExpressBackend's
+      // checkoutSale for why: it's what makes the receipt a single atomic transaction
+      // (all items sell together or none do) with one real receipt number, instead of N
+      // independent inserts the server had no way to tie back together.
+      try {
+        const json = await apiPost("/api/sales/checkout", {
+          items: salesData,
+          paymentMethod,
+        });
+        checkoutReceiptNo = json.data?.receiptNo ?? null;
+
+        // The checkout response flags, per item, when it just dropped below the low-stock
+        // threshold — surface that immediately instead of making the cashier notice on
+        // the Inventory page later.
+        (json.data?.items || [])
+          .filter((sold) => sold.lowStock)
+          .forEach((sold) => {
+            const cartItem = cart.find((c) => (c.productId || c.id) === sold.productID);
+            toast.warning(`Low stock: ${cartItem?.productname || "Item"}.`);
+          });
+      } catch (error) {
+        // A real rejection from the server (e.g. "insufficient stock") must surface to
+        // the cashier as-is, not be queued for a retry that would just fail again.
+        // Only an actual dropped connection falls back to the offline outbox.
+        if (!error.isNetworkError) throw error;
+        wentOffline = true;
+        await enqueueOfflineSale({ items: salesData, paymentMethod });
+        for (const sale of salesData) {
+          await decrementLocalStock(sale.productID, sale.quantity, sale.lotId);
+        }
+      }
 
       dispatch(clearCart());
       setShowPayment(false);
@@ -138,7 +156,9 @@ export default function CartPanel({ onCheckedOut }) {
       // The sale is already saved at this point (online or offline-queued) — the receipt
       // preview modal below is just an in-app "want a printed copy?" prompt, not a gate
       // on the checkout itself. Works offline too: printReceipt only needs these items +
-      // cached company settings, no server round-trip.
+      // cached company settings, no server round-trip. receiptNo stays null for an
+      // offline-queued sale — it's only assigned once the checkout actually reaches the
+      // server (see syncManager.js's flush()).
       setReceiptItems(
         cart.map((item) => ({
           productname: item.productname,
@@ -147,13 +167,7 @@ export default function CartPanel({ onCheckedOut }) {
         }))
       );
       setReceiptTotal(subtotal);
-
-      // The sale endpoint already flags when a product just dropped below the low-stock
-      // threshold — surface that immediately instead of making the cashier notice on
-      // the Inventory page later.
-      results
-        .filter((r) => r.messageSend?.toLowerCase().includes("less than"))
-        .forEach((r) => toast.warning(`Low stock: ${r.item.productname} — ${r.messageSend}.`));
+      setReceiptNo(checkoutReceiptNo);
 
       // NOT called here — onCheckedOut collapses the mobile bottom sheet / floating cart
       // panel this component is rendered inside of (CartDock.jsx / cartCheckout.jsx), and
@@ -345,10 +359,12 @@ export default function CartPanel({ onCheckedOut }) {
         isOpen={receiptItems !== null}
         onClose={() => {
           setReceiptItems(null);
+          setReceiptNo(null);
           onCheckedOut?.();
         }}
         items={receiptItems || []}
         totalAmount={receiptTotal}
+        receiptNo={receiptNo}
       />
     </div>
   );

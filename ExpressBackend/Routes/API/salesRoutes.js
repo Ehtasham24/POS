@@ -2,6 +2,7 @@ const express = require("express");
 const routes = express.Router();
 const {
   PostSales,
+  CheckoutSales,
   getSales,
   getSalesByProfitLoss,
   getSalesTimeSeries,
@@ -20,6 +21,7 @@ const requireOwner = require("../../Middleware/requireOwner");
 routes.get("/api/getsales", requireAuth, getRecentSale);
 routes.get("/api/BilledHistory", requireAuth, getBilledHistory);
 routes.post("/sales", requireAuth, PostSales);
+routes.post("/api/sales/checkout", requireAuth, CheckoutSales);
 routes.patch("/api/sales/:id/void", requireAuth, voidSaleController);
 routes.post("/api/Sales", requireAuth, requireOwner, getSales);
 routes.post("/api/Sales/filter", requireAuth, requireOwner, getSalesByProfitLoss);

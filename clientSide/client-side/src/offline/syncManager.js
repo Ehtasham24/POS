@@ -31,7 +31,10 @@ const flush = async () => {
     for (const { id, payload } of pending) {
       // Stop at the first failure (e.g. connectivity dropped again mid-flush) rather than
       // reordering sales by skipping ahead — the rest stay queued for the next reconnect.
-      await apiPost("/sales", payload);
+      // Each queued payload is a whole checkout ({items, paymentMethod}, see CartPanel.jsx)
+      // — synced as one atomic transaction, so the receipt number an offline sale gets is
+      // only assigned here, at the moment it actually reaches the server.
+      await apiPost("/api/sales/checkout", payload);
       await outbox.removeSynced(id);
     }
     await refreshFromServer();

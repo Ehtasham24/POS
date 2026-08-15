@@ -15,7 +15,7 @@ const esc = (value) =>
     "'": "&#39;",
   }[ch]));
 
-function printViaBrowserDialog(salesData, totalAmount, company, existingWindow) {
+function printViaBrowserDialog(salesData, totalAmount, company, receiptNo, existingWindow) {
   const itemRows = salesData.length
     ? salesData
         .map((sale) => {
@@ -79,6 +79,7 @@ function printViaBrowserDialog(salesData, totalAmount, company, existingWindow) 
         <div class="receipt-title">RECEIPT</div>
       </div>
 
+      ${receiptNo ? `<div class="meta-line"><span>Receipt: ${esc(receiptNo)}</span></div>` : ""}
       <div class="meta-line"><span>${esc(now)}</span></div>
       <div class="divider"></div>
 
@@ -110,7 +111,7 @@ function printViaBrowserDialog(salesData, totalAmount, company, existingWindow) 
 // (see utils/thermalPrinter/connection.js — Chromium-only, best-effort per printer model).
 // Falls back to the OS print dialog everywhere else: no printer connected, unsupported
 // browser (Safari/iOS/Firefox), or the direct write itself fails mid-print.
-export async function printReceipt(salesData, totalAmount, { onFallback } = {}) {
+export async function printReceipt(salesData, totalAmount, receiptNo, { onFallback } = {}) {
   const printerConnected = !!printerConnection.getStatus().type;
   // Pre-open the receipt window synchronously, before any `await` below, when we're
   // going to need one — most browsers only allow window.open() to escape popup-blocking
@@ -130,7 +131,7 @@ export async function printReceipt(salesData, totalAmount, { onFallback } = {}) 
 
   if (printerConnected) {
     try {
-      const bytes = await buildReceiptBytes(salesData, totalAmount, company);
+      const bytes = await buildReceiptBytes(salesData, totalAmount, company, receiptNo);
       await printerConnection.write(bytes);
       return;
     } catch (error) {
@@ -139,12 +140,12 @@ export async function printReceipt(salesData, totalAmount, { onFallback } = {}) 
       // No pre-opened window for this path (we didn't expect to need one) — same
       // popup-blocking exposure this fallback already had before this change, not a
       // regression, just not newly fixed either.
-      printViaBrowserDialog(salesData, totalAmount, company);
+      printViaBrowserDialog(salesData, totalAmount, company, receiptNo);
       return;
     }
   }
 
-  printViaBrowserDialog(salesData, totalAmount, company, receiptWindow);
+  printViaBrowserDialog(salesData, totalAmount, company, receiptNo, receiptWindow);
 }
 
 // Lets the Company page's "Test Print" button confirm a newly-paired printer actually
@@ -153,5 +154,5 @@ export async function printTestReceipt() {
   const dummy = [
     { id: "test", productname: "Test Item", selling_price: 100, quantity: 1 },
   ];
-  await printReceipt(dummy, 100);
+  await printReceipt(dummy, 100, "RCPT-000000");
 }

@@ -15,7 +15,7 @@ import { withFallback, getSettings as getOfflineSettings } from "offline/cache";
 // doesn't wait on this modal), so either button just finishes the interaction — Print
 // additionally sends it to the printer (thermal if paired, OS dialog otherwise), Done
 // skips that and simply closes.
-export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmount }) {
+export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmount, receiptNo }) {
   const { t } = useLanguage();
   const toast = useToast();
   const [company, setCompany] = useState({});
@@ -31,7 +31,7 @@ export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmoun
   const handlePrint = async () => {
     setPrinting(true);
     try {
-      await printReceipt(items, totalAmount, { onFallback: toast.info });
+      await printReceipt(items, totalAmount, receiptNo, { onFallback: toast.info });
     } catch (error) {
       console.error("Error printing receipt:", error);
       toast.error(t("receipt.printError"));
@@ -64,7 +64,8 @@ export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmoun
           <p className="mt-1 font-bold">{t("receipt.receiptTitle")}</p>
         </div>
 
-        <p className="mt-2">{new Date().toLocaleString()}</p>
+        {receiptNo && <p className="mt-2 font-bold">{t("receipt.receiptNo")}: {receiptNo}</p>}
+        <p className="mt-1">{new Date().toLocaleString()}</p>
         <div className="my-2 border-t border-dashed border-gray-400 dark:border-gray-600" />
 
         {items.length === 0 ? (
