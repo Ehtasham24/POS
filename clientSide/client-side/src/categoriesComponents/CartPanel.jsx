@@ -14,7 +14,7 @@ import {
 import { apiPost } from "utils/api";
 import { enqueueOfflineSale } from "offline/syncManager";
 import { decrementLocalStock } from "offline/cache";
-import { printReceipt } from "utils/printReceipt";
+import ReceiptPreviewModal from "./ReceiptPreviewModal";
 
 // Cash amounts customers commonly hand over — used to build one-tap tender suggestions.
 const CASH_DENOMINATIONS = [50, 100, 500, 1000, 5000];
@@ -74,6 +74,11 @@ export default function CartPanel({ onCheckedOut }) {
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [amountTendered, setAmountTendered] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  // Set together right after a successful sale to open ReceiptPreviewModal — null means
+  // closed. Holding the sold items here (rather than re-reading `cart`, which gets
+  // cleared) is what lets the preview keep showing them after checkout.
+  const [receiptItems, setReceiptItems] = useState(null);
+  const [receiptTotal, setReceiptTotal] = useState(0);
 
   const calculateSubtotal = () =>
     cart.reduce((total, item) => total + item.sellingPrice * item.sellingQuantity, 0);
@@ -130,20 +135,18 @@ export default function CartPanel({ onCheckedOut }) {
           : `Sold for PKR ${subtotal}. Products sold successfully!`
       );
 
-      // Auto-print the moment a sale confirms — same as a real till — instead of the
-      // cashier needing to find it later on Sales History and print it manually. Works
-      // offline too: printReceipt only needs the cart contents + cached company
-      // settings, no server round-trip, so this fires the same way whether the sale
-      // above just synced or got queued.
-      const receiptItems = cart.map((item) => ({
-        productname: item.productname,
-        selling_price: item.sellingPrice,
-        quantity: item.sellingQuantity,
-      }));
-      printReceipt(receiptItems, subtotal, { onFallback: toast.info }).catch((error) => {
-        console.error("Error auto-printing receipt:", error);
-        toast.error("Sale saved, but the receipt couldn't be printed automatically.");
-      });
+      // The sale is already saved at this point (online or offline-queued) — the receipt
+      // preview modal below is just an in-app "want a printed copy?" prompt, not a gate
+      // on the checkout itself. Works offline too: printReceipt only needs these items +
+      // cached company settings, no server round-trip.
+      setReceiptItems(
+        cart.map((item) => ({
+          productname: item.productname,
+          selling_price: item.sellingPrice,
+          quantity: item.sellingQuantity,
+        }))
+      );
+      setReceiptTotal(subtotal);
 
       // The sale endpoint already flags when a product just dropped below the low-stock
       // threshold — surface that immediately instead of making the cashier notice on
@@ -331,6 +334,13 @@ export default function CartPanel({ onCheckedOut }) {
           </button>
         </div>
       </Modal>
+
+      <ReceiptPreviewModal
+        isOpen={receiptItems !== null}
+        onClose={() => setReceiptItems(null)}
+        items={receiptItems || []}
+        totalAmount={receiptTotal}
+      />
     </div>
   );
 }
