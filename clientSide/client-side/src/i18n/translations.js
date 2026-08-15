@@ -269,6 +269,7 @@ const translations = {
       statusAll: "All",
       statusConfirmed: "Confirmed",
       statusVoided: "Voided",
+      statusPartial: "Partially Voided",
     },
     report: {
       title: "Sales Report",
@@ -553,6 +554,7 @@ const translations = {
       statusAll: "تمام",
       statusConfirmed: "تصدیق شدہ",
       statusVoided: "منسوخ شدہ",
+      statusPartial: "جزوی طور پر منسوخ",
     },
     report: {
       title: "سیلز رپورٹ",

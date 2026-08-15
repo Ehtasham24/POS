@@ -20,6 +20,17 @@ const PAGE_SIZE = 30;
 const batchTotal = (batch) =>
   batch.filter((sale) => !sale.is_voided).reduce((sum, sale) => sum + sale.selling_price * sale.quantity, 0);
 
+// One glance at the collapsed row should say whether anything in it was voided, instead
+// of needing to expand every row (or apply the Status filter) just to find out — most
+// transactions are a single item, so "confirmed" vs "voided" covers almost everything;
+// "partial" is the rarer multi-item case where only some lines were returned.
+const batchStatus = (batch) => {
+  const voidedCount = batch.filter((sale) => sale.is_voided).length;
+  if (voidedCount === 0) return "confirmed";
+  if (voidedCount === batch.length) return "voided";
+  return "partial";
+};
+
 const inputClass =
   "p-2.5 border border-surface-border dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500";
 
@@ -228,6 +239,9 @@ export default function SalesHistoryPage() {
                     {t("salesHistory.items")}
                   </th>
                   <th className="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {t("salesHistory.status")}
+                  </th>
+                  <th className="text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("salesHistory.total")}
                   </th>
                   <th></th>
@@ -236,7 +250,7 @@ export default function SalesHistoryPage() {
               <tbody className="divide-y divide-surface-border dark:divide-gray-800">
                 {batches.length === 0 ? (
                   <tr>
-                    <td colSpan={5} className="py-4">
+                    <td colSpan={6} className="py-4">
                       <EmptyState
                         icon={HiOutlineClipboardDocumentList}
                         title={loading ? t("salesHistory.loading") : t("salesHistory.empty")}
@@ -267,6 +281,21 @@ export default function SalesHistoryPage() {
                               {batch.length} item{batch.length === 1 ? "" : "s"}
                             </span>
                           </td>
+                          <td className="px-3 py-3">
+                            {batchStatus(batch) === "confirmed" ? (
+                              <span className="inline-flex rounded-full bg-success-50 px-2.5 py-1 text-xs font-semibold text-success-600 dark:bg-success-500/10 dark:text-success-500">
+                                {t("salesHistory.statusConfirmed")}
+                              </span>
+                            ) : batchStatus(batch) === "voided" ? (
+                              <span className="inline-flex rounded-full bg-surface-muted px-2.5 py-1 text-xs font-semibold text-gray-500 dark:bg-gray-700 dark:text-gray-400">
+                                {t("salesHistory.statusVoided")}
+                              </span>
+                            ) : (
+                              <span className="inline-flex rounded-full bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-600 dark:bg-amber-500/10 dark:text-amber-400">
+                                {t("salesHistory.statusPartial")}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-3 py-3 whitespace-nowrap font-medium text-gray-800 dark:text-gray-100">
                             Rs.{batchTotal(batch).toFixed(2)}
                           </td>
@@ -286,7 +315,7 @@ export default function SalesHistoryPage() {
                         {isExpanded && (
                           <tr className="bg-surface-subtle dark:bg-gray-800/40">
                             <td></td>
-                            <td colSpan={4} className="px-3 pb-4 pt-1">
+                            <td colSpan={5} className="px-3 pb-4 pt-1">
                               <div className="overflow-x-auto rounded-xl border border-surface-border dark:border-gray-700 bg-white-A700 dark:bg-gray-900">
                                 <table className="w-full min-w-[420px] border-collapse">
                                   <thead>
