@@ -155,7 +155,13 @@ export default function CartPanel({ onCheckedOut }) {
         .filter((r) => r.messageSend?.toLowerCase().includes("less than"))
         .forEach((r) => toast.warning(`Low stock: ${r.item.productname} — ${r.messageSend}.`));
 
-      onCheckedOut?.();
+      // NOT called here — onCheckedOut collapses the mobile bottom sheet / floating cart
+      // panel this component is rendered inside of (CartDock.jsx / cartCheckout.jsx), and
+      // since ReceiptPreviewModal isn't a portal, it lives in that same render tree: firing
+      // this immediately unmounted the receipt modal in the same instant it was supposed
+      // to appear, so it never showed at all. Deferred to the modal's own onClose instead
+      // (below), so the cart UI only collapses once the cashier is actually done with the
+      // receipt, not the moment the sale itself finishes.
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -337,7 +343,10 @@ export default function CartPanel({ onCheckedOut }) {
 
       <ReceiptPreviewModal
         isOpen={receiptItems !== null}
-        onClose={() => setReceiptItems(null)}
+        onClose={() => {
+          setReceiptItems(null);
+          onCheckedOut?.();
+        }}
         items={receiptItems || []}
         totalAmount={receiptTotal}
       />
