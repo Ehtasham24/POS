@@ -156,3 +156,74 @@ export async function printTestReceipt() {
   ];
   await printReceipt(dummy, 100, "RCPT-000000");
 }
+
+// A refund slip is its own document, not a reprint of the original sale receipt — different
+// content (one line item, refund method/condition/reason, its own REF-... number referencing
+// the original RCPT-... one), so it gets its own small template rather than reusing
+// printViaBrowserDialog's cart-of-items layout. Browser print dialog only for v1 (no direct
+// thermal path) — a deliberate scope reduction, not an oversight; can gain one later the same
+// way printReceipt did, by adding a buildRefundReceiptBytes alongside buildReceiptBytes.
+export async function printRefundReceipt({ productname, quantity, amount, refundMethod, condition, reason, refundNo, receiptNo }) {
+  const refundWindow = window.open("", "_blank", "width=400,height=600");
+
+  let company = {};
+  try {
+    company = await withFallback(() => apiGet("/api/settings"), getOfflineSettings);
+  } catch (error) {
+    console.error("Error fetching company settings for refund receipt:", error);
+  }
+
+  const now = new Date().toLocaleString();
+  const methodLabel = { cash: "Cash", card: "Card", store_credit: "Store Credit" }[refundMethod] || refundMethod;
+
+  const content = `
+  <html>
+    <head>
+      <title>Refund Slip</title>
+      <style>
+        @page { size: 80mm auto; margin: 0; }
+        * { box-sizing: border-box; }
+        body { font-family: 'Courier New', Courier, monospace; width: 80mm; margin: 0; padding: 3mm; font-size: 12px; color: #000; }
+        .center { text-align: center; }
+        .logo { max-width: 45mm; max-height: 20mm; margin: 0 auto 2mm; display: block; }
+        .company-name { font-size: 16px; font-weight: bold; margin: 0 0 1mm; }
+        .company-meta { font-size: 11px; line-height: 1.4; }
+        .receipt-title { font-size: 13px; font-weight: bold; margin: 2mm 0; }
+        .divider { border-top: 1px dashed #000; margin: 2mm 0; }
+        .meta-line, .total-line { display: flex; justify-content: space-between; gap: 8px; }
+        .total-line { font-size: 14px; font-weight: bold; margin-top: 1mm; }
+        .item-name { font-weight: bold; margin-bottom: 1.5mm; }
+      </style>
+    </head>
+    <body>
+      <div class="center">
+        ${company.company_logo ? `<img class="logo" src="${company.company_logo}" alt="" />` : ""}
+        <div class="company-name">${esc(company.company_name || "Company Name")}</div>
+        <div class="receipt-title">REFUND SLIP</div>
+      </div>
+
+      <div class="meta-line"><span>Refund: ${esc(refundNo)}</span></div>
+      ${receiptNo ? `<div class="meta-line"><span>Original: ${esc(receiptNo)}</span></div>` : ""}
+      <div class="meta-line"><span>${esc(now)}</span></div>
+      <div class="divider"></div>
+
+      <div class="item-name">${esc(productname)}</div>
+      <div class="meta-line"><span>Qty refunded</span><span>${esc(quantity)}</span></div>
+      <div class="meta-line"><span>Condition</span><span>${esc(condition === "damaged" ? "Damaged" : "Resellable")}</span></div>
+      <div class="meta-line"><span>Method</span><span>${esc(methodLabel)}</span></div>
+      <div class="meta-line"><span>Reason</span><span>${esc(reason)}</span></div>
+
+      <div class="divider"></div>
+      <div class="total-line"><span>REFUNDED</span><span>Rs.${Number(amount).toFixed(2)}</span></div>
+      <div class="divider"></div>
+    </body>
+  </html>
+  `;
+
+  if (refundWindow) {
+    refundWindow.document.write(content);
+    refundWindow.document.close();
+    refundWindow.print();
+    refundWindow.close();
+  }
+}

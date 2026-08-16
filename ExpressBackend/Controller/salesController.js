@@ -7,6 +7,7 @@ const {
   fetchSalesTimeSeries,
   fetchBilledHistory,
   voidSale,
+  refundSale,
 } = require("../Sevices/salesService");
 const asyncHandler = require("../utils/asyncHandler");
 
@@ -50,7 +51,7 @@ const getRecentSale = asyncHandler(async (req, res) => {
 });
 
 const getBilledHistory = asyncHandler(async (req, res) => {
-  const { startDate, endDate, categoryId, page, pageSize, voidStatus } = req.query;
+  const { startDate, endDate, categoryId, page, pageSize, voidStatus, receiptNo } = req.query;
   // A Cashier only ever sees their own sales from today — same route as Owner's full
   // history, just pre-filtered server-side (see salesService.js's fetchBilledHistory).
   const viewerFilter = req.user.role === "cashier" ? { soldBy: req.user.id } : null;
@@ -61,7 +62,8 @@ const getBilledHistory = asyncHandler(async (req, res) => {
     page ? parseInt(page, 10) : 1,
     pageSize ? parseInt(pageSize, 10) : 30,
     viewerFilter,
-    voidStatus
+    voidStatus,
+    receiptNo
   );
   res.status(200).send(result);
 });
@@ -69,6 +71,20 @@ const getBilledHistory = asyncHandler(async (req, res) => {
 const voidSaleController = asyncHandler(async (req, res) => {
   const voided = await voidSale(req.params.id, req.user, req.body?.reason);
   res.status(200).send(voided);
+});
+
+// Any logged-in staff, any sale, any day — deliberately no requireOwner / same-day-own-sale
+// gate here (unlike void), per the confirmed design: refunds routinely happen well after the
+// original sale, by whoever's on shift. refundSale itself enforces the refund-window/already-
+// voided/remaining-quantity rules.
+const refundSaleController = asyncHandler(async (req, res) => {
+  const { quantity, refundAmount, refundMethod, condition, reason } = req.body;
+  const result = await refundSale(
+    req.params.id,
+    { quantity, refundAmount, refundMethod, condition, reason },
+    req.user
+  );
+  res.status(200).send(result);
 });
 
 const getSales = asyncHandler(async (req, res) => {
@@ -105,4 +121,5 @@ module.exports = {
   getRecentSale,
   getBilledHistory,
   voidSaleController,
+  refundSaleController,
 };

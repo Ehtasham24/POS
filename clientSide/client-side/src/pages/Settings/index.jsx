@@ -5,6 +5,7 @@ import {
   HiOutlineLanguage,
   HiOutlinePrinter,
   HiOutlineDocumentText,
+  HiOutlineReceiptRefund,
 } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { useToast } from "components/Toast/ToastContext";
@@ -118,6 +119,8 @@ export default function SettingsPage() {
   const [savingThreshold, setSavingThreshold] = useState(false);
   const [terms, setTerms] = useState("");
   const [savingTerms, setSavingTerms] = useState(false);
+  const [refundWindow, setRefundWindow] = useState(""); // "" = unlimited (unset)
+  const [savingRefundWindow, setSavingRefundWindow] = useState(false);
 
   const fetchSettings = async () => {
     try {
@@ -125,6 +128,7 @@ export default function SettingsPage() {
       setSettings(data);
       setThreshold(data.low_stock_threshold || "10");
       setTerms(data.receipt_terms ?? DEFAULT_RECEIPT_TERMS);
+      setRefundWindow(data.refund_window_days || "");
     } catch (error) {
       console.error("Error fetching settings:", error);
       toast.error("Couldn't load settings — check your connection and try again.");
@@ -146,6 +150,21 @@ export default function SettingsPage() {
       toast.error(error.message);
     } finally {
       setSavingThreshold(false);
+    }
+  };
+
+  const handleSaveRefundWindow = async () => {
+    setSavingRefundWindow(true);
+    try {
+      // "" (unlimited) is a valid value here, unlike threshold's fallback-to-10 — an empty
+      // refund window is a deliberate policy choice (no age restriction), not a missing one.
+      await updateSetting("refund_window_days", refundWindow === "" ? "" : Number(refundWindow) || "");
+      setSettings((prev) => ({ ...prev, refund_window_days: refundWindow }));
+      toast.success(t("settings.refundWindowUpdated"));
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setSavingRefundWindow(false);
     }
   };
 
@@ -240,6 +259,40 @@ export default function SettingsPage() {
                   className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
                 >
                   {savingThreshold ? t("common.saving") : t("common.save")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
+          <div className="flex items-start gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
+              <HiOutlineReceiptRefund className="text-xl text-primary-600 dark:text-primary-400" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
+                {t("settings.refundWindowTitle")}
+              </h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {t("settings.refundWindowDesc")}
+              </p>
+              <div className="mt-3 flex items-center gap-3">
+                <input
+                  type="number"
+                  min="0"
+                  value={refundWindow}
+                  onChange={(e) => setRefundWindow(e.target.value)}
+                  placeholder={t("settings.refundWindowUnlimited")}
+                  className="h-10 w-32 rounded-lg border border-surface-border bg-white-A700 px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                />
+                <button
+                  type="button"
+                  onClick={handleSaveRefundWindow}
+                  disabled={savingRefundWindow}
+                  className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {savingRefundWindow ? t("common.saving") : t("common.save")}
                 </button>
               </div>
             </div>

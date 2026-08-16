@@ -106,6 +106,14 @@ const getLowStockThreshold = async () => {
   return Number.isFinite(threshold) ? threshold : 10;
 };
 
+// null = unlimited (the default — no setting means no age restriction on refunds, Owner/
+// staff discretion). Mirrors getLowStockThreshold's read-from-settings shape.
+const getRefundWindowDays = async () => {
+  const settings = await getSettings();
+  const days = Number(settings.refund_window_days);
+  return Number.isFinite(days) && days > 0 ? days : null;
+};
+
 // Sale from a specific, manually-picked lot (batch-tracked products).
 // Decrements exactly that lot (and the product's cached total), and snapshots
 // the lot's buying price onto the sale so later price changes never rewrite past profit.
@@ -201,6 +209,12 @@ const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id, lotI
 const RECEIPT_PREFIX = "RCPT-";
 const formatReceiptNo = (transactionId) =>
   transactionId ? `${RECEIPT_PREFIX}${String(transactionId).padStart(6, "0")}` : null;
+
+// Same idea, same robustness rationale (refunds.id is a SERIAL, allocated atomically by
+// Postgres) — just its own prefix so a refund slip is visibly distinct from a sale receipt.
+const REFUND_PREFIX = "REF-";
+const formatRefundNo = (refundId) =>
+  refundId ? `${REFUND_PREFIX}${String(refundId).padStart(6, "0")}` : null;
 
 // Checkout: atomically creates one sale_transactions row (the receipt) plus one sales row
 // per cart item, all inside a single DB transaction — either the whole cart sells or none of
@@ -350,16 +364,23 @@ const fetchBilledHistory = async (
   page = 1,
   pageSize = DEFAULT_HISTORY_PAGE_SIZE,
   viewerFilter = null, // { soldBy } — when set, restricts to that user's sales from today
-  voidStatus = "all" // 'all' | 'voided' | 'confirmed' — a transaction matches if ANY of
+  voidStatus = "all", // 'all' | 'voided' | 'confirmed' — a transaction matches if ANY of
   // its line items does (see below), same as the category filter's "any item matches"
   // semantics, so a mixed transaction (one voided line + one active line) shows up under
   // both filters rather than getting hidden from either.
+  receiptNo = null // e.g. "RCPT-000123" — the receipt-number lookup a refund flow starts
+  // from; parsed back to the raw transaction_id and matched exactly, no new endpoint needed
+  // since this reuses the same conditions[]/params mechanism as every other filter here.
 ) => {
   try {
     const hasDateFilter =
       startDate && endDate && isValidDate(startDate) && isValidDate(endDate);
     const parsedCategoryId = parseInt(categoryId, 10);
     const hasCategoryFilter = Number.isFinite(parsedCategoryId);
+    const parsedTransactionId = receiptNo
+      ? parseInt(String(receiptNo).replace(/^RCPT-/i, ""), 10)
+      : NaN;
+    const hasReceiptFilter = Number.isFinite(parsedTransactionId);
 
     // A transaction "matches" the category filter if any item in it belongs to that
     // category — the product join is only needed to test that, not to restrict which
@@ -383,6 +404,10 @@ const fetchBilledHistory = async (
       conditions.push(`s.is_voided = true`);
     } else if (voidStatus === "confirmed") {
       conditions.push(`s.is_voided = false`);
+    }
+    if (hasReceiptFilter) {
+      params.push(parsedTransactionId);
+      conditions.push(`s.transaction_id = $${params.length}`);
     }
     const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const joinClause = hasCategoryFilter
@@ -421,7 +446,8 @@ const fetchBilledHistory = async (
       `SELECT s.id, s.selling_price, s.buying_price, s.quantity, s.sale_time, s.product_id,
               s.sold_by, s.is_voided, s.voided_at, s.void_reason, s.transaction_id,
               ${BATCH_KEY_EXPR} AS batch_key,
-              p.productname, l.lot_code
+              p.productname, l.lot_code,
+              COALESCE((SELECT SUM(r.quantity) FROM refunds r WHERE r.sale_id = s.id), 0) AS refunded_quantity
        FROM public.sales s
        JOIN public.products p ON s.product_id = p.id
        LEFT JOIN public.lots l ON s.lot_id = l.id
@@ -461,6 +487,9 @@ const fetchBilledHistory = async (
         // null for legacy (pre-receipt-number) batches — the frontend shows nothing/a
         // dash there rather than fabricate a number for sales that never got one.
         receipt_no: formatReceiptNo(row.transaction_id),
+        // How much of THIS line item has already been refunded — always derived fresh from
+        // the refunds table (see refundSale), never a cached flag on sales itself.
+        refunded_quantity: Number(row.refunded_quantity),
       });
     });
 
@@ -491,6 +520,17 @@ const voidSale = async (saleId, requestingUser, reason) => {
     const sale = rows[0];
     if (!sale) throw new ApiError(404, "Sale not found");
     if (sale.is_voided) throw new ApiError(409, "This sale has already been voided");
+
+    // Once any part of a sale has been refunded, it's no longer a same-day "this never
+    // happened" correction — void and refund are kept non-overlapping (see refundSale below)
+    // so any remaining quantity has to go through refund instead.
+    const { rows: refundCheck } = await client.query(
+      `SELECT 1 FROM refunds WHERE sale_id = $1 LIMIT 1`,
+      [saleId]
+    );
+    if (refundCheck[0]) {
+      throw new ApiError(409, "This sale has a refund on record — void isn't available once part of it has been refunded");
+    }
 
     if (requestingUser.role !== "owner") {
       const { rows: dateCheck } = await client.query(
@@ -546,6 +586,113 @@ const voidSale = async (saleId, requestingUser, reason) => {
   }
 };
 
+const REFUND_METHODS = ["cash", "card", "store_credit"];
+const REFUND_CONDITIONS = ["resellable", "damaged"];
+
+// Reverses part or all of a sale that genuinely happened — unlike void, the original sale row
+// is never touched (no flag, no field changes): it really was revenue on its day, so it stays
+// exactly as recorded. "How much has been refunded so far" is derived from SUM(refunds.quantity)
+// on every call, never cached, so there's nothing to keep in sync or get wrong. Any logged-in
+// staff can refund any sale, any day (no same-day/own-sale rule like void has) — refunds
+// routinely happen well after the original sale, by whoever's on shift, per the confirmed
+// design decision.
+const refundSale = async (saleId, { quantity, refundAmount, refundMethod, condition, reason }, requestingUser) => {
+  if (!reason || !String(reason).trim()) throw new ApiError(400, "A reason is required for a refund");
+  if (!REFUND_METHODS.includes(refundMethod)) throw new ApiError(400, "Invalid refund method");
+  if (!REFUND_CONDITIONS.includes(condition)) throw new ApiError(400, "Invalid item condition");
+  const qty = Number(quantity);
+  if (!Number.isFinite(qty) || qty <= 0) throw new ApiError(400, "Invalid refund quantity");
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Locking the sale row is what makes two concurrent refund attempts on the SAME sale
+    // serialize correctly — the second transaction's FOR UPDATE blocks until the first
+    // commits, and under Postgres's read-committed default, this transaction's next read of
+    // `refunds` (below) sees that committed row. A FOR UPDATE directly on a SUM(...) query
+    // isn't valid SQL — Postgres can't lock rows an aggregate doesn't return 1:1 with — so
+    // the lock has to live here, exactly like voidSale does for the same reason.
+    const { rows } = await client.query(`SELECT * FROM sales WHERE id = $1 FOR UPDATE`, [saleId]);
+    const sale = rows[0];
+    if (!sale) throw new ApiError(404, "Sale not found");
+    if (sale.is_voided) throw new ApiError(409, "This sale was voided — nothing to refund");
+
+    const windowDays = await getRefundWindowDays();
+    if (windowDays != null) {
+      const { rows: ageCheck } = await client.query(
+        `SELECT (NOW() - sale_time) > ($2 || ' days')::interval AS expired FROM sales WHERE id = $1`,
+        [saleId, windowDays]
+      );
+      if (ageCheck[0]?.expired) {
+        throw new ApiError(403, `This sale is older than the ${windowDays}-day refund window`);
+      }
+    }
+
+    const { rows: refundedRows } = await client.query(
+      `SELECT COALESCE(SUM(quantity), 0) AS refunded FROM refunds WHERE sale_id = $1`,
+      [saleId]
+    );
+    const remaining = sale.quantity - Number(refundedRows[0].refunded);
+    if (qty > remaining) {
+      throw new ApiError(409, `Only ${remaining} unit(s) of this sale remain refundable`);
+    }
+
+    // Amount actually paid back — defaults to the full proportional price, but can be
+    // reduced (a goodwill/partial refund) down to >0. Never allowed above what was actually
+    // paid for that many units.
+    const maxAmount = qty * Number(sale.selling_price);
+    const amount = refundAmount != null ? Number(refundAmount) : maxAmount;
+    if (!Number.isFinite(amount) || amount <= 0 || amount > maxAmount) {
+      throw new ApiError(400, `Refund amount must be between 0 and ${maxAmount}`);
+    }
+
+    // Restore stock only if the returned item is resellable — mirrors voidSale's
+    // lot-then-plain-product restore logic (and its same skip-if-since-deleted defensiveness),
+    // reused verbatim rather than factored out, matching how voidSale itself already
+    // duplicates this shape instead of calling into lotService.
+    if (condition === "resellable") {
+      if (sale.lot_id) {
+        const { rows: lotRows } = await client.query(`SELECT * FROM lots WHERE id = $1`, [sale.lot_id]);
+        if (lotRows[0]) {
+          await client.query(`UPDATE lots SET qty_remaining = qty_remaining + $2 WHERE id = $1`, [
+            sale.lot_id,
+            qty,
+          ]);
+          await client.query(`UPDATE products SET quantity = quantity + $2 WHERE id = $1`, [
+            lotRows[0].product_id,
+            qty,
+          ]);
+        }
+      } else if (sale.product_id) {
+        await client.query(`UPDATE products SET quantity = quantity + $2 WHERE id = $1`, [
+          sale.product_id,
+          qty,
+        ]);
+      }
+    }
+
+    const { rows: inserted } = await client.query(
+      `INSERT INTO refunds (sale_id, transaction_id, quantity, refund_amount, refund_method, condition, reason, refunded_by)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       RETURNING *`,
+      [saleId, sale.transaction_id, qty, amount, refundMethod, condition, reason, requestingUser.id]
+    );
+
+    await client.query("COMMIT");
+    return {
+      refund: inserted[0],
+      refundNo: formatRefundNo(inserted[0].id),
+      remainingAfter: remaining - qty,
+    };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err instanceof ApiError ? err : new ApiError(500, err.message);
+  } finally {
+    client.release();
+  }
+};
+
 const fetchSales = async (startDate, endDate) => {
   try {
     // Validate date inputs
@@ -564,6 +711,14 @@ const fetchSales = async (startDate, endDate) => {
     // Costs are sourced from sales.buying_price — the price snapshotted at the moment each
     // sale happened — not the product's current price, so past profit never shifts when a
     // product's/lot's price changes later.
+    //
+    // Sources from sales_ledger (migrations/009_refunds.sql), not the raw sales table: it
+    // already excludes voided sales (same as before) AND folds in every refund as a negative-
+    // quantity row dated on its OWN event_time — a refund reduces revenue/profit on the day
+    // it actually happens, not retroactively on the original sale's day. quantity/selling_
+    // price/buying_price mean the same thing on both branches of the view, so every SUM/AVG
+    // below keeps working unchanged; a refund's negative quantity does the subtraction for
+    // free.
     const response = await pool.query(
       `SELECT
          p.productname,
@@ -574,10 +729,10 @@ const fetchSales = async (startDate, endDate) => {
          CAST(AVG(s.selling_price) AS INT) AS avg_selling_price,  -- Cast average selling price to INT
          CAST(AVG(s.selling_price - s.buying_price) AS INT) AS profit_loss,  -- Profit per piece as INT
          SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
-       FROM Sales s
+       FROM sales_ledger s
        INNER JOIN Products p ON s.product_id = p.id
        INNER JOIN Categories c ON p.category_id = c.id  -- Join with Categories table to get category name
-       WHERE s.sale_time BETWEEN $1 AND $2 AND s.is_voided = false
+       WHERE s.event_time BETWEEN $1 AND $2
        GROUP BY p.productname, p.category_id, c.category_name  -- Group by necessary columns including category name
        ORDER BY profit_loss DESC`,
       [startDate, endDate]
@@ -626,6 +781,8 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type) => {
       throw new Error("Invalid type. Must be 'profit' or 'loss'.");
     }
 
+    // Sources from sales_ledger, same reasoning as fetchSales above — voided sales already
+    // excluded, refunds folded in as negative-quantity rows dated on their own event_time.
     const response = await pool.query(
       `SELECT
          p.productname,
@@ -636,10 +793,10 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type) => {
          CAST(AVG(s.selling_price) AS INT) AS avg_selling_price,  -- Cast average selling price to INT
          CAST(AVG(s.selling_price - s.buying_price) AS INT) AS profit_loss,  -- Profit per piece as INT
          SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
-       FROM Sales s
+       FROM sales_ledger s
        INNER JOIN Products p ON s.product_id = p.id
        INNER JOIN Categories c ON p.category_id = c.id
-       WHERE s.sale_time BETWEEN $1 AND $2 AND s.is_voided = false
+       WHERE s.event_time BETWEEN $1 AND $2
        GROUP BY p.productname, p.category_id, c.category_name  -- Group by product name and category
        HAVING ${profitCondition} -- Apply the profit condition for profit-only items
        ORDER BY overall_profit_loss DESC`,
@@ -671,14 +828,17 @@ const fetchSalesTimeSeries = async (startDate, endDate) => {
     throw new Error("Invalid date inputs. Please provide valid start and end dates.");
   }
 
+  // Sources from sales_ledger, same reasoning as fetchSales above — a refund lands on its
+  // OWN day here (negative units/revenue/profit that day), not retroactively on the day of
+  // the original sale.
   const response = await pool.query(
     `SELECT
-       DATE_TRUNC('day', s.sale_time) AS day,
+       DATE_TRUNC('day', s.event_time) AS day,
        SUM(s.quantity * s.selling_price)::BIGINT AS revenue,
        SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit,
        SUM(s.quantity)::BIGINT AS units
-     FROM Sales s
-     WHERE s.sale_time BETWEEN $1 AND $2 AND s.is_voided = false
+     FROM sales_ledger s
+     WHERE s.event_time BETWEEN $1 AND $2
      GROUP BY day
      ORDER BY day`,
     [startDate, endDate]
@@ -696,4 +856,5 @@ module.exports = {
   getRecentSales,
   fetchBilledHistory,
   voidSale,
+  refundSale,
 };
