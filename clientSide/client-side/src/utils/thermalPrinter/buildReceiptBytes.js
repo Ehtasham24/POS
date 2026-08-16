@@ -9,7 +9,7 @@ const ARABIC_SCRIPT = /[؀-ۿݐ-ݿ]/;
 // ESC/POS thermal printers use fixed 8-bit code pages, not Unicode text shaping — they
 // cannot render Arabic/Urdu script, so any such line in the user's receipt terms is
 // skipped here (it still prints fine in the HTML/print-dialog fallback, a real browser).
-export async function buildReceiptBytes(salesData, totalAmount, company = {}, receiptNo = null) {
+export async function buildReceiptBytes(salesData, totalAmount, company = {}, receiptNo = null, creditApplied = 0) {
   const now = formatInTimezone(new Date(), resolveTimezone(company));
   const termsLines = (company.receipt_terms ?? DEFAULT_RECEIPT_TERMS)
     .split("\n")
@@ -48,6 +48,12 @@ export async function buildReceiptBytes(salesData, totalAmount, company = {}, re
 
       <Line />
       <Row left={<Text bold size={{ width: 2, height: 2 }}>TOTAL</Text>} right={<Text bold size={{ width: 2, height: 2 }}>Rs.{totalAmount.toFixed(2)}</Text>} />
+      {creditApplied > 0 && (
+        <>
+          <Row left="Store Credit Applied" right={`-Rs.${creditApplied.toFixed(2)}`} />
+          <Row left="Amount Paid" right={`Rs.${(totalAmount - creditApplied).toFixed(2)}`} />
+        </>
+      )}
       <Line />
 
       <Text align="center">Thank you for your purchase!</Text>

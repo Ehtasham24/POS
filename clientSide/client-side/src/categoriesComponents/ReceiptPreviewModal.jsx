@@ -16,7 +16,7 @@ import { withFallback, getSettings as getOfflineSettings } from "offline/cache";
 // doesn't wait on this modal), so either button just finishes the interaction — Print
 // additionally sends it to the printer (thermal if paired, OS dialog otherwise), Done
 // skips that and simply closes.
-export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmount, receiptNo }) {
+export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmount, receiptNo, creditApplied = 0 }) {
   const { t } = useLanguage();
   const toast = useToast();
   const { formatDateTime } = useTimezone();
@@ -33,7 +33,7 @@ export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmoun
   const handlePrint = async () => {
     setPrinting(true);
     try {
-      await printReceipt(items, totalAmount, receiptNo, { onFallback: toast.info });
+      await printReceipt(items, totalAmount, receiptNo, creditApplied, { onFallback: toast.info });
     } catch (error) {
       console.error("Error printing receipt:", error);
       toast.error(t("receipt.printError"));
@@ -93,6 +93,18 @@ export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmoun
           <span>{t("receipt.total")}</span>
           <span>Rs.{totalAmount.toFixed(2)}</span>
         </div>
+        {creditApplied > 0 && (
+          <>
+            <div className="mt-1 flex justify-between text-primary-600 dark:text-primary-400">
+              <span>{t("receipt.storeCreditApplied")}</span>
+              <span>-Rs.{creditApplied.toFixed(2)}</span>
+            </div>
+            <div className="mt-1 flex justify-between font-semibold">
+              <span>{t("receipt.amountPaid")}</span>
+              <span>Rs.{(totalAmount - creditApplied).toFixed(2)}</span>
+            </div>
+          </>
+        )}
         <div className="my-2 border-t border-dashed border-gray-400 dark:border-gray-600" />
 
         <p className="text-center">{t("receipt.thankYou")}</p>

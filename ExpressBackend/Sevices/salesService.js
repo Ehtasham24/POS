@@ -483,10 +483,12 @@ const fetchBilledHistory = async (
               s.sold_by, s.is_voided, s.voided_at, s.void_reason, s.transaction_id,
               ${BATCH_KEY_EXPR} AS batch_key,
               p.productname, l.lot_code,
-              COALESCE((SELECT SUM(r.quantity) FROM refunds r WHERE r.sale_id = s.id), 0) AS refunded_quantity
+              COALESCE((SELECT SUM(r.quantity) FROM refunds r WHERE r.sale_id = s.id), 0) AS refunded_quantity,
+              st.store_credit_applied
        FROM public.sales s
        JOIN public.products p ON s.product_id = p.id
        LEFT JOIN public.lots l ON s.lot_id = l.id
+       LEFT JOIN public.sale_transactions st ON st.id = s.transaction_id
        WHERE ${BATCH_KEY_EXPR} = ANY($1::text[])
        ORDER BY s.sale_time DESC, s.id ASC;`,
       [batchKeys]
@@ -526,6 +528,9 @@ const fetchBilledHistory = async (
         // How much of THIS line item has already been refunded — always derived fresh from
         // the refunds table (see refundSale), never a cached flag on sales itself.
         refunded_quantity: Number(row.refunded_quantity),
+        // Same value on every row in a batch (it belongs to the whole transaction, not the
+        // line item) — null for legacy sales with no transaction_id, same as receipt_no.
+        store_credit_applied: row.store_credit_applied != null ? Number(row.store_credit_applied) : 0,
       });
     });
 

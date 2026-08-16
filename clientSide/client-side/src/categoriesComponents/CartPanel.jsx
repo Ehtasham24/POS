@@ -83,6 +83,10 @@ export default function CartPanel({ onCheckedOut }) {
   // The whole-cart receipt number from POST /api/sales/checkout — null for an offline-queued
   // sale (a real number is only assigned once it actually syncs; see syncManager.js).
   const [receiptNo, setReceiptNo] = useState(null);
+  // How much of THIS checkout was covered by store credit — set from creditToApply right
+  // after a successful sale, same as receiptNo, so the preview/print actually shows the
+  // breakdown instead of a receipt that silently looks like a plain cash/card sale.
+  const [receiptCreditApplied, setReceiptCreditApplied] = useState(0);
   // Collapsed by default — the vast majority of sales are walk-in with no customer attached
   // at all, so this whole block (and everything it touches downstream) stays completely out
   // of the way unless a cashier explicitly opens it.
@@ -217,6 +221,11 @@ export default function CartPanel({ onCheckedOut }) {
       );
       setReceiptTotal(subtotal);
       setReceiptNo(checkoutReceiptNo);
+      // Stays 0 for an offline-queued sale — the redemption hasn't actually happened yet
+      // (it's only re-validated for real once the queued checkout reaches the server), so
+      // claiming it on the receipt now would be misleading, same reasoning as receiptNo
+      // staying null until sync.
+      setReceiptCreditApplied(wentOffline ? 0 : creditToApply);
 
       // NOT called here — onCheckedOut collapses the mobile bottom sheet / floating cart
       // panel this component is rendered inside of (CartDock.jsx / cartCheckout.jsx), and
@@ -467,11 +476,13 @@ export default function CartPanel({ onCheckedOut }) {
         onClose={() => {
           setReceiptItems(null);
           setReceiptNo(null);
+          setReceiptCreditApplied(0);
           onCheckedOut?.();
         }}
         items={receiptItems || []}
         totalAmount={receiptTotal}
         receiptNo={receiptNo}
+        creditApplied={receiptCreditApplied}
       />
     </div>
   );

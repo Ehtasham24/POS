@@ -405,7 +405,7 @@ export default function SalesHistoryPage() {
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
-                                printReceipt(batch, batchTotal(batch), batch[0]?.receipt_no, {
+                                printReceipt(batch, batchTotal(batch), batch[0]?.receipt_no, batch[0]?.store_credit_applied || 0, {
                                   onFallback: toast.info,
                                 });
                               }}
