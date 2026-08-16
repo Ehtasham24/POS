@@ -7,6 +7,7 @@ import {
   HiOutlineUserGroup,
   HiOutlineCog6Tooth,
   HiOutlineBuildingOffice2,
+  HiOutlineReceiptRefund,
 } from "react-icons/hi2";
 
 // `roles` omitted = visible to everyone logged in (Owner and Cashier alike). A Cashier's
@@ -40,6 +41,13 @@ export const navItems = [
     label: "Contacts",
     labelKey: "nav.contacts",
     icon: HiOutlineUserGroup,
+    roles: ["owner"],
+  },
+  {
+    to: "/store-credit",
+    label: "Store Credit",
+    labelKey: "nav.storeCredit",
+    icon: HiOutlineReceiptRefund,
     roles: ["owner"],
   },
   {

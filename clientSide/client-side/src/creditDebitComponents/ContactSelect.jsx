@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useToast } from "components/Toast/ToastContext";
+import { useAuth } from "auth/AuthContext";
 import { apiGet, apiPost } from "utils/api";
 
 const inputClass =
@@ -14,6 +15,12 @@ const NEW_CONTACT_VALUE = "__new__";
 // detour to the Contacts page first.
 export default function ContactSelect({ type, value, onChange, id }) {
   const toast = useToast();
+  const { user } = useAuth();
+  // Creating a contact stays Owner-only (POST /api/contacts) even though reading the list
+  // is now any staff (this component also renders in Cashier-accessible flows: refund-to-
+  // store-credit, checkout redemption) — hiding the option here instead of letting a
+  // Cashier hit a 403 after typing a name.
+  const canCreate = user?.role === "owner";
   const isVendor = type === "vendor";
   const [contacts, setContacts] = useState([]);
   const [creating, setCreating] = useState(false);
@@ -97,10 +104,12 @@ export default function ContactSelect({ type, value, onChange, id }) {
             </option>
           );
         })}
-        <option value={NEW_CONTACT_VALUE}>+ Add new {isVendor ? "vendor" : "customer"}...</option>
+        {canCreate && (
+          <option value={NEW_CONTACT_VALUE}>+ Add new {isVendor ? "vendor" : "customer"}...</option>
+        )}
       </select>
 
-      {creating && (
+      {creating && canCreate && (
         <div className="mt-2 flex flex-col gap-2 rounded-lg border border-dashed border-surface-border p-3 dark:border-gray-700">
           <input
             type="text"

@@ -8,6 +8,7 @@ import Settings from "pages/Settings";
 import Company from "pages/Company";
 import Inventory from "pages/Inventory";
 import Contacts from "pages/Contacts";
+import StoreCredit from "pages/StoreCredit";
 import LoginPage from "pages/Login";
 import NotFound from "pages/NotFound";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
@@ -116,6 +117,14 @@ function App() {
                   element={
                     <ProtectedRoute roles={OWNER_ONLY}>
                       <Contacts />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/store-credit"
+                  element={
+                    <ProtectedRoute roles={OWNER_ONLY}>
+                      <StoreCredit />
                     </ProtectedRoute>
                   }
                 />

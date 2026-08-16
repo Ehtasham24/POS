@@ -32,8 +32,8 @@ const PostSales = asyncHandler(async (req, res) => {
 // alongside the older per-item PostSales above (receipt numbers need one atomic transaction
 // per checkout, not N independent inserts with no shared record of belonging together).
 const CheckoutSales = asyncHandler(async (req, res) => {
-  const { items, paymentMethod } = req.body;
-  const result = await checkoutSale(items, paymentMethod, req.user);
+  const { items, paymentMethod, contactId, storeCreditRedeemed } = req.body;
+  const result = await checkoutSale(items, paymentMethod, req.user, { contactId, storeCreditRedeemed });
 
   res.status(200).json({
     status: 200,
@@ -78,10 +78,10 @@ const voidSaleController = asyncHandler(async (req, res) => {
 // original sale, by whoever's on shift. refundSale itself enforces the refund-window/already-
 // voided/remaining-quantity rules.
 const refundSaleController = asyncHandler(async (req, res) => {
-  const { quantity, refundAmount, refundMethod, condition, reason } = req.body;
+  const { quantity, refundAmount, refundMethod, condition, reason, contactId } = req.body;
   const result = await refundSale(
     req.params.id,
-    { quantity, refundAmount, refundMethod, condition, reason },
+    { quantity, refundAmount, refundMethod, condition, reason, contactId },
     req.user
   );
   res.status(200).send(result);

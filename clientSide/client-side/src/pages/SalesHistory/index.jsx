@@ -14,6 +14,7 @@ import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { useTimezone } from "timezone/TimezoneContext";
 import RefundReceiptModal from "categoriesComponents/RefundReceiptModal";
+import ContactSelect from "creditDebitComponents/ContactSelect";
 
 const REFUND_METHODS = ["cash", "card", "store_credit"];
 
@@ -87,6 +88,7 @@ export default function SalesHistoryPage() {
   const [refundCondition, setRefundCondition] = useState("resellable");
   const [refundAmount, setRefundAmount] = useState("");
   const [refundReason, setRefundReason] = useState("");
+  const [refundContactId, setRefundContactId] = useState(""); // required only when refundMethod === "store_credit"
   const [refunding, setRefunding] = useState(false);
   const [refundReceipt, setRefundReceipt] = useState(null); // set after a successful refund, opens RefundReceiptModal
 
@@ -182,6 +184,10 @@ export default function SalesHistoryPage() {
   // no client-side role/ownership gate to apply here, unlike void.
   const handleRefund = async () => {
     if (!refundTarget) return;
+    if (refundMethod === "store_credit" && !refundContactId) {
+      toast.error(t("salesHistory.refundCustomerRequired"));
+      return;
+    }
     setRefunding(true);
     try {
       const result = await apiPost(`/api/sales/${refundTarget.id}/refunds`, {
@@ -190,6 +196,7 @@ export default function SalesHistoryPage() {
         refundMethod,
         condition: refundCondition,
         reason: refundReason,
+        contactId: refundMethod === "store_credit" ? Number(refundContactId) : undefined,
       });
       toast.success(t("salesHistory.refunded"));
       setRefundReceipt({
@@ -201,6 +208,7 @@ export default function SalesHistoryPage() {
         reason: refundReason,
         refundNo: result.refundNo,
         receiptNo: refundTarget.receipt_no,
+        storeCreditBalance: result.storeCreditBalance,
       });
       setRefundTarget(null);
       fetchHistory(page);
@@ -520,6 +528,7 @@ export default function SalesHistoryPage() {
                                                       setRefundCondition("resellable");
                                                       setRefundAmount("");
                                                       setRefundReason("");
+                                                      setRefundContactId("");
                                                     }}
                                                     className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1.5 text-xs font-semibold text-primary-600 transition-colors hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-500/10"
                                                   >
@@ -703,6 +712,15 @@ export default function SalesHistoryPage() {
               </div>
             </div>
 
+            {refundMethod === "store_credit" && (
+              <ContactSelect
+                type="customer"
+                value={refundContactId}
+                onChange={setRefundContactId}
+                id="refund-store-credit-contact"
+              />
+            )}
+
             <div>
               <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
                 {t("salesHistory.refundReasonLabel")}
@@ -728,7 +746,12 @@ export default function SalesHistoryPage() {
               <button
                 type="button"
                 onClick={handleRefund}
-                disabled={refunding || !refundReason.trim() || !refundQuantity}
+                disabled={
+                  refunding ||
+                  !refundReason.trim() ||
+                  !refundQuantity ||
+                  (refundMethod === "store_credit" && !refundContactId)
+                }
                 className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
               >
                 {refunding ? t("salesHistory.refunding") : t("salesHistory.refundConfirmButton")}

@@ -1,6 +1,7 @@
 const { pool } = require("../Db");
 const { getLotById, decrementLot } = require("./lotService");
 const { getSettings, getBusinessTimezone } = require("./settingsService");
+const storeCreditService = require("./storeCreditService");
 const ApiError = require("../utils/ApiError");
 
 // RETURNING * used to be discarded here — nothing on the client ever learned a sale's
@@ -232,20 +233,44 @@ const formatRefundNo = (refundId) =>
 // transaction's client with FOR UPDATE row locks (mirrors voidSale's own inline-SQL style,
 // same reason: the mutation has to happen against `client`, not the module-level `pool`, to
 // actually be part of the same transaction).
-const checkoutSale = async (items, paymentMethod, requestingUser) => {
+// contactId/storeCreditRedeemed are both optional — when omitted (every anonymous walk-in
+// sale, still the vast majority), checkout behaves exactly as it did before store credit
+// existed: contact_id stays NULL, store_credit_applied stays its 0 default. Redemption is a
+// mixed/split payment, not all-or-nothing — it covers as much of the cart as is available,
+// paymentMethod covers whatever remains (e.g. Rs.800 cart, Rs.300 credit applied still records
+// payment_method: 'cash' for the remaining Rs.500).
+const checkoutSale = async (items, paymentMethod, requestingUser, { contactId, storeCreditRedeemed } = {}) => {
   if (!Array.isArray(items) || items.length === 0) {
     throw new ApiError(400, "Cart is empty");
   }
+
+  const cartTotal = items.reduce((sum, i) => sum + i.sellingPrice * i.quantity, 0);
+  // Capped at the cart's own total — redeeming can't produce cash back, only reduce what's
+  // owed. The actual balance check happens inside storeCreditService.redeemCredit below,
+  // inside the same transaction.
+  const creditToApply =
+    storeCreditRedeemed > 0 ? Math.min(Number(storeCreditRedeemed), cartTotal) : 0;
 
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
 
     const { rows: txnRows } = await client.query(
-      `INSERT INTO sale_transactions (sold_by, payment_method) VALUES ($1, $2) RETURNING id`,
-      [requestingUser.id, paymentMethod || null]
+      `INSERT INTO sale_transactions (sold_by, payment_method, contact_id, store_credit_applied)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [requestingUser.id, paymentMethod || null, contactId || null, creditToApply]
     );
     const transactionId = txnRows[0].id;
+
+    if (creditToApply > 0) {
+      await storeCreditService.redeemCredit(client, {
+        contactId,
+        amount: creditToApply,
+        transactionId,
+        requestingUser,
+      });
+    }
+
     const threshold = await getLowStockThreshold();
 
     const soldItems = [];
@@ -327,7 +352,8 @@ const checkoutSale = async (items, paymentMethod, requestingUser) => {
       transactionId,
       receiptNo: formatReceiptNo(transactionId),
       items: soldItems,
-      total: items.reduce((sum, i) => sum + i.sellingPrice * i.quantity, 0),
+      total: cartTotal,
+      creditApplied: creditToApply,
     };
   } catch (err) {
     await client.query("ROLLBACK");
@@ -612,10 +638,17 @@ const REFUND_CONDITIONS = ["resellable", "damaged"];
 // staff can refund any sale, any day (no same-day/own-sale rule like void has) — refunds
 // routinely happen well after the original sale, by whoever's on shift, per the confirmed
 // design decision.
-const refundSale = async (saleId, { quantity, refundAmount, refundMethod, condition, reason }, requestingUser) => {
+const refundSale = async (
+  saleId,
+  { quantity, refundAmount, refundMethod, condition, reason, contactId },
+  requestingUser
+) => {
   if (!reason || !String(reason).trim()) throw new ApiError(400, "A reason is required for a refund");
   if (!REFUND_METHODS.includes(refundMethod)) throw new ApiError(400, "Invalid refund method");
   if (!REFUND_CONDITIONS.includes(condition)) throw new ApiError(400, "Invalid item condition");
+  if (refundMethod === "store_credit" && !contactId) {
+    throw new ApiError(400, "A customer must be selected to issue store credit");
+  }
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty <= 0) throw new ApiError(400, "Invalid refund quantity");
 
@@ -695,11 +728,29 @@ const refundSale = async (saleId, { quantity, refundAmount, refundMethod, condit
       [saleId, sale.transaction_id, qty, amount, refundMethod, condition, reason, requestingUser.id]
     );
 
+    // Issuing store credit is atomic with the refund itself — same transaction client, so
+    // either both the refund and the credit it produces commit together, or neither does.
+    // Deliberately not requiring the ORIGINAL sale to have had a customer attached: contactId
+    // here is whoever the cashier picks/creates at refund time (reuses ContactSelect's
+    // existing "+ Add new customer..." flow), since most existing sales have no customer link.
+    let storeCreditBalance = null;
+    if (refundMethod === "store_credit") {
+      await storeCreditService.issueCredit(client, {
+        contactId,
+        amount,
+        refundId: inserted[0].id,
+        note: `Refund: ${reason}`,
+        requestingUser,
+      });
+      storeCreditBalance = await storeCreditService.getBalance(contactId, client);
+    }
+
     await client.query("COMMIT");
     return {
       refund: inserted[0],
       refundNo: formatRefundNo(inserted[0].id),
       remainingAfter: remaining - qty,
+      storeCreditBalance,
     };
   } catch (err) {
     await client.query("ROLLBACK");

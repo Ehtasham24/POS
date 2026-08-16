@@ -11,10 +11,11 @@ import {
   setQuantity,
   clearCart,
 } from "cartRedux/cartSlice";
-import { apiPost } from "utils/api";
+import { apiGet, apiPost } from "utils/api";
 import { enqueueOfflineSale } from "offline/syncManager";
 import { decrementLocalStock } from "offline/cache";
 import ReceiptPreviewModal from "./ReceiptPreviewModal";
+import ContactSelect from "creditDebitComponents/ContactSelect";
 
 // Cash amounts customers commonly hand over — used to build one-tap tender suggestions.
 const CASH_DENOMINATIONS = [50, 100, 500, 1000, 5000];
@@ -82,18 +83,53 @@ export default function CartPanel({ onCheckedOut }) {
   // The whole-cart receipt number from POST /api/sales/checkout — null for an offline-queued
   // sale (a real number is only assigned once it actually syncs; see syncManager.js).
   const [receiptNo, setReceiptNo] = useState(null);
+  // Collapsed by default — the vast majority of sales are walk-in with no customer attached
+  // at all, so this whole block (and everything it touches downstream) stays completely out
+  // of the way unless a cashier explicitly opens it.
+  const [showStoreCredit, setShowStoreCredit] = useState(false);
+  const [storeCreditContactId, setStoreCreditContactId] = useState("");
+  const [storeCreditBalance, setStoreCreditBalance] = useState(null);
+  const [loadingBalance, setLoadingBalance] = useState(false);
+  const [storeCreditAmount, setStoreCreditAmount] = useState("");
 
   const calculateSubtotal = () =>
     cart.reduce((total, item) => total + item.sellingPrice * item.sellingQuantity, 0);
 
   const subtotal = calculateSubtotal();
+
+  useEffect(() => {
+    if (!storeCreditContactId) {
+      setStoreCreditBalance(null);
+      return;
+    }
+    setLoadingBalance(true);
+    apiGet(`/api/store-credit/${storeCreditContactId}/balance`)
+      .then((res) => setStoreCreditBalance(res.balance))
+      .catch(() => setStoreCreditBalance(null))
+      .finally(() => setLoadingBalance(false));
+  }, [storeCreditContactId]);
+
+  // Redemption is a mixed/split payment, not all-or-nothing — capped at both what's actually
+  // available and the cart's own total (can't redeem more credit than the bill, and never
+  // more than the cashier typed in). The real, authoritative check still happens server-side
+  // in redeemCredit (Sevices/storeCreditService.js) inside the same DB transaction — this is
+  // purely a UX cap so the amount-due math on screen is never misleading.
+  const creditToApply = Math.max(
+    0,
+    Math.min(Number(storeCreditAmount) || 0, storeCreditBalance || 0, subtotal)
+  );
+  const amountDue = subtotal - creditToApply;
+
   const tenderedNum = parseFloat(amountTendered) || 0;
-  const changeDue = tenderedNum - subtotal;
-  const canConfirm = paymentMethod === "card" || tenderedNum >= subtotal;
+  const changeDue = tenderedNum - amountDue;
+  const canConfirm = amountDue <= 0 || paymentMethod === "card" || tenderedNum >= amountDue;
 
   const openPayment = () => {
     setPaymentMethod("cash");
     setAmountTendered("");
+    setShowStoreCredit(false);
+    setStoreCreditContactId("");
+    setStoreCreditAmount("");
     setShowPayment(true);
   };
 
@@ -115,11 +151,19 @@ export default function CartPanel({ onCheckedOut }) {
       // checkoutSale for why: it's what makes the receipt a single atomic transaction
       // (all items sell together or none do) with one real receipt number, instead of N
       // independent inserts the server had no way to tie back together.
+      // contactId/storeCreditRedeemed are both omitted entirely (undefined, not just falsy)
+      // unless the cashier actually opened "Customer has store credit?" and applied some —
+      // checkoutSale on the backend treats their absence as a completely ordinary walk-in
+      // sale, same as before store credit existed.
+      const checkoutPayload = {
+        items: salesData,
+        paymentMethod,
+        contactId: creditToApply > 0 ? Number(storeCreditContactId) : undefined,
+        storeCreditRedeemed: creditToApply > 0 ? creditToApply : undefined,
+      };
+
       try {
-        const json = await apiPost("/api/sales/checkout", {
-          items: salesData,
-          paymentMethod,
-        });
+        const json = await apiPost("/api/sales/checkout", checkoutPayload);
         checkoutReceiptNo = json.data?.receiptNo ?? null;
 
         // The checkout response flags, per item, when it just dropped below the low-stock
@@ -132,12 +176,15 @@ export default function CartPanel({ onCheckedOut }) {
             toast.warning(`Low stock: ${cartItem?.productname || "Item"}.`);
           });
       } catch (error) {
-        // A real rejection from the server (e.g. "insufficient stock") must surface to
-        // the cashier as-is, not be queued for a retry that would just fail again.
-        // Only an actual dropped connection falls back to the offline outbox.
+        // A real rejection from the server (e.g. "insufficient stock", or the store credit
+        // balance no longer covers what was requested) must surface to the cashier as-is,
+        // not be queued for a retry that would just fail again. Only an actual dropped
+        // connection falls back to the offline outbox — a redemption queued that way is
+        // re-validated for real once it actually reaches the server (see storeCreditService's
+        // redeemCredit), same accepted behavior stock-insufficiency already has offline.
         if (!error.isNetworkError) throw error;
         wentOffline = true;
-        await enqueueOfflineSale({ items: salesData, paymentMethod });
+        await enqueueOfflineSale(checkoutPayload);
         for (const sale of salesData) {
           await decrementLocalStock(sale.productID, sale.quantity, sale.lotId);
         }
@@ -150,6 +197,8 @@ export default function CartPanel({ onCheckedOut }) {
           ? `Saved offline — will sync automatically once connection is back. Total: PKR ${subtotal}.`
           : paymentMethod === "cash" && changeDue > 0
           ? `Sold for PKR ${subtotal}. Change due: PKR ${changeDue.toFixed(0)}.`
+          : creditToApply > 0
+          ? `Sold for PKR ${subtotal} — PKR ${creditToApply.toFixed(0)} paid via store credit.`
           : `Sold for PKR ${subtotal}. Products sold successfully!`
       );
 
@@ -262,12 +311,64 @@ export default function CartPanel({ onCheckedOut }) {
       </div>
 
       <Modal isOpen={showPayment} onClose={() => setShowPayment(false)} title={t("payment.title")}>
-        <div className="mb-4 flex items-center justify-between rounded-lg bg-surface-subtle px-4 py-3 dark:bg-gray-900/40">
-          <span className="text-sm text-gray-600 dark:text-gray-300">{t("payment.amountDue")}</span>
-          <span className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
-            PKR {subtotal}
-          </span>
+        <div className="mb-4 rounded-lg bg-surface-subtle px-4 py-3 dark:bg-gray-900/40">
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-gray-600 dark:text-gray-300">{t("payment.amountDue")}</span>
+            <span className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
+              PKR {amountDue.toFixed(0)}
+            </span>
+          </div>
+          {creditToApply > 0 && (
+            <div className="mt-1 flex items-center justify-between text-xs text-primary-600 dark:text-primary-400">
+              <span>{t("payment.storeCreditApplied")}</span>
+              <span>- PKR {creditToApply.toFixed(0)}</span>
+            </div>
+          )}
         </div>
+
+        <button
+          type="button"
+          onClick={() => setShowStoreCredit((v) => !v)}
+          className="mb-4 text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400"
+        >
+          {showStoreCredit ? t("payment.hideStoreCredit") : t("payment.customerHasStoreCredit")}
+        </button>
+
+        {showStoreCredit && (
+          <div className="mb-4 rounded-lg border border-dashed border-surface-border p-3 dark:border-gray-700">
+            <ContactSelect
+              type="customer"
+              value={storeCreditContactId}
+              onChange={setStoreCreditContactId}
+              id="checkout-store-credit-contact"
+            />
+            {storeCreditContactId && (
+              <div className="mt-2">
+                {loadingBalance ? (
+                  <p className="text-xs text-gray-500 dark:text-gray-400">{t("payment.loadingBalance")}</p>
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-600 dark:text-gray-300">
+                      {t("payment.availableCredit")}: PKR {Number(storeCreditBalance || 0).toFixed(0)}
+                    </p>
+                    <label className="mb-1 mt-2 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+                      {t("payment.amountToRedeem")}
+                    </label>
+                    <input
+                      type="number"
+                      min={0}
+                      max={Math.min(storeCreditBalance || 0, subtotal)}
+                      value={storeCreditAmount}
+                      onChange={(e) => setStoreCreditAmount(e.target.value)}
+                      placeholder="0"
+                      className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                    />
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         <div className="mb-4 grid grid-cols-2 gap-2">
           <button
@@ -296,7 +397,13 @@ export default function CartPanel({ onCheckedOut }) {
           </button>
         </div>
 
-        {paymentMethod === "cash" && (
+        {amountDue <= 0 && (
+          <div className="mb-4 rounded-lg bg-success-50 px-4 py-3 text-sm font-semibold text-success-700 dark:bg-success-500/10 dark:text-success-500">
+            {t("payment.fullyCoveredByCredit")}
+          </div>
+        )}
+
+        {paymentMethod === "cash" && amountDue > 0 && (
           <>
             <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
               {t("payment.amountReceived")}
@@ -311,7 +418,7 @@ export default function CartPanel({ onCheckedOut }) {
             />
 
             <div className="mb-3 flex flex-wrap gap-2">
-              {tenderSuggestions(subtotal).map((amount) => (
+              {tenderSuggestions(amountDue).map((amount) => (
                 <button
                   key={amount}
                   type="button"

@@ -18,8 +18,10 @@ export default function RefundReceiptModal({ isOpen, onClose, refund }) {
 
   if (!refund) return null;
 
-  const { productname, quantity, amount, refundMethod, condition, reason, refundNo, receiptNo } = refund;
+  const { productname, quantity, amount, refundMethod, condition, reason, refundNo, receiptNo, storeCreditBalance } =
+    refund;
   const methodLabel = { cash: "Cash", card: "Card", store_credit: "Store Credit" }[refundMethod] || refundMethod;
+  const isStoreCredit = refundMethod === "store_credit" && storeCreditBalance != null;
 
   const handlePrint = async () => {
     setPrinting(true);
@@ -71,6 +73,12 @@ export default function RefundReceiptModal({ isOpen, onClose, refund }) {
           <span>{t("salesHistory.refundedAmount")}</span>
           <span>Rs.{Number(amount).toFixed(2)}</span>
         </div>
+        {isStoreCredit && (
+          <div className="mt-1 flex justify-between text-[11px] text-gray-500 dark:text-gray-400">
+            <span>{t("salesHistory.newStoreCreditBalance")}</span>
+            <span>Rs.{Number(storeCreditBalance).toFixed(2)}</span>
+          </div>
+        )}
       </div>
 
       <div className="mt-4 flex gap-3">

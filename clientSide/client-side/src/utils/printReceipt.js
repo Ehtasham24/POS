@@ -166,7 +166,7 @@ export async function printTestReceipt() {
 // printViaBrowserDialog's cart-of-items layout. Browser print dialog only for v1 (no direct
 // thermal path) — a deliberate scope reduction, not an oversight; can gain one later the same
 // way printReceipt did, by adding a buildRefundReceiptBytes alongside buildReceiptBytes.
-export async function printRefundReceipt({ productname, quantity, amount, refundMethod, condition, reason, refundNo, receiptNo }) {
+export async function printRefundReceipt({ productname, quantity, amount, refundMethod, condition, reason, refundNo, receiptNo, storeCreditBalance }) {
   const refundWindow = window.open("", "_blank", "width=400,height=600");
 
   let company = {};
@@ -218,6 +218,11 @@ export async function printRefundReceipt({ productname, quantity, amount, refund
 
       <div class="divider"></div>
       <div class="total-line"><span>REFUNDED</span><span>Rs.${Number(amount).toFixed(2)}</span></div>
+      ${
+        refundMethod === "store_credit" && storeCreditBalance != null
+          ? `<div class="meta-line"><span>New credit balance</span><span>Rs.${Number(storeCreditBalance).toFixed(2)}</span></div>`
+          : ""
+      }
       <div class="divider"></div>
     </body>
   </html>

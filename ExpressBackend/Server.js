@@ -8,6 +8,7 @@ const routesProducts = require("./Routes/API/productsRoutes");
 const routesCategories = require("./Routes/API/categoriesRoutes");
 const routesSales = require("./Routes/API/salesRoutes");
 const routesPartyLedger = require("./Routes/API/partyLedgerRoutes");
+const routesStoreCredit = require("./Routes/API/storeCreditRoutes");
 const routesSettings = require("./Routes/API/settingsRoutes");
 const routesSearch = require("./Routes/API/searchRoutes");
 const routesInventory = require("./Routes/API/inventoryRoutes");
@@ -57,6 +58,7 @@ const Server = async () => {
   server.use(routesCategories);
   server.use(routesSales);
   server.use(routesPartyLedger);
+  server.use(routesStoreCredit);
   server.use(routesSettings);
   server.use(routesSearch);
   server.use(routesInventory);
