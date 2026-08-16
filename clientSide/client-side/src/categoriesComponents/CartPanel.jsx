@@ -15,7 +15,6 @@ import { apiGet, apiPost } from "utils/api";
 import { enqueueOfflineSale } from "offline/syncManager";
 import { decrementLocalStock } from "offline/cache";
 import ReceiptPreviewModal from "./ReceiptPreviewModal";
-import ContactSelect from "creditDebitComponents/ContactSelect";
 
 // Cash amounts customers commonly hand over — used to build one-tap tender suggestions.
 const CASH_DENOMINATIONS = [50, 100, 500, 1000, 5000];
@@ -87,13 +86,16 @@ export default function CartPanel({ onCheckedOut }) {
   // after a successful sale, same as receiptNo, so the preview/print actually shows the
   // breakdown instead of a receipt that silently looks like a plain cash/card sale.
   const [receiptCreditApplied, setReceiptCreditApplied] = useState(0);
-  // Collapsed by default — the vast majority of sales are walk-in with no customer attached
+  // Collapsed by default — the vast majority of sales are walk-in with no voucher involved
   // at all, so this whole block (and everything it touches downstream) stays completely out
-  // of the way unless a cashier explicitly opens it.
+  // of the way unless a cashier explicitly opens it. Gift-voucher model, not a customer
+  // account (see migrations/011_store_credit_vouchers.sql) — redeeming just needs the code
+  // printed on a refund slip (REF-XXXXXX), no customer lookup/selection involved.
   const [showStoreCredit, setShowStoreCredit] = useState(false);
-  const [storeCreditContactId, setStoreCreditContactId] = useState("");
+  const [storeCreditCode, setStoreCreditCode] = useState("");
   const [storeCreditBalance, setStoreCreditBalance] = useState(null);
   const [loadingBalance, setLoadingBalance] = useState(false);
+  const [voucherError, setVoucherError] = useState(false);
   const [storeCreditAmount, setStoreCreditAmount] = useState("");
 
   const calculateSubtotal = () =>
@@ -101,17 +103,29 @@ export default function CartPanel({ onCheckedOut }) {
 
   const subtotal = calculateSubtotal();
 
+  // Debounced — this is a free-text field the cashier types into, unlike the old contact
+  // dropdown (which only ever fired on a discrete selection), so looking up on every
+  // keystroke would fire a request per character.
   useEffect(() => {
-    if (!storeCreditContactId) {
+    const code = storeCreditCode.trim();
+    if (!code) {
       setStoreCreditBalance(null);
+      setVoucherError(false);
       return;
     }
     setLoadingBalance(true);
-    apiGet(`/api/store-credit/${storeCreditContactId}/balance`)
-      .then((res) => setStoreCreditBalance(res.balance))
-      .catch(() => setStoreCreditBalance(null))
-      .finally(() => setLoadingBalance(false));
-  }, [storeCreditContactId]);
+    setVoucherError(false);
+    const timer = setTimeout(() => {
+      apiGet(`/api/store-credit/lookup/${encodeURIComponent(code)}`)
+        .then((res) => setStoreCreditBalance(res.balance))
+        .catch(() => {
+          setStoreCreditBalance(null);
+          setVoucherError(true);
+        })
+        .finally(() => setLoadingBalance(false));
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [storeCreditCode]);
 
   // Redemption is a mixed/split payment, not all-or-nothing — capped at both what's actually
   // available and the cart's own total (can't redeem more credit than the bill, and never
@@ -132,7 +146,7 @@ export default function CartPanel({ onCheckedOut }) {
     setPaymentMethod("cash");
     setAmountTendered("");
     setShowStoreCredit(false);
-    setStoreCreditContactId("");
+    setStoreCreditCode("");
     setStoreCreditAmount("");
     setShowPayment(true);
   };
@@ -155,14 +169,14 @@ export default function CartPanel({ onCheckedOut }) {
       // checkoutSale for why: it's what makes the receipt a single atomic transaction
       // (all items sell together or none do) with one real receipt number, instead of N
       // independent inserts the server had no way to tie back together.
-      // contactId/storeCreditRedeemed are both omitted entirely (undefined, not just falsy)
-      // unless the cashier actually opened "Customer has store credit?" and applied some —
+      // voucherCode/storeCreditRedeemed are both omitted entirely (undefined, not just falsy)
+      // unless the cashier actually opened "Have a store credit voucher?" and applied some —
       // checkoutSale on the backend treats their absence as a completely ordinary walk-in
       // sale, same as before store credit existed.
       const checkoutPayload = {
         items: salesData,
         paymentMethod,
-        contactId: creditToApply > 0 ? Number(storeCreditContactId) : undefined,
+        voucherCode: creditToApply > 0 ? storeCreditCode.trim() : undefined,
         storeCreditRedeemed: creditToApply > 0 ? creditToApply : undefined,
       };
 
@@ -340,21 +354,27 @@ export default function CartPanel({ onCheckedOut }) {
           onClick={() => setShowStoreCredit((v) => !v)}
           className="mb-4 text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400"
         >
-          {showStoreCredit ? t("payment.hideStoreCredit") : t("payment.customerHasStoreCredit")}
+          {showStoreCredit ? t("payment.hideStoreCredit") : t("payment.haveVoucherCode")}
         </button>
 
         {showStoreCredit && (
           <div className="mb-4 rounded-lg border border-dashed border-surface-border p-3 dark:border-gray-700">
-            <ContactSelect
-              type="customer"
-              value={storeCreditContactId}
-              onChange={setStoreCreditContactId}
-              id="checkout-store-credit-contact"
+            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+              {t("payment.voucherCode")}
+            </label>
+            <input
+              type="text"
+              value={storeCreditCode}
+              onChange={(e) => setStoreCreditCode(e.target.value)}
+              placeholder="REF-000123"
+              className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
             />
-            {storeCreditContactId && (
+            {storeCreditCode.trim() && (
               <div className="mt-2">
                 {loadingBalance ? (
                   <p className="text-xs text-gray-500 dark:text-gray-400">{t("payment.loadingBalance")}</p>
+                ) : voucherError ? (
+                  <p className="text-xs text-danger-600 dark:text-danger-400">{t("payment.invalidVoucherCode")}</p>
                 ) : (
                   <>
                     <p className="text-xs text-gray-600 dark:text-gray-300">

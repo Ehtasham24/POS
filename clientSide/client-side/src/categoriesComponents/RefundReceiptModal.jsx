@@ -18,10 +18,12 @@ export default function RefundReceiptModal({ isOpen, onClose, refund }) {
 
   if (!refund) return null;
 
-  const { productname, quantity, amount, refundMethod, condition, reason, refundNo, receiptNo, storeCreditBalance } =
-    refund;
+  const { productname, quantity, amount, refundMethod, condition, reason, refundNo, receiptNo } = refund;
   const methodLabel = { cash: "Cash", card: "Card", store_credit: "Store Credit" }[refundMethod] || refundMethod;
-  const isStoreCredit = refundMethod === "store_credit" && storeCreditBalance != null;
+  // Gift-voucher model, not a customer account (see migrations/011_store_credit_vouchers.sql)
+  // — this refund's own number IS the redemption code, there's no separate "balance" concept
+  // to show beyond the amount already printed below.
+  const isStoreCredit = refundMethod === "store_credit";
 
   const handlePrint = async () => {
     setPrinting(true);
@@ -74,9 +76,8 @@ export default function RefundReceiptModal({ isOpen, onClose, refund }) {
           <span>Rs.{Number(amount).toFixed(2)}</span>
         </div>
         {isStoreCredit && (
-          <div className="mt-1 flex justify-between text-[11px] text-gray-500 dark:text-gray-400">
-            <span>{t("salesHistory.newStoreCreditBalance")}</span>
-            <span>Rs.{Number(storeCreditBalance).toFixed(2)}</span>
+          <div className="mt-2 rounded-lg bg-primary-50 p-2 text-center text-[11px] font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
+            {t("salesHistory.voucherCodeHint", { code: refundNo })}
           </div>
         )}
       </div>

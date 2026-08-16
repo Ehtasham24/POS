@@ -88,7 +88,7 @@ export default function SalesHistoryPage() {
   const [refundCondition, setRefundCondition] = useState("resellable");
   const [refundAmount, setRefundAmount] = useState("");
   const [refundReason, setRefundReason] = useState("");
-  const [refundContactId, setRefundContactId] = useState(""); // required only when refundMethod === "store_credit"
+  const [refundContactId, setRefundContactId] = useState(""); // always optional — see handleRefund's comment
   const [refunding, setRefunding] = useState(false);
   const [refundReceipt, setRefundReceipt] = useState(null); // set after a successful refund, opens RefundReceiptModal
 
@@ -184,19 +184,18 @@ export default function SalesHistoryPage() {
   // no client-side role/ownership gate to apply here, unlike void.
   const handleRefund = async () => {
     if (!refundTarget) return;
-    if (refundMethod === "store_credit" && !refundContactId) {
-      toast.error(t("salesHistory.refundCustomerRequired"));
-      return;
-    }
     setRefunding(true);
     try {
+      // contactId is always optional — gift-voucher model, not a customer account (see
+      // migrations/011_store_credit_vouchers.sql). Tagging one here is purely for the
+      // owner's own tracking (shows up on the Store Credit page); redemption never needs it.
       const result = await apiPost(`/api/sales/${refundTarget.id}/refunds`, {
         quantity: Number(refundQuantity),
         refundAmount: refundAmount === "" ? undefined : Number(refundAmount),
         refundMethod,
         condition: refundCondition,
         reason: refundReason,
-        contactId: refundMethod === "store_credit" ? Number(refundContactId) : undefined,
+        contactId: refundContactId ? Number(refundContactId) : undefined,
       });
       toast.success(t("salesHistory.refunded"));
       setRefundReceipt({
@@ -208,7 +207,6 @@ export default function SalesHistoryPage() {
         reason: refundReason,
         refundNo: result.refundNo,
         receiptNo: refundTarget.receipt_no,
-        storeCreditBalance: result.storeCreditBalance,
       });
       setRefundTarget(null);
       fetchHistory(page);
@@ -713,12 +711,17 @@ export default function SalesHistoryPage() {
             </div>
 
             {refundMethod === "store_credit" && (
-              <ContactSelect
-                type="customer"
-                value={refundContactId}
-                onChange={setRefundContactId}
-                id="refund-store-credit-contact"
-              />
+              <div>
+                <ContactSelect
+                  type="customer"
+                  value={refundContactId}
+                  onChange={setRefundContactId}
+                  id="refund-store-credit-contact"
+                />
+                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  {t("salesHistory.refundCustomerOptionalHint")}
+                </p>
+              </div>
             )}
 
             <div>
@@ -746,12 +749,7 @@ export default function SalesHistoryPage() {
               <button
                 type="button"
                 onClick={handleRefund}
-                disabled={
-                  refunding ||
-                  !refundReason.trim() ||
-                  !refundQuantity ||
-                  (refundMethod === "store_credit" && !refundContactId)
-                }
+                disabled={refunding || !refundReason.trim() || !refundQuantity}
                 className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
               >
                 {refunding ? t("salesHistory.refunding") : t("salesHistory.refundConfirmButton")}

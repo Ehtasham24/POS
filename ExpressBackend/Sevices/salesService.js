@@ -233,20 +233,22 @@ const formatRefundNo = (refundId) =>
 // transaction's client with FOR UPDATE row locks (mirrors voidSale's own inline-SQL style,
 // same reason: the mutation has to happen against `client`, not the module-level `pool`, to
 // actually be part of the same transaction).
-// contactId/storeCreditRedeemed are both optional — when omitted (every anonymous walk-in
+// voucherCode/storeCreditRedeemed are both optional — when omitted (every anonymous walk-in
 // sale, still the vast majority), checkout behaves exactly as it did before store credit
-// existed: contact_id stays NULL, store_credit_applied stays its 0 default. Redemption is a
-// mixed/split payment, not all-or-nothing — it covers as much of the cart as is available,
-// paymentMethod covers whatever remains (e.g. Rs.800 cart, Rs.300 credit applied still records
-// payment_method: 'cash' for the remaining Rs.500).
-const checkoutSale = async (items, paymentMethod, requestingUser, { contactId, storeCreditRedeemed } = {}) => {
+// existed: store_credit_applied stays its 0 default. Redemption is a mixed/split payment, not
+// all-or-nothing — it covers as much of the cart as is available, paymentMethod covers
+// whatever remains (e.g. Rs.800 cart, Rs.300 credit applied still records payment_method:
+// 'cash' for the remaining Rs.500). No customer identity involved anywhere here — see
+// migrations/011_store_credit_vouchers.sql: redemption works by the voucher's own code, not
+// by who's making the purchase.
+const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode, storeCreditRedeemed } = {}) => {
   if (!Array.isArray(items) || items.length === 0) {
     throw new ApiError(400, "Cart is empty");
   }
 
   const cartTotal = items.reduce((sum, i) => sum + i.sellingPrice * i.quantity, 0);
   // Capped at the cart's own total — redeeming can't produce cash back, only reduce what's
-  // owed. The actual balance check happens inside storeCreditService.redeemCredit below,
+  // owed. The actual balance check happens inside storeCreditService.redeemVoucher below,
   // inside the same transaction.
   const creditToApply =
     storeCreditRedeemed > 0 ? Math.min(Number(storeCreditRedeemed), cartTotal) : 0;
@@ -256,15 +258,15 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { contactId, s
     await client.query("BEGIN");
 
     const { rows: txnRows } = await client.query(
-      `INSERT INTO sale_transactions (sold_by, payment_method, contact_id, store_credit_applied)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [requestingUser.id, paymentMethod || null, contactId || null, creditToApply]
+      `INSERT INTO sale_transactions (sold_by, payment_method, store_credit_applied)
+       VALUES ($1, $2, $3) RETURNING id`,
+      [requestingUser.id, paymentMethod || null, creditToApply]
     );
     const transactionId = txnRows[0].id;
 
     if (creditToApply > 0) {
-      await storeCreditService.redeemCredit(client, {
-        contactId,
+      await storeCreditService.redeemVoucher(client, {
+        code: voucherCode,
         amount: creditToApply,
         transactionId,
         requestingUser,
@@ -651,9 +653,10 @@ const refundSale = async (
   if (!reason || !String(reason).trim()) throw new ApiError(400, "A reason is required for a refund");
   if (!REFUND_METHODS.includes(refundMethod)) throw new ApiError(400, "Invalid refund method");
   if (!REFUND_CONDITIONS.includes(condition)) throw new ApiError(400, "Invalid item condition");
-  if (refundMethod === "store_credit" && !contactId) {
-    throw new ApiError(400, "A customer must be selected to issue store credit");
-  }
+  // contactId is always optional (gift-voucher model — see migrations/011_store_credit_
+  // vouchers.sql): a store-credit refund never needs a customer identified to be issued.
+  // When provided, it's purely for the owner's own tracking (shows up on the Store Credit
+  // page), not required for redemption, which always works by the refund's own number.
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty <= 0) throw new ApiError(400, "Invalid refund quantity");
 
@@ -726,36 +729,21 @@ const refundSale = async (
       }
     }
 
+    // When refundMethod is store_credit, this row IS the voucher — its own refund_amount is
+    // the initial value, its own id (formatted below as REF-XXXXXX) is the redemption code.
+    // No separate "issue" step needed (see storeCreditService.js / migrations/011).
     const { rows: inserted } = await client.query(
-      `INSERT INTO refunds (sale_id, transaction_id, quantity, refund_amount, refund_method, condition, reason, refunded_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      `INSERT INTO refunds (sale_id, transaction_id, quantity, refund_amount, refund_method, condition, reason, refunded_by, contact_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING *`,
-      [saleId, sale.transaction_id, qty, amount, refundMethod, condition, reason, requestingUser.id]
+      [saleId, sale.transaction_id, qty, amount, refundMethod, condition, reason, requestingUser.id, contactId || null]
     );
-
-    // Issuing store credit is atomic with the refund itself — same transaction client, so
-    // either both the refund and the credit it produces commit together, or neither does.
-    // Deliberately not requiring the ORIGINAL sale to have had a customer attached: contactId
-    // here is whoever the cashier picks/creates at refund time (reuses ContactSelect's
-    // existing "+ Add new customer..." flow), since most existing sales have no customer link.
-    let storeCreditBalance = null;
-    if (refundMethod === "store_credit") {
-      await storeCreditService.issueCredit(client, {
-        contactId,
-        amount,
-        refundId: inserted[0].id,
-        note: `Refund: ${reason}`,
-        requestingUser,
-      });
-      storeCreditBalance = await storeCreditService.getBalance(contactId, client);
-    }
 
     await client.query("COMMIT");
     return {
       refund: inserted[0],
       refundNo: formatRefundNo(inserted[0].id),
       remainingAfter: remaining - qty,
-      storeCreditBalance,
     };
   } catch (err) {
     await client.query("ROLLBACK");
