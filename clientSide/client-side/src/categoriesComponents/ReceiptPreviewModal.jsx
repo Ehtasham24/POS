@@ -3,6 +3,7 @@ import { HiOutlinePrinter, HiOutlineCheckCircle } from "react-icons/hi2";
 import { Modal } from "components";
 import { useLanguage } from "i18n/LanguageContext";
 import { useToast } from "components/Toast/ToastContext";
+import { useTimezone } from "timezone/TimezoneContext";
 import { printReceipt } from "utils/printReceipt";
 import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
 import { apiGet } from "utils/api";
@@ -18,6 +19,7 @@ import { withFallback, getSettings as getOfflineSettings } from "offline/cache";
 export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmount, receiptNo }) {
   const { t } = useLanguage();
   const toast = useToast();
+  const { formatDateTime } = useTimezone();
   const [company, setCompany] = useState({});
   const [printing, setPrinting] = useState(false);
 
@@ -65,7 +67,7 @@ export default function ReceiptPreviewModal({ isOpen, onClose, items, totalAmoun
         </div>
 
         {receiptNo && <p className="mt-2 font-bold">{t("receipt.receiptNo")}: {receiptNo}</p>}
-        <p className="mt-1">{new Date().toLocaleString()}</p>
+        <p className="mt-1">{formatDateTime(new Date())}</p>
         <div className="my-2 border-t border-dashed border-gray-400 dark:border-gray-600" />
 
         {items.length === 0 ? (

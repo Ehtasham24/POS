@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { HiOutlinePencil, HiOutlineTrash } from "react-icons/hi2";
 import { Pagination } from "components";
 import { useLanguage } from "i18n/LanguageContext";
+import { useTimezone } from "timezone/TimezoneContext";
 import { apiGet } from "utils/api";
 
 const PAGE_SIZE = 20;
@@ -31,6 +32,7 @@ export default function PartyHistoryRow({
   onDeleteTransaction,
 }) {
   const { t } = useLanguage();
+  const { formatDateTime } = useTimezone();
   const [transactions, setTransactions] = useState(null);
   const [loadError, setLoadError] = useState(false);
   const [page, setPage] = useState(1);
@@ -97,7 +99,7 @@ export default function PartyHistoryRow({
                   {transactions.map((tx) => (
                     <tr key={tx.id}>
                       <td className="whitespace-nowrap px-3 py-2 text-gray-600 dark:text-gray-300">
-                        {new Date(tx.occurred_on).toLocaleDateString()}
+                        {formatDateTime(tx.occurred_on, { dateStyle: "medium" })}
                       </td>
                       <td className={`px-3 py-2 font-medium ${kindColor(tx.kind)}`}>
                         {kindLabel(t, tx.kind, direction)}

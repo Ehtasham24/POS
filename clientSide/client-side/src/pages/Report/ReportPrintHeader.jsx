@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { apiGet } from "utils/api";
 import * as offlineCache from "offline/cache";
 import { useLanguage } from "i18n/LanguageContext";
+import { useTimezone } from "timezone/TimezoneContext";
 
 // Only rendered on paper (hidden on screen) — a proper letterhead so a printed report
 // looks like it came from a real business, not a browser tab. Reuses the exact company
@@ -9,6 +10,7 @@ import { useLanguage } from "i18n/LanguageContext";
 // (utils/printReceipt.js), so the two never disagree.
 export default function ReportPrintHeader({ startDate, endDate, filterType }) {
   const { t } = useLanguage();
+  const { formatDateTime } = useTimezone();
   const [company, setCompany] = useState({});
 
   useEffect(() => {
@@ -25,6 +27,11 @@ export default function ReportPrintHeader({ startDate, endDate, filterType }) {
       ? t("report.lossProducts")
       : t("report.allProducts");
 
+  // Deliberately NOT business-timezone-formatted, unlike generatedOn below: startDate/endDate
+  // are the literal datetime-local values the viewer picked on the Report page (a naive
+  // string with no timezone info at all, parsed by JS as this browser's own local time) —
+  // re-displaying them with an explicit business timeZone would silently double-convert
+  // them rather than showing back what was actually typed.
   const formatDisplay = (value) => (value ? new Date(value).toLocaleString() : "—");
 
   return (
@@ -52,7 +59,7 @@ export default function ReportPrintHeader({ startDate, endDate, filterType }) {
             {t("report.filterLabel")}: {filterLabel}
           </p>
           <p className="mt-1 text-[11px] text-gray-500">
-            {t("report.generatedOn")} {new Date().toLocaleString()}
+            {t("report.generatedOn")} {formatDateTime(new Date())}
           </p>
         </div>
       </div>

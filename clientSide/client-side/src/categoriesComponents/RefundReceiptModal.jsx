@@ -3,6 +3,7 @@ import { HiOutlinePrinter, HiOutlineCheckCircle } from "react-icons/hi2";
 import { Modal } from "components";
 import { useLanguage } from "i18n/LanguageContext";
 import { useToast } from "components/Toast/ToastContext";
+import { useTimezone } from "timezone/TimezoneContext";
 import { printRefundReceipt } from "utils/printReceipt";
 
 // Shown right after a refund is confirmed — mirrors ReceiptPreviewModal's Done/Print pattern
@@ -12,6 +13,7 @@ import { printRefundReceipt } from "utils/printReceipt";
 export default function RefundReceiptModal({ isOpen, onClose, refund }) {
   const { t } = useLanguage();
   const toast = useToast();
+  const { formatDateTime } = useTimezone();
   const [printing, setPrinting] = useState(false);
 
   if (!refund) return null;
@@ -41,7 +43,7 @@ export default function RefundReceiptModal({ isOpen, onClose, refund }) {
 
         <p className="mt-2">{t("salesHistory.refundNo")}: {refundNo}</p>
         {receiptNo && <p>{t("salesHistory.receiptNo")}: {receiptNo}</p>}
-        <p>{new Date().toLocaleString()}</p>
+        <p>{formatDateTime(new Date())}</p>
         <div className="my-2 border-t border-dashed border-gray-400 dark:border-gray-600" />
 
         <p className="font-bold">{productname}</p>

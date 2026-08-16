@@ -3,6 +3,7 @@ import * as printerConnection from "utils/thermalPrinter/connection";
 import { buildReceiptBytes } from "utils/thermalPrinter/buildReceiptBytes";
 import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
 import { withFallback, getSettings as getOfflineSettings } from "offline/cache";
+import { resolveTimezone, formatInTimezone } from "utils/timezone";
 
 // Escapes text pulled from settings/product names before it's spliced into the
 // print-dialog fallback's raw HTML string (that window is built with document.write, not JSX).
@@ -32,7 +33,9 @@ function printViaBrowserDialog(salesData, totalAmount, company, receiptNo, exist
         .join("")
     : `<p style="text-align:center;">No sale data available</p>`;
 
-  const now = new Date().toLocaleString();
+  // Consistent-for-everyone business timezone, not this device's own — same reasoning as
+  // TimezoneContext.jsx (a printed receipt's time shouldn't depend on which till printed it).
+  const now = formatInTimezone(new Date(), resolveTimezone(company));
 
   const receiptContent = `
   <html>
@@ -173,7 +176,7 @@ export async function printRefundReceipt({ productname, quantity, amount, refund
     console.error("Error fetching company settings for refund receipt:", error);
   }
 
-  const now = new Date().toLocaleString();
+  const now = formatInTimezone(new Date(), resolveTimezone(company));
   const methodLabel = { cash: "Cash", card: "Card", store_credit: "Store Credit" }[refundMethod] || refundMethod;
 
   const content = `

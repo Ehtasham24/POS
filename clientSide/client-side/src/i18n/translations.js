@@ -126,6 +126,10 @@ const translations = {
       refundWindowDesc: "Sales older than this many days can't be refunded. Leave blank for no limit.",
       refundWindowUnlimited: "Unlimited",
       refundWindowUpdated: "Refund window updated",
+      timezoneTitle: "Timezone",
+      timezoneDesc: "Every date/time shown or printed anywhere in the app — receipts, Sales History, reports — uses this timezone, the same for every device, not each viewer's own.",
+      timezoneAuto: "Auto",
+      timezoneUpdated: "Timezone updated",
     },
     company: {
       title: "Company",
@@ -440,6 +444,10 @@ const translations = {
       refundWindowDesc: "اتنے دنوں سے پرانی سیل ریفنڈ نہیں ہو سکے گی۔ کوئی حد نہ رکھنے کے لیے خالی چھوڑ دیں۔",
       refundWindowUnlimited: "کوئی حد نہیں",
       refundWindowUpdated: "ریفنڈ ونڈو اپڈیٹ ہو گئی",
+      timezoneTitle: "ٹائم زون",
+      timezoneDesc: "ایپ میں ہر جگہ دکھایا یا پرنٹ ہونے والا وقت — رسیدیں، سیلز ہسٹری، رپورٹس — اسی ٹائم زون میں ہوگا، ہر ڈیوائس پر ایک جیسا، ہر دیکھنے والے کا اپنا الگ نہیں۔",
+      timezoneAuto: "خودکار",
+      timezoneUpdated: "ٹائم زون اپڈیٹ ہو گیا",
     },
     company: {
       title: "کمپنی",

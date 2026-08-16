@@ -1,4 +1,5 @@
 import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
+import { useTimezone } from "timezone/TimezoneContext";
 import {
   ResponsiveContainer,
   LineChart,
@@ -38,9 +39,6 @@ const TOOLTIP_ITEM_STYLE = { color: "#f3f4f6" };
 
 const PIE_COLORS = ["#4f46e5", "#0ea5e9", "#16a34a", "#f59e0b", "#e11d48", "#8b5cf6", "#14b8a6"];
 
-const formatDay = (iso) =>
-  new Date(iso).toLocaleDateString("en-US", { month: "short", day: "numeric" });
-
 // SVG, not a CSS background-color swatch — browsers only print background colors when
 // "print background graphics" is on (often off by default), so a plain
 // <span style={{backgroundColor}}/> silently vanishes in a printed/PDF report while the
@@ -75,9 +73,16 @@ const ChartCard = ({ title, children }) => (
 // has actually fired, so print always waits for the real, current animation to finish
 // instead of a guessed delay.
 const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData }, ref) {
+  const { formatDateTime } = useTimezone();
   const [remountKey, setRemountKey] = useState(0);
   const pendingRef = useRef(new Set());
   const resolveRef = useRef(null);
+
+  // The "day" values themselves are already grouped in the business timezone server-side
+  // (see fetchSalesTimeSeries in salesService.js) — this just needs to display them in that
+  // same timezone rather than the viewer's own, so the axis label always agrees with which
+  // bucket a given point actually landed in.
+  const formatDay = (iso) => formatDateTime(iso, { month: "short", day: "numeric" });
 
   const hasTrend = timeSeriesData && timeSeriesData.length > 0;
   const hasSales = salesData && salesData.length > 0;

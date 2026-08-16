@@ -1,6 +1,7 @@
 import React from "react";
 import { Printer, Text, Row, Line, Image, Cut, render } from "react-thermal-printer";
 import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
+import { resolveTimezone, formatInTimezone } from "utils/timezone";
 
 // Matches Arabic-script characters (covers Urdu too, since it's written in the same script).
 const ARABIC_SCRIPT = /[؀-ۿݐ-ݿ]/;
@@ -9,7 +10,7 @@ const ARABIC_SCRIPT = /[؀-ۿݐ-ݿ]/;
 // cannot render Arabic/Urdu script, so any such line in the user's receipt terms is
 // skipped here (it still prints fine in the HTML/print-dialog fallback, a real browser).
 export async function buildReceiptBytes(salesData, totalAmount, company = {}, receiptNo = null) {
-  const now = new Date().toLocaleString();
+  const now = formatInTimezone(new Date(), resolveTimezone(company));
   const termsLines = (company.receipt_terms ?? DEFAULT_RECEIPT_TERMS)
     .split("\n")
     .map((line) => line.trim())

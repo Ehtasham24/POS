@@ -1,6 +1,6 @@
 const { pool } = require("../Db");
 const { getLotById, decrementLot } = require("./lotService");
-const { getSettings } = require("./settingsService");
+const { getSettings, getBusinessTimezone } = require("./settingsService");
 const ApiError = require("../utils/ApiError");
 
 // RETURNING * used to be discarded here — nothing on the client ever learned a sale's
@@ -398,7 +398,17 @@ const fetchBilledHistory = async (
     if (viewerFilter?.soldBy) {
       params.push(viewerFilter.soldBy);
       conditions.push(`s.sold_by = $${params.length}`);
-      conditions.push(`s.sale_time >= CURRENT_DATE`);
+      // "Today" here means today in the shop's own configured timezone, not Postgres's
+      // session timezone (UTC) — CURRENT_DATE would silently use the wrong calendar day for
+      // several hours around each UTC midnight (e.g. a sale at 1am PKT is still "yesterday"
+      // in UTC). sale_time is stored as a naive timestamp that's actually UTC (session
+      // timezone is UTC — see Db.js's type-parser comment), so `AT TIME ZONE 'UTC'` first
+      // makes that explicit before converting into the business timezone for the comparison.
+      const businessTimezone = await getBusinessTimezone();
+      params.push(businessTimezone);
+      conditions.push(
+        `(s.sale_time AT TIME ZONE 'UTC') AT TIME ZONE $${params.length} >= date_trunc('day', NOW() AT TIME ZONE $${params.length})`
+      );
     }
     if (voidStatus === "voided") {
       conditions.push(`s.is_voided = true`);
@@ -533,9 +543,15 @@ const voidSale = async (saleId, requestingUser, reason) => {
     }
 
     if (requestingUser.role !== "owner") {
+      // Business-timezone-aware "today" — same reasoning as fetchBilledHistory's cashier
+      // filter above: Postgres's own CURRENT_DATE is the UTC calendar day, which disagrees
+      // with the shop's actual day for several hours around each UTC midnight.
+      const businessTimezone = await getBusinessTimezone();
       const { rows: dateCheck } = await client.query(
-        `SELECT DATE(sale_time) = CURRENT_DATE AS is_today FROM sales WHERE id = $1`,
-        [saleId]
+        `SELECT date_trunc('day', (sale_time AT TIME ZONE 'UTC') AT TIME ZONE $2)
+                = date_trunc('day', NOW() AT TIME ZONE $2) AS is_today
+         FROM sales WHERE id = $1`,
+        [saleId, businessTimezone]
       );
       const isOwnSale = String(sale.sold_by) === String(requestingUser.id);
       const isToday = dateCheck[0]?.is_today;
@@ -830,10 +846,13 @@ const fetchSalesTimeSeries = async (startDate, endDate) => {
 
   // Sources from sales_ledger, same reasoning as fetchSales above — a refund lands on its
   // OWN day here (negative units/revenue/profit that day), not retroactively on the day of
-  // the original sale.
+  // the original sale. Grouped by day in the business timezone (not Postgres's UTC session
+  // timezone) so the chart's day buckets agree with what a human looking at the shop's clock
+  // would call "today" — same AT TIME ZONE reasoning as fetchBilledHistory's cashier filter.
+  const businessTimezone = await getBusinessTimezone();
   const response = await pool.query(
     `SELECT
-       DATE_TRUNC('day', s.event_time) AS day,
+       date_trunc('day', (s.event_time AT TIME ZONE 'UTC') AT TIME ZONE $3) AS day,
        SUM(s.quantity * s.selling_price)::BIGINT AS revenue,
        SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit,
        SUM(s.quantity)::BIGINT AS units
@@ -841,7 +860,7 @@ const fetchSalesTimeSeries = async (startDate, endDate) => {
      WHERE s.event_time BETWEEN $1 AND $2
      GROUP BY day
      ORDER BY day`,
-    [startDate, endDate]
+    [startDate, endDate, businessTimezone]
   );
 
   return response.rows;

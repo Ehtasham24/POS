@@ -6,10 +6,12 @@ import {
   HiOutlinePrinter,
   HiOutlineDocumentText,
   HiOutlineReceiptRefund,
+  HiOutlineGlobeAlt,
 } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
+import { useTimezone } from "timezone/TimezoneContext";
 import { apiGet, apiPut } from "utils/api";
 import { printTestReceipt } from "utils/printReceipt";
 import useThermalPrinterStatus from "hooks/useThermalPrinterStatus";
@@ -17,6 +19,18 @@ import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
 import UsersCard from "./UsersCard";
 
 const updateSetting = (key, value) => apiPut("/api/settings", { key, value: String(value) });
+
+// Only real, browser-recognized IANA zone names are ever offered as options — the strongest
+// form of validation is not letting an invalid value be enterable in the first place. The
+// backend (settingsService.js's isValidTimezone) validates the same way independently, since
+// this endpoint could in principle be called directly.
+const SUPPORTED_TIMEZONES = (() => {
+  try {
+    return Intl.supportedValuesOf("timeZone");
+  } catch {
+    return [];
+  }
+})();
 
 function PrinterCard() {
   const toast = useToast();
@@ -114,6 +128,7 @@ function PrinterCard() {
 export default function SettingsPage() {
   const toast = useToast();
   const { language, setLanguage, t } = useLanguage();
+  const { refresh: refreshTimezone } = useTimezone();
   const [settings, setSettings] = useState(null);
   const [threshold, setThreshold] = useState("10");
   const [savingThreshold, setSavingThreshold] = useState(false);
@@ -121,6 +136,8 @@ export default function SettingsPage() {
   const [savingTerms, setSavingTerms] = useState(false);
   const [refundWindow, setRefundWindow] = useState(""); // "" = unlimited (unset)
   const [savingRefundWindow, setSavingRefundWindow] = useState(false);
+  const [timezone, setTimezone] = useState(""); // "" = auto (use timezone_default)
+  const [savingTimezone, setSavingTimezone] = useState(false);
 
   const fetchSettings = async () => {
     try {
@@ -129,6 +146,7 @@ export default function SettingsPage() {
       setThreshold(data.low_stock_threshold || "10");
       setTerms(data.receipt_terms ?? DEFAULT_RECEIPT_TERMS);
       setRefundWindow(data.refund_window_days || "");
+      setTimezone(data.timezone || "");
     } catch (error) {
       console.error("Error fetching settings:", error);
       toast.error("Couldn't load settings — check your connection and try again.");
@@ -165,6 +183,23 @@ export default function SettingsPage() {
       toast.error(error.message);
     } finally {
       setSavingRefundWindow(false);
+    }
+  };
+
+  const handleSaveTimezone = async () => {
+    setSavingTimezone(true);
+    try {
+      await updateSetting("timezone", timezone);
+      setSettings((prev) => ({ ...prev, timezone }));
+      // Every already-open page (Sales History, receipts, reports) needs to pick this up
+      // immediately, not just after a reload — TimezoneContext.jsx's refresh() re-fetches
+      // and re-derives the effective timezone for the whole app in one call.
+      await refreshTimezone();
+      toast.success(t("settings.timezoneUpdated"));
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setSavingTimezone(false);
     }
   };
 
@@ -226,6 +261,47 @@ export default function SettingsPage() {
                   }`}
                 >
                   {t("settings.urdu")}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
+          <div className="flex items-start gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
+              <HiOutlineGlobeAlt className="text-xl text-primary-600 dark:text-primary-400" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
+                {t("settings.timezoneTitle")}
+              </h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">
+                {t("settings.timezoneDesc")}
+              </p>
+              <div className="mt-3 flex flex-wrap items-center gap-3">
+                <select
+                  value={timezone}
+                  onChange={(e) => setTimezone(e.target.value)}
+                  className="h-10 max-w-full rounded-lg border border-surface-border bg-white-A700 px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                >
+                  <option value="">
+                    {t("settings.timezoneAuto")}
+                    {settings.timezone_default ? ` (${settings.timezone_default})` : ""}
+                  </option>
+                  {SUPPORTED_TIMEZONES.map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleSaveTimezone}
+                  disabled={savingTimezone}
+                  className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {savingTimezone ? t("common.saving") : t("common.save")}
                 </button>
               </div>
             </div>

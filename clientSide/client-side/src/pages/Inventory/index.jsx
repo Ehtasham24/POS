@@ -18,6 +18,7 @@ import EditProductModal from "categoriesComponents/editProductModal";
 import UpdateProductModal from "categoriesComponents/updateProductModal";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
+import { useTimezone } from "timezone/TimezoneContext";
 import { apiGet, apiDelete } from "utils/api";
 import * as offlineCache from "offline/cache";
 
@@ -100,6 +101,7 @@ function RowActionsMenu({ onEdit, onUpdate, onDelete }) {
 
 function LotsRow({ productId }) {
   const { t } = useLanguage();
+  const { formatDateTime } = useTimezone();
   const [lots, setLots] = useState(null);
   const [loadError, setLoadError] = useState(false);
 
@@ -176,7 +178,7 @@ function LotsRow({ productId }) {
                       </span>
                     </td>
                     <td className="px-3 py-2 text-gray-600 dark:text-gray-300">
-                      {new Date(lot.received_at).toLocaleDateString()}
+                      {formatDateTime(lot.received_at, { dateStyle: "medium" })}
                     </td>
                   </tr>
                 ))}

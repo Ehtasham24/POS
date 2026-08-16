@@ -12,6 +12,7 @@ import AppShell from "components/AppShell";
 import { apiGet, apiPatch, apiPost } from "utils/api";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
+import { useTimezone } from "timezone/TimezoneContext";
 import RefundReceiptModal from "categoriesComponents/RefundReceiptModal";
 
 const REFUND_METHODS = ["cash", "card", "store_credit"];
@@ -64,6 +65,7 @@ const defaultEndDate = () => {
 export default function SalesHistoryPage() {
   const toast = useToast();
   const { t } = useLanguage();
+  const { formatDateTime } = useTimezone();
   const [batches, setBatches] = useState([]);
   const [expandedIndex, setExpandedIndex] = useState(null);
   const [categories, setCategories] = useState([]);
@@ -360,7 +362,7 @@ export default function SalesHistoryPage() {
                             />
                           </td>
                           <td className="px-3 py-3 text-gray-800 dark:text-gray-100">
-                            <div className="truncate">{new Date(batch[0].sale_time).toLocaleString()}</div>
+                            <div className="truncate">{formatDateTime(batch[0].sale_time)}</div>
                             {/* null for legacy (pre-receipt-number) batches — nothing to show there */}
                             {batch[0].receipt_no && (
                               <div className="truncate text-xs font-normal text-gray-400 dark:text-gray-500">

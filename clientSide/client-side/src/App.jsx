@@ -14,6 +14,7 @@ import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import { ToastProvider } from "components/Toast/ToastContext";
 import { LanguageProvider } from "i18n/LanguageContext";
 import { AuthProvider } from "auth/AuthContext";
+import { TimezoneProvider } from "timezone/TimezoneContext";
 import ProtectedRoute from "components/ProtectedRoute";
 import { tryAutoReconnect } from "utils/thermalPrinter/connection";
 
@@ -33,94 +34,96 @@ function App() {
   return (
     <LanguageProvider>
       <ToastProvider>
-        <AuthProvider>
-          <Router>
-            <Routes>
-              <Route path="/login" element={<LoginPage />} />
-              <Route
-                path="/"
-                element={
-                  <ProtectedRoute>
-                    <CategorieswithSidebar />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/categories/:prodNum"
-                element={
-                  <ProtectedRoute>
-                    <ProductList />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/productlist/:prodNum"
-                element={
-                  <ProtectedRoute>
-                    <ProductList />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/report"
-                element={
-                  <ProtectedRoute roles={OWNER_ONLY}>
-                    <SalesDataComponent />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/sales-history"
-                element={
-                  <ProtectedRoute>
-                    <SalesHistory />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/credit-debit"
-                element={
-                  <ProtectedRoute roles={OWNER_ONLY}>
-                    <CreditDebit />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/settings"
-                element={
-                  <ProtectedRoute roles={OWNER_ONLY}>
-                    <Settings />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/company"
-                element={
-                  <ProtectedRoute roles={OWNER_ONLY}>
-                    <Company />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/inventory"
-                element={
-                  <ProtectedRoute roles={OWNER_ONLY}>
-                    <Inventory />
-                  </ProtectedRoute>
-                }
-              />
-              <Route
-                path="/contacts"
-                element={
-                  <ProtectedRoute roles={OWNER_ONLY}>
-                    <Contacts />
-                  </ProtectedRoute>
-                }
-              />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Router>
-        </AuthProvider>
+        <TimezoneProvider>
+          <AuthProvider>
+            <Router>
+              <Routes>
+                <Route path="/login" element={<LoginPage />} />
+                <Route
+                  path="/"
+                  element={
+                    <ProtectedRoute>
+                      <CategorieswithSidebar />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/categories/:prodNum"
+                  element={
+                    <ProtectedRoute>
+                      <ProductList />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/productlist/:prodNum"
+                  element={
+                    <ProtectedRoute>
+                      <ProductList />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/report"
+                  element={
+                    <ProtectedRoute roles={OWNER_ONLY}>
+                      <SalesDataComponent />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/sales-history"
+                  element={
+                    <ProtectedRoute>
+                      <SalesHistory />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/credit-debit"
+                  element={
+                    <ProtectedRoute roles={OWNER_ONLY}>
+                      <CreditDebit />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/settings"
+                  element={
+                    <ProtectedRoute roles={OWNER_ONLY}>
+                      <Settings />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/company"
+                  element={
+                    <ProtectedRoute roles={OWNER_ONLY}>
+                      <Company />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/inventory"
+                  element={
+                    <ProtectedRoute roles={OWNER_ONLY}>
+                      <Inventory />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/contacts"
+                  element={
+                    <ProtectedRoute roles={OWNER_ONLY}>
+                      <Contacts />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Router>
+          </AuthProvider>
+        </TimezoneProvider>
       </ToastProvider>
     </LanguageProvider>
   );
