@@ -46,22 +46,36 @@ fix.
    matches exactly.
 7. In the **Apps to Monitor** list, tick JazzCash / Easypaisa / your bank app(s) — whichever
    ones are installed and logged into the same account(s) configured on the POS's Company
-   page.
+   page. **This is also the email channel** — if the bank confirms by email, tick your
+   email app (e.g. Gmail) here too. Nothing else to set up for email specifically: it's
+   forwarded and parsed exactly the same way as any other app's notification.
+8. If the bank/wallet also confirms by **SMS**, scroll to **SMS to Monitor**: tap **Grant
+   SMS Permission** (a normal Android permission dialog — allow it), then type the sender
+   ID(s) that text you when a payment lands (e.g. `JazzCash` or a shortcode like `8080`,
+   comma-separated for more than one) into the box and tap **Save Senders**. Only SMS from
+   senders listed here are ever read or forwarded — everything else on the phone (personal
+   texts, OTPs, etc.) is left alone. Unlike the notification-based channels above, SMS is
+   read directly (the full, un-truncated message), not through a notification banner.
 
 From here it runs unattended: keep the phone charged and on WiFi, and it forwards matching
-notifications automatically.
+notifications/texts automatically. SMS and app-notification (including email) channels
+both feed the exact same backend matching engine — whichever one reports the payment
+first is the one that confirms the sale.
 
-## Tuning the parser for a specific bank/app
+## Tuning the parser for a specific bank/app/SMS sender
 
 `ExpressBackend/Sevices/PaymentNotifications/parsers/generic.js` is a best-effort fallback
-(matches "Rs./PKR <number>" in the notification text) — it has **not** been verified against
-a real notification, unlike `ExpressBackend/utils/bankQr.js`'s QR encoding (which was
-reverse-engineered and CRC-checked against real Meezan/JazzCash samples). If the generic
-parser misses real "payment received" notifications, or a bank's phrasing has multiple
-numbers in the text (so it grabs the wrong one), share 2-3 real notification texts (redact
-the sender's name/number if you want) the same way the QR was worked out, and a tuned
-parser can be added to that folder, registered by package name in
-`Sevices/PaymentNotifications/parsers/index.js`.
+(matches "Rs./PKR <number>" in the text) — it has **not** been verified against a real
+notification or SMS, unlike `ExpressBackend/utils/bankQr.js`'s QR encoding (which was
+reverse-engineered and CRC-checked against real Meezan/JazzCash samples). If it misses real
+"payment received" messages, or a message has multiple numbers in it (so it grabs the wrong
+one), share 2-3 real texts (redact the sender's name/number if you want) the same way the
+QR was worked out, and a tuned parser can be added to that folder, registered in
+`Sevices/PaymentNotifications/parsers/index.js` — keyed by Android package name for an app
+notification (e.g. `com.techlogix.mobilinkcustomer` for JazzCash, `com.google.android.gm`
+for Gmail), or by `sms:<sender>` for a text (e.g. `sms:JazzCash` or `sms:8080`, matching
+whatever's typed into **SMS to Monitor** above) — both go through the exact same registry
+and fall back to `generic` until a tuned one exists.
 
 ## What's NOT included yet
 

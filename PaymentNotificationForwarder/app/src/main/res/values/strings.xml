@@ -9,6 +9,13 @@
     <string name="action_disable_battery_optimization">Disable Battery Optimization</string>
     <string name="action_test_connection">Test Connection (send heartbeat)</string>
     <string name="section_apps">Apps to Monitor</string>
-    <string name="section_apps_desc">Pick the JazzCash/Easypaisa/bank apps installed on this phone whose \"payment received\" notifications should be forwarded.</string>
+    <string name="section_apps_desc">Pick the JazzCash/Easypaisa/bank apps installed on this phone whose \"payment received\" notifications should be forwarded. Tick your email app (e.g. Gmail) here too if the bank confirms by email instead of/as well as an app notification.</string>
     <string name="hint_search_apps">Search installed apps…</string>
+
+    <string name="section_sms">SMS to Monitor</string>
+    <string name="section_sms_desc">Bank/wallet \"payment received\" texts are read directly (full, un-truncated) instead of through a notification banner. Requires its own permission, and only forwards texts from senders you list below — nothing else on this phone is ever read.</string>
+    <string name="sms_permission_status">SMS permission: checking…</string>
+    <string name="action_grant_sms_permission">Grant SMS Permission</string>
+    <string name="hint_sms_senders">Sender IDs, comma-separated (e.g. JazzCash, 8080)</string>
+    <string name="action_save_sms_senders">Save Senders</string>
 </resources>

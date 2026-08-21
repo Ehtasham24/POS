@@ -4,6 +4,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Dangerous permission (API 23+) — requested at runtime by MainActivity, not just
+         declared here. Play-Store-restricted to default SMS/Assistant apps, but that
+         restriction only applies to apps distributed via the Play Store; irrelevant here
+         since this app is only ever sideloaded onto a dedicated shop phone. -->
+    <uses-permission android:name="android.permission.RECEIVE_SMS" />
 
     <application
         android:allowBackup="false"
@@ -40,6 +45,19 @@
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- SMS_RECEIVED_ACTION is one of the implicit broadcasts still allowed to a
+             manifest-declared receiver under Android 8+'s background-execution limits
+             (it's on the OS's own exemption list), so no runtime dynamic-registration
+             trick is needed here the way it would be for most other implicit broadcasts. -->
+        <receiver
+            android:name=".SmsReceiver"
+            android:exported="true"
+            android:permission="android.permission.BROADCAST_SMS">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_RECEIVED" />
             </intent-filter>
         </receiver>
 

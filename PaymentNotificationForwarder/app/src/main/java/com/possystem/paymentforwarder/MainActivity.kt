@@ -1,6 +1,8 @@
 package com.possystem.paymentforwarder
 
+import android.Manifest
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -12,8 +14,10 @@ import android.widget.Button
 import android.widget.EditText
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.LinearLayoutManager
 import androidx.recyclerview.widget.RecyclerView
@@ -30,7 +34,18 @@ class MainActivity : AppCompatActivity() {
     private lateinit var prefs: Prefs
     private lateinit var statusText: TextView
     private lateinit var notificationAccessStatus: TextView
+    private lateinit var smsPermissionStatus: TextView
     private lateinit var appsAdapter: InstalledAppsAdapter
+
+    // Standard runtime-permission launcher — RECEIVE_SMS is "dangerous" (API 23+), unlike
+    // notification access/battery exemption above, which are handled by deep-linking to a
+    // system Settings screen instead. Only updates the status line here; SmsReceiver
+    // re-checks Prefs.monitoredSmsSenders itself and no-ops until senders are configured
+    // regardless of this permission's grant state.
+    private val requestSmsPermission =
+        registerForActivityResult(ActivityResultContracts.RequestPermission()) {
+            refreshSmsPermissionStatus()
+        }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -41,6 +56,7 @@ class MainActivity : AppCompatActivity() {
         val secretInput = findViewById<EditText>(R.id.secretInput)
         statusText = findViewById(R.id.statusText)
         notificationAccessStatus = findViewById(R.id.notificationAccessStatus)
+        smsPermissionStatus = findViewById(R.id.smsPermissionStatus)
 
         serverUrlInput.setText(prefs.serverUrl)
         secretInput.setText(prefs.secret)
@@ -64,6 +80,22 @@ class MainActivity : AppCompatActivity() {
             testConnection(serverUrlInput.text.toString().trim(), secretInput.text.toString().trim())
         }
 
+        val smsSendersInput = findViewById<EditText>(R.id.smsSendersInput)
+        smsSendersInput.setText(prefs.monitoredSmsSenders.joinToString(", "))
+
+        findViewById<Button>(R.id.smsPermissionButton).setOnClickListener {
+            requestSmsPermission.launch(Manifest.permission.RECEIVE_SMS)
+        }
+
+        findViewById<Button>(R.id.saveSmsSendersButton).setOnClickListener {
+            prefs.monitoredSmsSenders = smsSendersInput.text.toString()
+                .split(",")
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .toSet()
+            Toast.makeText(this, "Saved", Toast.LENGTH_SHORT).show()
+        }
+
         setupAppsList()
 
         findViewById<EditText>(R.id.appSearchInput).addTextChangedListener(object : TextWatcher {
@@ -78,6 +110,7 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshNotificationAccessStatus()
+        refreshSmsPermissionStatus()
     }
 
     private fun refreshNotificationAccessStatus() {
@@ -86,6 +119,16 @@ class MainActivity : AppCompatActivity() {
             "Notification access: granted ✓"
         } else {
             "Notification access: NOT granted — tap the button below"
+        }
+    }
+
+    private fun refreshSmsPermissionStatus() {
+        val granted = ContextCompat.checkSelfPermission(this, Manifest.permission.RECEIVE_SMS) ==
+            PackageManager.PERMISSION_GRANTED
+        smsPermissionStatus.text = if (granted) {
+            "SMS permission: granted ✓"
+        } else {
+            "SMS permission: NOT granted — tap the button below"
         }
     }
 

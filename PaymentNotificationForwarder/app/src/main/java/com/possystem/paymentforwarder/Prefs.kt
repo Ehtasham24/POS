@@ -30,12 +30,21 @@ class Prefs(context: Context) {
         get() = prefs.getString(KEY_LAST_RESULT, "") ?: ""
         set(value) = prefs.edit().putString(KEY_LAST_RESULT, value).apply()
 
+    // Which SMS senders' texts actually get forwarded — same explicit-opt-in shape as
+    // monitoredPackages above, just typed in by the owner (e.g. "JazzCash" or a shortcode
+    // like "8080") rather than picked from a list, since there's no OS-level "list of
+    // possible SMS senders" the way there is for installed apps. See SmsReceiver.kt.
+    var monitoredSmsSenders: Set<String>
+        get() = prefs.getStringSet(KEY_MONITORED_SMS_SENDERS, emptySet()) ?: emptySet()
+        set(value) = prefs.edit().putStringSet(KEY_MONITORED_SMS_SENDERS, value).apply()
+
     fun isConfigured(): Boolean = serverUrl.isNotBlank() && secret.isNotBlank()
 
     companion object {
         private const val KEY_SERVER_URL = "server_url"
         private const val KEY_SECRET = "secret"
         private const val KEY_MONITORED_PACKAGES = "monitored_packages"
+        private const val KEY_MONITORED_SMS_SENDERS = "monitored_sms_senders"
         private const val KEY_LAST_RESULT = "last_forward_result"
     }
 }
