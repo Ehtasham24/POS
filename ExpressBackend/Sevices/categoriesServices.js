@@ -1,13 +1,24 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
+const { withCache, invalidate } = require("../utils/cache");
+
+// Categories barely ever change (one write path: createCategory below) but get read on
+// almost every page — POS terminal, both product modals, Sales History, the category
+// sidebar. Cached for 5 minutes and invalidated immediately on write, so a new category
+// shows up right away instead of waiting out the TTL.
+const CATEGORIES_CACHE_KEY = "categories:all";
+const CATEGORIES_CACHE_TTL_SECONDS = 300;
 
 const getCategories = async () => {
   try {
-    const result = await pool.query('SELECT * FROM "categories"');
-    return result;
+    const rows = await withCache(CATEGORIES_CACHE_KEY, CATEGORIES_CACHE_TTL_SECONDS, async () => {
+      const result = await pool.query('SELECT * FROM "categories"');
+      return result.rows;
+    });
+    return { rows };
   } catch (err) {
     console.log(err);
-    res.send({ message: "Internal error" });
+    throw new Error("Internal error");
   }
 };
 
@@ -17,6 +28,7 @@ const createCategory = async (category_name) => {
       'INSERT INTO "categories" (category_name) VALUES ($1) RETURNING *',
       [category_name]
     );
+    await invalidate(CATEGORIES_CACHE_KEY);
     return result;
   } catch (err) {
     if (err.code === "23505") {

@@ -1,5 +1,6 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
+const { withCache, invalidate } = require("../utils/cache");
 
 // This machine's own OS timezone — the sensible zero-configuration default ("by default use
 // whichever timezone the system is running in"). Resolved once at startup, not per-call: it
@@ -8,12 +9,23 @@ const DEFAULT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
 const VALID_TIMEZONES = new Set(Intl.supportedValuesOf("timeZone"));
 const isValidTimezone = (tz) => typeof tz === "string" && VALID_TIMEZONES.has(tz);
 
+// Tiny key-value table, but read constantly — not just by the Settings page: every
+// sales list/report/void query calls getBusinessTimezone() below (sometimes more than
+// once per request, see salesService.js), and getInventory() reads the low-stock
+// threshold from here too. Cached for 5 minutes and invalidated immediately on write,
+// so e.g. changing the timezone in Settings takes effect on the very next request
+// rather than up to 5 minutes later.
+const SETTINGS_CACHE_KEY = "settings:all";
+const SETTINGS_CACHE_TTL_SECONDS = 300;
+
 const getSettings = async () => {
-  const result = await pool.query("SELECT key, value FROM settings");
-  return result.rows.reduce((acc, row) => {
-    acc[row.key] = row.value;
-    return acc;
-  }, {});
+  return withCache(SETTINGS_CACHE_KEY, SETTINGS_CACHE_TTL_SECONDS, async () => {
+    const result = await pool.query("SELECT key, value FROM settings");
+    return result.rows.reduce((acc, row) => {
+      acc[row.key] = row.value;
+      return acc;
+    }, {});
+  });
 };
 
 // The effective business timezone — used everywhere a "today"/day-boundary business rule
@@ -42,6 +54,7 @@ const updateSetting = async (key, value) => {
      RETURNING key, value`,
     [key, String(value)]
   );
+  await invalidate(SETTINGS_CACHE_KEY);
   return result.rows[0];
 };
 
