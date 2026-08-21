@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from "react";
-import { HiOutlineBuildingOffice2, HiOutlinePhoto, HiOutlineTrash } from "react-icons/hi2";
+import { HiOutlineBuildingOffice2, HiOutlinePhoto, HiOutlineTrash, HiOutlineBanknotes } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { Skeleton } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiGet, apiPut } from "utils/api";
+import { PAKISTAN_BANKS, ALL_PAKISTAN_BANK_NAMES } from "constants/pakistanBanks";
 
 const inputClass =
   "h-10 w-full rounded-lg border border-surface-border bg-white-A700 px-3 text-sm dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100";
@@ -22,6 +23,10 @@ const emptyForm = {
   company_ntn: "",
   company_phone: "",
   company_address: "",
+  bank_name: "",
+  bank_account_title: "",
+  bank_account_number: "",
+  bank_iban: "",
 };
 
 export default function CompanyPage() {
@@ -30,22 +35,48 @@ export default function CompanyPage() {
   const [form, setForm] = useState(null);
   const [logo, setLogo] = useState("");
   const [saving, setSaving] = useState(false);
+  // Separate from form.bank_name's own value — tracks whether the "Other" text input
+  // should be showing, independent of whether that input is currently empty or has
+  // something typed in it. Keying this off form.bank_name === "" instead (i.e. treating
+  // "empty" and "explicitly chose Other" as the same state) would make picking "Other"
+  // immediately snap back to the placeholder the moment its text field is cleared.
+  const [customBankMode, setCustomBankMode] = useState(false);
   const fileInputRef = useRef(null);
 
   const fetchSettings = async () => {
     try {
       const data = await apiGet("/api/settings");
+      const bankName = data.bank_name || "";
       setForm({
         company_name: data.company_name || "",
         company_ntn: data.company_ntn || "",
         company_phone: data.company_phone || "",
         company_address: data.company_address || "",
+        bank_name: bankName,
+        bank_account_title: data.bank_account_title || "",
+        bank_account_number: data.bank_account_number || "",
+        bank_iban: data.bank_iban || "",
       });
+      // A previously-saved bank name that isn't in the current PAKISTAN_BANKS list (typed
+      // in before this dropdown existed, or just not one of the ones listed) should still
+      // show correctly as "Other" with its real value, not silently fall back to blank.
+      setCustomBankMode(bankName !== "" && !ALL_PAKISTAN_BANK_NAMES.includes(bankName));
       setLogo(data.company_logo || "");
     } catch (error) {
       console.error("Error fetching company settings:", error);
       toast.error("Couldn't load company details — check your connection and try again.");
       setForm(emptyForm);
+    }
+  };
+
+  const handleBankSelect = (e) => {
+    const value = e.target.value;
+    if (value === "__other__") {
+      setCustomBankMode(true);
+      setForm((prev) => ({ ...prev, bank_name: "" }));
+    } else {
+      setCustomBankMode(false);
+      setForm((prev) => ({ ...prev, bank_name: value }));
     }
   };
 
@@ -222,18 +253,123 @@ export default function CompanyPage() {
                   </div>
                 </div>
 
-                <button
-                  type="button"
-                  onClick={handleSave}
-                  disabled={saving}
-                  className="mt-2 w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50 sm:w-auto sm:self-start sm:px-6"
-                >
-                  {saving ? t("common.saving") : t("company.saveChanges")}
-                </button>
               </div>
             </div>
           </div>
         </div>
+
+        {/* Bank details — a separate card from the receipt/branding fields above since
+            this one feeds the QR-checkout flow (CartPanel.jsx's Bank Transfer option),
+            not the receipt header. Same generic-settings save mechanism either way —
+            these are plain, non-secret values (see bankPaymentService.js's comment on
+            why they're fine in the ordinary settings table, unlike a future Gmail token). */}
+        <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
+          <div className="flex items-start gap-4">
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
+              <HiOutlineBanknotes className="text-xl text-primary-600 dark:text-primary-400" />
+            </div>
+            <div className="flex-1">
+              <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
+                {t("company.bankDetailsTitle")}
+              </h2>
+              <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("company.bankDetailsDesc")}</p>
+
+              <div className="mt-4 flex flex-col gap-4">
+                <div>
+                  <label htmlFor="bank_name" className={labelClass}>
+                    {t("company.bankName")}
+                  </label>
+                  <select
+                    id="bank_name"
+                    value={customBankMode ? "__other__" : form.bank_name}
+                    onChange={handleBankSelect}
+                    className={inputClass}
+                  >
+                    <option value="">{t("company.selectBank")}</option>
+                    {PAKISTAN_BANKS.map((group) => (
+                      <optgroup key={group.group} label={group.group}>
+                        {group.banks.map((bank) => (
+                          <option key={bank} value={bank}>
+                            {bank}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ))}
+                    <option value="__other__">{t("company.otherBank")}</option>
+                  </select>
+                  {customBankMode && (
+                    <input
+                      type="text"
+                      name="bank_name"
+                      value={form.bank_name}
+                      onChange={handleChange}
+                      placeholder={t("company.otherBankPlaceholder")}
+                      autoFocus
+                      className={`${inputClass} mt-2`}
+                    />
+                  )}
+                </div>
+                <div>
+                  <label htmlFor="bank_account_title" className={labelClass}>
+                    {t("company.bankAccountTitle")}
+                  </label>
+                  <input
+                    type="text"
+                    id="bank_account_title"
+                    name="bank_account_title"
+                    value={form.bank_account_title}
+                    onChange={handleChange}
+                    className={inputClass}
+                  />
+                </div>
+                <div>
+                  {/* Required, not optional — the QR payload (utils/bankQr.js) is a real,
+                      CRC-verified Raast payload with a slot only for the IBAN (tag 04);
+                      createIntent rejects checkout with "Bank Transfer" selected until this
+                      is filled in. */}
+                  <label htmlFor="bank_iban" className={labelClass}>
+                    {t("company.bankIban")}
+                  </label>
+                  <input
+                    type="text"
+                    id="bank_iban"
+                    name="bank_iban"
+                    value={form.bank_iban}
+                    onChange={handleChange}
+                    placeholder="PKxx XXXX XXXXXXXXXXXXXXXX"
+                    className={inputClass}
+                  />
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                    {t("company.bankIbanHint")}
+                  </p>
+                </div>
+                <div>
+                  <label htmlFor="bank_account_number" className={labelClass}>
+                    {t("company.bankAccountNumber")}
+                  </label>
+                  <input
+                    type="text"
+                    id="bank_account_number"
+                    name="bank_account_number"
+                    value={form.bank_account_number}
+                    onChange={handleChange}
+                    placeholder={t("company.optional")}
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={handleSave}
+          disabled={saving}
+          className="w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:opacity-50 sm:w-auto sm:self-start sm:px-6"
+        >
+          {saving ? t("common.saving") : t("company.saveChanges")}
+        </button>
       </div>
     </AppShell>
   );

@@ -1,0 +1,3 @@
+<resources>
+    <style name="Theme.PaymentForwarder" parent="Theme.MaterialComponents.DayNight.NoActionBar" />
+</resources>

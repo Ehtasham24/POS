@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">Payment Notification Forwarder</string>
+    <string name="section_server">POS Server</string>
+    <string name="hint_server_url">http://192.168.x.x:4001</string>
+    <string name="hint_secret">Shared secret (from Development.env)</string>
+    <string name="action_save">Save Settings</string>
+    <string name="section_permissions">Permissions</string>
+    <string name="action_grant_notification_access">Grant Notification Access</string>
+    <string name="action_disable_battery_optimization">Disable Battery Optimization</string>
+    <string name="action_test_connection">Test Connection (send heartbeat)</string>
+    <string name="section_apps">Apps to Monitor</string>
+    <string name="section_apps_desc">Pick the JazzCash/Easypaisa/bank apps installed on this phone whose \"payment received\" notifications should be forwarded.</string>
+    <string name="hint_search_apps">Search installed apps…</string>
+</resources>

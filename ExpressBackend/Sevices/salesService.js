@@ -257,10 +257,14 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
   try {
     await client.query("BEGIN");
 
+    // requestingUser can be null here — the notification-forwarder auto-matcher
+    // (Sevices/PaymentNotifications/matchingService.js) confirms a bank-transfer intent
+    // with no logged-in staff behind it at all. sold_by is nullable for exactly this
+    // reason (see migrations/006_users_and_auth.sql's own comment on nullable sold_by).
     const { rows: txnRows } = await client.query(
       `INSERT INTO sale_transactions (sold_by, payment_method, store_credit_applied)
        VALUES ($1, $2, $3) RETURNING id`,
-      [requestingUser.id, paymentMethod || null, creditToApply]
+      [requestingUser?.id || null, paymentMethod || null, creditToApply]
     );
     const transactionId = txnRows[0].id;
 
@@ -330,7 +334,7 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
         `INSERT INTO sales (selling_price, quantity, product_id, sale_time, lot_id, buying_price, sold_by, transaction_id)
          VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7)
          RETURNING id`,
-        [sellingPrice, qty, productID, lotId || null, buyingPrice, requestingUser.id, transactionId]
+        [sellingPrice, qty, productID, lotId || null, buyingPrice, requestingUser?.id || null, transactionId]
       );
 
       const { rows: afterRows } = await client.query(`SELECT quantity FROM products WHERE id = $1`, [

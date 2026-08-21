@@ -1,0 +1,261 @@
+const { pool } = require("../Db");
+const ApiError = require("../utils/ApiError");
+const { checkoutSale } = require("./salesService");
+const { getSettings } = require("./settingsService");
+const { buildQrPayload, generateQrDataUrl } = require("../utils/bankQr");
+
+// Same idea as salesService.js's formatReceiptNo/formatRefundNo — a display reference
+// derived from the row's own SERIAL id at read time, never stored, so Postgres's own
+// atomic id allocation is the only uniqueness guarantee needed.
+const REFERENCE_PREFIX = "BTX-";
+const formatIntentRef = (id) => (id ? `${REFERENCE_PREFIX}${String(id).padStart(6, "0")}` : null);
+
+// qr_data_url -> qrDataUrl: renamed on the way out so the API shape matches what
+// createIntent's caller (CartPanel.jsx) already expects, and so every endpoint that
+// returns an intent (create/get/list/confirm/cancel) exposes it under the same name —
+// including the Pending Bank Payments page's list, which is what lets clicking a row
+// re-open BankTransferQrModal with the exact original QR, no extra request needed.
+const withReference = (row) => {
+  if (!row) return row;
+  const { qr_data_url, ...rest } = row;
+  return { ...rest, referenceCode: formatIntentRef(row.id), qrDataUrl: qr_data_url };
+};
+
+// Opens a pending bank-transfer payment: snapshots the cart + computes what's actually
+// owed (mirrors checkoutSale's own cartTotal/creditToApply math exactly, since confirmIntent
+// below hands this same cart straight to checkoutSale later) and builds a QR for it.
+// Deliberately does NOT touch products/lots/sales/sale_transactions/store credit at all —
+// only confirmIntent does that, via the real checkoutSale, once payment is actually
+// confirmed. No stock is reserved by generating a QR; an abandoned scan costs nothing.
+const createIntent = async (items, requestingUser, { voucherCode, storeCreditRedeemed } = {}) => {
+  if (!Array.isArray(items) || items.length === 0) {
+    throw new ApiError(400, "Cart is empty");
+  }
+
+  const settings = await getSettings();
+  const bankDetails = {
+    bankName: settings.bank_name,
+    accountTitle: settings.bank_account_title,
+    accountNumber: settings.bank_account_number,
+    iban: settings.bank_iban,
+  };
+  // IBAN specifically — not "account number OR IBAN" — because the real Raast QR payload
+  // (utils/bankQr.js) only has a slot for the IBAN (tag 04); there's no field for a plain
+  // account number in the verified format. bankName/accountTitle stay required too even
+  // though they're not encoded in the QR itself — they're shown next to it on the checkout
+  // screen (BankTransferQrModal.jsx) so there's a human-readable confirmation of the account.
+  if (!bankDetails.bankName || !bankDetails.accountTitle || !bankDetails.iban) {
+    throw new ApiError(
+      400,
+      "Bank IBAN isn't set up yet — add your bank name, account title, and IBAN on the Company page first"
+    );
+  }
+
+  const cartTotal = items.reduce((sum, i) => sum + i.sellingPrice * i.quantity, 0);
+  const creditToApply =
+    storeCreditRedeemed > 0 ? Math.min(Number(storeCreditRedeemed), cartTotal) : 0;
+  const amount = cartTotal - creditToApply;
+  if (!(amount > 0)) {
+    throw new ApiError(400, "Nothing left to pay by bank transfer once store credit is applied");
+  }
+
+  const { rows } = await pool.query(
+    `INSERT INTO bank_payment_intents (cart_snapshot, amount, voucher_code, store_credit_redeemed, created_by)
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    [
+      JSON.stringify(items),
+      amount,
+      creditToApply > 0 ? voucherCode : null,
+      creditToApply > 0 ? creditToApply : null,
+      requestingUser.id,
+    ]
+  );
+  const intent = rows[0];
+  // The real Raast payload (utils/bankQr.js) has no slot for a reference code — it's a
+  // fixed IBAN+amount+expiry+CRC structure, verified against a real bank-generated QR —
+  // so unlike the earlier plain-text draft, referenceCode is display-only now (shown next
+  // to the QR, never embedded in it) and building the payload doesn't need the row's id at
+  // all. Still done as a follow-up UPDATE rather than folded into the INSERT above, simply
+  // because the QR image itself is only worth generating once the row (and its amount) is
+  // durably committed.
+  const payload = buildQrPayload(bankDetails, amount);
+  const qrDataUrl = await generateQrDataUrl(payload);
+
+  // Stored, not just returned — see migrations/013's comment: re-showing this exact QR
+  // later (Pending Bank Payments page) must never risk regenerating a different one from
+  // whatever the bank settings happen to be at that later moment.
+  const { rows: updatedRows } = await pool.query(
+    `UPDATE bank_payment_intents SET qr_data_url = $2 WHERE id = $1 RETURNING *`,
+    [intent.id, qrDataUrl]
+  );
+
+  return withReference(updatedRows[0]);
+};
+
+const getIntent = async (id) => {
+  const { rows } = await pool.query(`SELECT * FROM bank_payment_intents WHERE id = $1`, [id]);
+  if (!rows[0]) throw new ApiError(404, "Bank payment intent not found");
+  return withReference(rows[0]);
+};
+
+// Owner/staff-facing list — Pending Bank Payments page and the header bell both use this,
+// filtered to status='awaiting_payment' for the common case.
+const listIntents = async ({ status } = {}) => {
+  const params = [];
+  let query = `SELECT * FROM bank_payment_intents`;
+  if (status) {
+    params.push(status);
+    query += ` WHERE status = $1`;
+  }
+  query += ` ORDER BY created_at DESC`;
+  const { rows } = await pool.query(query, params);
+  return rows.map(withReference);
+};
+
+// Turns a pending intent into a real sale — the ONLY place that happens for a bank-
+// transfer payment. Reuses checkoutSale() completely unmodified (same function cash/card
+// sales already go through), so there remains exactly one place in the whole app that ever
+// creates a real sale/decrements stock. `autoConfirmed`/`matchedSourceText` let the
+// notification-forwarder auto-matcher (Sevices/PaymentNotifications/matchingService.js)
+// call this exact same function a human's "Mark as Paid" click does — there is only ever
+// one confirm code path, manual or automatic.
+const confirmIntent = async (id, { requestingUser, autoConfirmed = false, matchedSourceText = null } = {}) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Locking this row is what makes two concurrent confirm attempts on the SAME intent
+    // (a double-click, or a human and a future auto-matcher at the same instant) serialize
+    // correctly — identical reasoning to voidSale/refundSale's own FOR UPDATE locks
+    // (salesService.js). The second attempt blocks here until the first's transaction
+    // commits, then re-reads the now-'confirmed' row and is correctly rejected below.
+    const { rows } = await client.query(
+      `SELECT * FROM bank_payment_intents WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    const intent = rows[0];
+    if (!intent) throw new ApiError(404, "Bank payment intent not found");
+    if (intent.status === "confirmed") throw new ApiError(409, "This payment was already confirmed");
+    if (intent.status === "cancelled") throw new ApiError(409, "This payment was already cancelled — it can't be confirmed");
+
+    let result;
+    try {
+      // checkoutSale opens its OWN connection/transaction (pool.connect(), not this
+      // function's `client`) — a stock or voucher-balance conflict there rolls back only
+      // that inner transaction. This outer transaction (and the row lock above) is
+      // untouched either way, so the error-recording branch below always runs cleanly.
+      result = await checkoutSale(intent.cart_snapshot, "bank_transfer", requestingUser, {
+        voucherCode: intent.voucher_code || undefined,
+        storeCreditRedeemed: intent.store_credit_redeemed || undefined,
+      });
+    } catch (err) {
+      // Accepted trade-off (see plan.md): since stock is never reserved when the QR is
+      // generated, two intents can both target the last unit of a product. Whoever
+      // confirms first wins; this makes the loser's failure visible on the Pending Bank
+      // Payments page (last_confirm_error) instead of silently vanishing — status stays
+      // 'awaiting_payment' so nothing is lost, ready for manual resolution.
+      await client.query(`UPDATE bank_payment_intents SET last_confirm_error = $2 WHERE id = $1`, [
+        id,
+        err.message || String(err),
+      ]);
+      await client.query("COMMIT");
+      throw err;
+    }
+
+    const { rows: updatedRows } = await client.query(
+      `UPDATE bank_payment_intents
+       SET status = 'confirmed', transaction_id = $2, resolved_by = $3, resolved_at = NOW(),
+           auto_confirmed = $4, matched_source_text = $5, last_confirm_error = NULL
+       WHERE id = $1 RETURNING *`,
+      [id, result.transactionId, requestingUser?.id || null, autoConfirmed, matchedSourceText]
+    );
+    await client.query("COMMIT");
+    return { ...withReference(updatedRows[0]), receiptNo: result.receiptNo };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err instanceof ApiError ? err : new ApiError(500, err.message);
+  } finally {
+    client.release();
+  }
+};
+
+const cancelIntent = async (id, requestingUser, reason) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    const { rows } = await client.query(
+      `SELECT * FROM bank_payment_intents WHERE id = $1 FOR UPDATE`,
+      [id]
+    );
+    const intent = rows[0];
+    if (!intent) throw new ApiError(404, "Bank payment intent not found");
+    if (intent.status === "confirmed") {
+      throw new ApiError(409, "This payment was already confirmed — it can't be cancelled, only refunded");
+    }
+    if (intent.status === "cancelled") throw new ApiError(409, "This payment was already cancelled");
+
+    const { rows: updatedRows } = await client.query(
+      `UPDATE bank_payment_intents
+       SET status = 'cancelled', resolved_by = $2, resolved_at = NOW(), resolution_note = $3
+       WHERE id = $1 RETURNING *`,
+      [id, requestingUser?.id || null, reason || null]
+    );
+    await client.query("COMMIT");
+    return withReference(updatedRows[0]);
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err instanceof ApiError ? err : new ApiError(500, err.message);
+  } finally {
+    client.release();
+  }
+};
+
+// Called by the notification-forwarder matcher (Sevices/PaymentNotifications/
+// matchingService.js) when one incoming notification's amount matches more than one
+// pending intent, or one intent matches more than one incoming notification — "never
+// guess" (plan.md): every intent involved gets flagged for a human to sort out rather
+// than any of them being auto-confirmed. `id -> candidates` lets each intent record only
+// the specific conflicting notification(s)/intent(s) relevant to it.
+const flagAmbiguous = async (candidatesByIntentId) => {
+  const ids = Object.keys(candidatesByIntentId);
+  if (ids.length === 0) return [];
+  const results = [];
+  for (const id of ids) {
+    const { rows } = await pool.query(
+      `UPDATE bank_payment_intents
+       SET status = 'ambiguous', match_candidates = $2
+       WHERE id = $1 AND status IN ('awaiting_payment', 'ambiguous')
+       RETURNING *`,
+      [id, JSON.stringify(candidatesByIntentId[id])]
+    );
+    if (rows[0]) results.push(withReference(rows[0]));
+  }
+  return results;
+};
+
+// Manual "actually, go back to waiting" — an Owner/staff decision after looking at an
+// ambiguous pair, distinct from confirmIntent/cancelIntent since neither "yes this one
+// was paid" nor "no, cancel it" fits "I'm not sure yet, keep waiting."
+const requeueIntent = async (id, requestingUser) => {
+  const { rows } = await pool.query(
+    `UPDATE bank_payment_intents
+     SET status = 'awaiting_payment', match_candidates = NULL, resolution_note = $2
+     WHERE id = $1 AND status = 'ambiguous'
+     RETURNING *`,
+    [id, requestingUser?.id ? `Requeued by user ${requestingUser.id}` : null]
+  );
+  if (!rows[0]) throw new ApiError(404, "No ambiguous bank payment intent found with that id");
+  return withReference(rows[0]);
+};
+
+module.exports = {
+  createIntent,
+  getIntent,
+  listIntents,
+  confirmIntent,
+  cancelIntent,
+  flagAmbiguous,
+  requeueIntent,
+  formatIntentRef,
+};

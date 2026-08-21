@@ -9,6 +9,7 @@ import Company from "pages/Company";
 import Inventory from "pages/Inventory";
 import Contacts from "pages/Contacts";
 import StoreCredit from "pages/StoreCredit";
+import BankPayments from "pages/BankPayments";
 import LoginPage from "pages/Login";
 import NotFound from "pages/NotFound";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
@@ -125,6 +126,16 @@ function App() {
                   element={
                     <ProtectedRoute roles={OWNER_ONLY}>
                       <StoreCredit />
+                    </ProtectedRoute>
+                  }
+                />
+                {/* No roles restriction — confirming/cancelling a bank-transfer payment is
+                    any-staff, same trust level as refunds (see Routes/API/bankPaymentRoutes.js). */}
+                <Route
+                  path="/bank-payments"
+                  element={
+                    <ProtectedRoute>
+                      <BankPayments />
                     </ProtectedRoute>
                   }
                 />

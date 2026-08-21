@@ -1,6 +1,12 @@
 import { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
-import { HiOutlineShoppingBag, HiOutlineCube, HiOutlineBanknotes, HiOutlineCreditCard } from "react-icons/hi2";
+import {
+  HiOutlineShoppingBag,
+  HiOutlineCube,
+  HiOutlineBanknotes,
+  HiOutlineCreditCard,
+  HiOutlineQrCode,
+} from "react-icons/hi2";
 import { useToast } from "components/Toast/ToastContext";
 import { Modal } from "components";
 import { useLanguage } from "i18n/LanguageContext";
@@ -14,7 +20,9 @@ import {
 import { apiGet, apiPost } from "utils/api";
 import { enqueueOfflineSale } from "offline/syncManager";
 import { decrementLocalStock } from "offline/cache";
+import useOfflineStatus from "hooks/useOfflineStatus";
 import ReceiptPreviewModal from "./ReceiptPreviewModal";
+import BankTransferQrModal from "./BankTransferQrModal";
 
 // Cash amounts customers commonly hand over — used to build one-tap tender suggestions.
 const CASH_DENOMINATIONS = [50, 100, 500, 1000, 5000];
@@ -69,11 +77,19 @@ export default function CartPanel({ onCheckedOut }) {
   const dispatch = useDispatch();
   const toast = useToast();
   const { t } = useLanguage();
+  const { online } = useOfflineStatus();
 
   const [showPayment, setShowPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [amountTendered, setAmountTendered] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
+  // Bank-transfer checkout is its own, separate flow (handleBankTransferCheckout below) —
+  // it opens a pending payment intent + QR instead of an immediate sale, so it gets its
+  // own in-flight flag and its own follow-up modal rather than reusing isProcessing/
+  // ReceiptPreviewModal, which are cash/card's "sale already happened" concepts.
+  const [isCreatingBankIntent, setIsCreatingBankIntent] = useState(false);
+  const [bankIntent, setBankIntent] = useState(null);
+  const [showBankQr, setShowBankQr] = useState(false);
   // Set together right after a successful sale to open ReceiptPreviewModal — null means
   // closed. Holding the sold items here (rather than re-reading `cart`, which gets
   // cleared) is what lets the preview keep showing them after checkout.
@@ -140,7 +156,17 @@ export default function CartPanel({ onCheckedOut }) {
 
   const tenderedNum = parseFloat(amountTendered) || 0;
   const changeDue = tenderedNum - amountDue;
-  const canConfirm = amountDue <= 0 || paymentMethod === "card" || tenderedNum >= amountDue;
+  // Bank transfer has no tendered-amount concept (same as card) — the QR is generated for
+  // the exact amount due, nothing for the cashier to compare against on this screen.
+  const canConfirm = amountDue <= 0 || paymentMethod !== "cash" || tenderedNum >= amountDue;
+
+  // Bank transfer needs a live connection to reach the server and generate a real, checkable
+  // QR — there's no sensible offline story for it (unlike cash/card, which queue via the
+  // offline outbox). If connectivity drops while it's selected, fall back to cash rather
+  // than leaving a now-unavailable option selected.
+  useEffect(() => {
+    if (!online && paymentMethod === "bank_transfer") setPaymentMethod("cash");
+  }, [online, paymentMethod]);
 
   const openPayment = () => {
     setPaymentMethod("cash");
@@ -255,6 +281,40 @@ export default function CartPanel({ onCheckedOut }) {
     }
   };
 
+  // Opens a pending bank-transfer payment instead of an immediate sale — see
+  // ExpressBackend/Sevices/bankPaymentService.js's createIntent. Unlike handleCheckout,
+  // nothing is sold/decremented yet: that only happens once the payment is actually
+  // confirmed (Pending Bank Payments page, or an eventual auto-matcher), so the cart is
+  // cleared here purely so the cashier can move on to the next customer — the sale itself
+  // isn't final until confirmed.
+  const handleBankTransferCheckout = async () => {
+    setIsCreatingBankIntent(true);
+
+    const salesData = cart.map((item) => ({
+      sellingPrice: item.sellingPrice,
+      quantity: item.sellingQuantity,
+      productID: item.productId || item.id,
+      lotId: item.lotId,
+    }));
+
+    try {
+      const intent = await apiPost("/api/bank-payments/intents", {
+        items: salesData,
+        voucherCode: creditToApply > 0 ? storeCreditCode.trim() : undefined,
+        storeCreditRedeemed: creditToApply > 0 ? creditToApply : undefined,
+      });
+
+      dispatch(clearCart());
+      setShowPayment(false);
+      setBankIntent(intent);
+      setShowBankQr(true);
+    } catch (error) {
+      toast.error(error.message);
+    } finally {
+      setIsCreatingBankIntent(false);
+    }
+  };
+
   const handleRemove = (id) => dispatch(removeCart(id));
   const handleDecrease = (id) => dispatch(decreaseQuantity({ id }));
   const handleIncrease = (item) => dispatch(increaseQuantity(item));
@@ -335,18 +395,30 @@ export default function CartPanel({ onCheckedOut }) {
 
       <Modal isOpen={showPayment} onClose={() => setShowPayment(false)} title={t("payment.title")}>
         <div className="mb-4 rounded-lg bg-surface-subtle px-4 py-3 dark:bg-gray-900/40">
+          {/* Subtotal + the deduction shown ABOVE the final Amount due (not below it) —
+              shown below it read as "5650 due, and ALSO minus 150 more", leaving the
+              cashier unsure whether the voucher was already applied to the number they're
+              about to collect. Only shown once a voucher is actually in play; the common
+              no-voucher case stays exactly as it was (just "Amount due"). */}
+          {creditToApply > 0 && (
+            <>
+              <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
+                <span>{t("cart.subtotal")}</span>
+                <span>PKR {subtotal.toFixed(0)}</span>
+              </div>
+              <div className="mt-1 flex items-center justify-between text-xs text-primary-600 dark:text-primary-400">
+                <span>{t("payment.storeCreditApplied")}</span>
+                <span>- PKR {creditToApply.toFixed(0)}</span>
+              </div>
+              <div className="my-2 border-t border-dashed border-surface-border dark:border-gray-700" />
+            </>
+          )}
           <div className="flex items-center justify-between">
             <span className="text-sm text-gray-600 dark:text-gray-300">{t("payment.amountDue")}</span>
             <span className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
               PKR {amountDue.toFixed(0)}
             </span>
           </div>
-          {creditToApply > 0 && (
-            <div className="mt-1 flex items-center justify-between text-xs text-primary-600 dark:text-primary-400">
-              <span>{t("payment.storeCreditApplied")}</span>
-              <span>- PKR {creditToApply.toFixed(0)}</span>
-            </div>
-          )}
         </div>
 
         <button
@@ -399,7 +471,7 @@ export default function CartPanel({ onCheckedOut }) {
           </div>
         )}
 
-        <div className="mb-4 grid grid-cols-2 gap-2">
+        <div className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-2">
           <button
             type="button"
             onClick={() => setPaymentMethod("cash")}
@@ -424,7 +496,29 @@ export default function CartPanel({ onCheckedOut }) {
             <HiOutlineCreditCard className="text-lg" />
             {t("payment.card")}
           </button>
+          {/* Hidden while offline — a QR needs a live server round-trip to generate and be
+              checkable, unlike cash/card which queue through the offline outbox. */}
+          {online && (
+            <button
+              type="button"
+              onClick={() => setPaymentMethod("bank_transfer")}
+              className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${
+                paymentMethod === "bank_transfer"
+                  ? "border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400"
+                  : "border-surface-border text-gray-600 hover:bg-surface-subtle dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+              }`}
+            >
+              <HiOutlineQrCode className="text-lg" />
+              {t("payment.bankTransfer")}
+            </button>
+          )}
         </div>
+
+        {!online && (
+          <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+            {t("payment.bankTransferUnavailableOffline")}
+          </p>
+        )}
 
         {amountDue <= 0 && (
           <div className="mb-4 rounded-lg bg-success-50 px-4 py-3 text-sm font-semibold text-success-700 dark:bg-success-500/10 dark:text-success-500">
@@ -482,14 +576,24 @@ export default function CartPanel({ onCheckedOut }) {
             {t("payment.cancel")}
           </button>
           <button
-            onClick={handleCheckout}
-            disabled={!canConfirm || isProcessing}
+            onClick={paymentMethod === "bank_transfer" ? handleBankTransferCheckout : handleCheckout}
+            disabled={!canConfirm || isProcessing || isCreatingBankIntent}
             className="rounded-lg bg-primary-600 px-4 py-2 text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {isProcessing ? t("payment.processing") : t("payment.confirmSale")}
+            {isProcessing || isCreatingBankIntent ? t("payment.processing") : t("payment.confirmSale")}
           </button>
         </div>
       </Modal>
+
+      <BankTransferQrModal
+        isOpen={showBankQr}
+        intent={bankIntent}
+        onClose={() => {
+          setShowBankQr(false);
+          setBankIntent(null);
+          onCheckedOut?.();
+        }}
+      />
 
       <ReceiptPreviewModal
         isOpen={receiptItems !== null}

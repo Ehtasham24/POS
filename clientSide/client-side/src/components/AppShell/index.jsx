@@ -6,6 +6,7 @@ import Logo from "components/Logo";
 import SidebarContent from "./SidebarContent";
 import GlobalSearch from "components/GlobalSearch";
 import LowStockBell from "./LowStockBell";
+import PendingBankPaymentsBell from "./PendingBankPaymentsBell";
 import OfflineStatusBadge from "./OfflineStatusBadge";
 import UserMenu from "./UserMenu";
 import CartCheckout from "categoriesComponents/cartCheckout";
@@ -67,6 +68,7 @@ export default function AppShell({ title, actions, hideSearch, children }) {
           </div>
           <div className="flex items-center gap-2">
             <OfflineStatusBadge />
+            <PendingBankPaymentsBell />
             <LowStockBell />
             <UserMenu />
           </div>
@@ -81,6 +83,7 @@ export default function AppShell({ title, actions, hideSearch, children }) {
             <div className="flex items-center gap-2">
               {!hideSearch && <GlobalSearch />}
               <OfflineStatusBadge />
+              <PendingBankPaymentsBell />
               <LowStockBell />
               <UserMenu />
             </div>

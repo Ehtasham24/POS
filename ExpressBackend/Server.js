@@ -2,6 +2,7 @@ const express = require("express");
 const path = require("path");
 const fs = require("fs");
 const https = require("https");
+const http = require("http");
 const cookieParser = require("cookie-parser");
 require("dotenv").config({ path: path.join(__dirname, "Development.env") });
 const routesProducts = require("./Routes/API/productsRoutes");
@@ -13,6 +14,8 @@ const routesSettings = require("./Routes/API/settingsRoutes");
 const routesSearch = require("./Routes/API/searchRoutes");
 const routesInventory = require("./Routes/API/inventoryRoutes");
 const routesContacts = require("./Routes/API/contactsRoutes");
+const routesBankPayment = require("./Routes/API/bankPaymentRoutes");
+const routesPaymentNotifications = require("./Routes/API/paymentNotificationRoutes");
 const routesPayment = require("./Routes/API/ThirdParty/PayFast/payFastRoutes");
 const routesAuth = require("./Routes/API/authRoutes");
 const routesUsers = require("./Routes/API/usersRoutes");
@@ -51,6 +54,7 @@ const Server = async () => {
   // also catch the static build/SPA catch-all below, which must stay reachable even when
   // logged out (see requireAuth.js's comment for the full reasoning).
   server.use(routesPayment); // third-party webhook, deliberately left public
+  server.use(routesPaymentNotifications); // phone-forwarder webhook, gated by shared secret not auth
   server.use(routesAuth); // public: login/logout; /me itself requires auth per-route
   server.use(routesHealth); // public: connectivity ping target
   server.use(routesUsers);
@@ -63,6 +67,7 @@ const Server = async () => {
   server.use(routesSearch);
   server.use(routesInventory);
   server.use(routesContacts);
+  server.use(routesBankPayment);
 
   // Serve static files from the React app
   server.use(
@@ -101,6 +106,25 @@ const Server = async () => {
     console.log(err);
     process.exit(1);
   }
+
+  // A second, deliberately separate, PLAIN HTTP listener carrying ONLY the phone-forwarder
+  // webhook routes — not the main `server` app, so nothing else (login, session-cookie
+  // routes) is ever reachable through it. Exists because the LAN-facing mkcert cert
+  // (certs/lan-cert.pem, see above) is issued only for localhost/127.0.0.1/::1 — a phone
+  // on the shop WiFi hitting the server's actual LAN IP would fail TLS hostname
+  // verification, and getting a phone to trust a custom CA is real setup friction for a
+  // DIY/cost-effective use case. These two routes are already gated by
+  // requireForwarderSecret (Middleware/requireForwarderSecret.js) rather than the session
+  // cookie the HTTPS-only requirement was originally about (see utils/auth.js's
+  // SameSite=None+Secure comment) — that reasoning doesn't apply to a shared-secret
+  // header, so plain HTTP here is a deliberate, scoped trade-off, not an oversight.
+  const webhookApp = express();
+  webhookApp.use(express.json());
+  webhookApp.use(routesPaymentNotifications);
+  const webhookPort = process.env.WEBHOOK_PORT || 4001;
+  http
+    .createServer(webhookApp)
+    .listen(webhookPort, () => console.log(`Phone-forwarder webhook listening on port ${webhookPort}`));
 };
 
 Server();

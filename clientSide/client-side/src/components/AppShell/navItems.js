@@ -8,6 +8,7 @@ import {
   HiOutlineCog6Tooth,
   HiOutlineBuildingOffice2,
   HiOutlineReceiptRefund,
+  HiOutlineQrCode,
 } from "react-icons/hi2";
 
 // `roles` omitted = visible to everyone logged in (Owner and Cashier alike). A Cashier's
@@ -49,6 +50,14 @@ export const navItems = [
     labelKey: "nav.storeCredit",
     icon: HiOutlineReceiptRefund,
     roles: ["owner"],
+  },
+  // No `roles` restriction — any staff can confirm/cancel a bank-transfer payment (same
+  // trust level as refunds), so they can see this list too. See Routes/API/bankPaymentRoutes.js.
+  {
+    to: "/bank-payments",
+    label: "Bank Payments",
+    labelKey: "nav.bankPayments",
+    icon: HiOutlineQrCode,
   },
   {
     to: "/report",

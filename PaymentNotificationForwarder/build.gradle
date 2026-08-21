@@ -1,0 +1,8 @@
+// Top-level build file — Android Studio will offer to update these plugin versions to
+// whatever it currently ships with when this project is first opened; accepting that
+// suggestion is fine and expected (this repo doesn't have Android tooling installed to
+// pin/verify an exact version against, see PaymentNotificationForwarder/README.md).
+plugins {
+    id 'com.android.application' version '8.5.2' apply false
+    id 'org.jetbrains.kotlin.android' version '1.9.24' apply false
+}
