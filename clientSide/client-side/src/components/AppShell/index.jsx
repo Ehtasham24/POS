@@ -82,10 +82,18 @@ export default function AppShell({ title, actions, hideSearch, children }) {
             </h1>
             <div className="flex items-center gap-2">
               {!hideSearch && <GlobalSearch />}
-              <OfflineStatusBadge />
-              <PendingBankPaymentsBell />
-              <LowStockBell />
-              <UserMenu />
+              {/* The "Mobile top bar" header above already shows this exact icon cluster
+                  at md: (this project's max-width/mobile breakpoint — see
+                  tailwind.config.js) — without md:hidden here, both rows render at once
+                  on any phone/tablet width, showing every icon twice. Real desktop
+                  (where that header is itself hidden) still needs this row, so it can't
+                  just be deleted. */}
+              <div className="flex items-center gap-2 md:hidden">
+                <OfflineStatusBadge />
+                <PendingBankPaymentsBell />
+                <LowStockBell />
+                <UserMenu />
+              </div>
             </div>
           </div>
           {actions && (
