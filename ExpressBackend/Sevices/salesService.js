@@ -701,9 +701,15 @@ const fetchSales = async (startDate, endDate, paymentMethod = null) => {
          p.productname,
          p.category_id,
          c.category_name,  -- Fetch category name from the categories table
-         CAST(AVG(s.buying_price) AS INT) AS buyingprice,  -- avg cost actually paid across the sold units
+         -- Quantity-weighted, same reasoning as profit_loss below — a product whose cost
+         -- changed over time (different lots) otherwise gets its buying/selling price
+         -- averaged one distinct-row-at-a-time, which can land on the wrong side of each
+         -- other (avg selling price appearing BELOW avg buying price) even when the real,
+         -- volume-weighted numbers show a healthy profit. Weighting both the same way
+         -- profit_loss is means (selling - buying) here always equals profit_loss exactly.
+         CAST(SUM(s.quantity * s.buying_price) / NULLIF(SUM(s.quantity), 0) AS INT) AS buyingprice,
          SUM(s.quantity) AS total_quantity_sold,
-         CAST(AVG(s.selling_price) AS INT) AS avg_selling_price,  -- Cast average selling price to INT
+         CAST(SUM(s.quantity * s.selling_price) / NULLIF(SUM(s.quantity), 0) AS INT) AS avg_selling_price,
          -- Quantity-weighted (total profit / total units), not a plain AVG across rows —
          -- a plain average gives every sale EVENT equal weight regardless of quantity, so
          -- a couple of low-quantity, deeply-discounted/clearance sales could pull this
@@ -772,9 +778,15 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = 
          p.productname,
          p.category_id,
          c.category_name,
-         CAST(AVG(s.buying_price) AS INT) AS buyingprice,  -- avg cost actually paid across the sold units
+         -- Quantity-weighted, same reasoning as profit_loss below — a product whose cost
+         -- changed over time (different lots) otherwise gets its buying/selling price
+         -- averaged one distinct-row-at-a-time, which can land on the wrong side of each
+         -- other (avg selling price appearing BELOW avg buying price) even when the real,
+         -- volume-weighted numbers show a healthy profit. Weighting both the same way
+         -- profit_loss is means (selling - buying) here always equals profit_loss exactly.
+         CAST(SUM(s.quantity * s.buying_price) / NULLIF(SUM(s.quantity), 0) AS INT) AS buyingprice,
          SUM(s.quantity) AS total_quantity_sold,
-         CAST(AVG(s.selling_price) AS INT) AS avg_selling_price,  -- Cast average selling price to INT
+         CAST(SUM(s.quantity * s.selling_price) / NULLIF(SUM(s.quantity), 0) AS INT) AS avg_selling_price,
          -- Quantity-weighted (total profit / total units), not a plain AVG across rows —
          -- a plain average gives every sale EVENT equal weight regardless of quantity, so
          -- a couple of low-quantity, deeply-discounted/clearance sales could pull this
