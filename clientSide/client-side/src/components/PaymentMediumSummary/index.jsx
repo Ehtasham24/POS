@@ -46,7 +46,7 @@ export default function PaymentMediumSummary({ startDate, endDate, onMediumClick
 
   if (!totals) {
     return (
-      <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-3 gap-4 sm:grid-cols-1">
         {[0, 1, 2].map((i) => (
           <div key={i} className="h-24 animate-pulse rounded-2xl bg-surface-muted dark:bg-gray-800" />
         ))}
@@ -55,7 +55,7 @@ export default function PaymentMediumSummary({ startDate, endDate, onMediumClick
   }
 
   return (
-    <div className="mb-6 grid grid-cols-1 gap-4 sm:grid-cols-3">
+    <div className="mb-6 grid grid-cols-3 gap-4 sm:grid-cols-1">
       {Object.keys(MEDIUM_META).map((medium) => {
         const { icon: Icon, labelKey, classes } = MEDIUM_META[medium];
         const Wrapper = onMediumClick ? "button" : "div";
@@ -84,7 +84,12 @@ export default function PaymentMediumSummary({ startDate, endDate, onMediumClick
           historical revenue with no recorded medium, shown only when it's actually
           nonzero rather than a permanent fourth card most shops will never see. */}
       {totals.unknown > 0 && (
-        <div className="flex items-center gap-4 rounded-2xl border border-dashed border-surface-border bg-surface-subtle p-4 dark:border-gray-700 dark:bg-gray-800/40 sm:col-span-3">
+        // col-span-3 on a grid whose explicit template drops to 1 column at sm: (this
+        // project's `sm` is a max-width/mobile breakpoint, not min-width — see
+        // tailwind.config.js) forces the grid to grow implicit columns to satisfy the
+        // span, silently pulling every OTHER card back into that wider implicit grid
+        // too. sm:col-span-1 keeps the span inside whatever the grid actually has.
+        <div className="col-span-3 flex items-center gap-4 rounded-2xl border border-dashed border-surface-border bg-surface-subtle p-4 dark:border-gray-700 dark:bg-gray-800/40 sm:col-span-1">
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">{t("report.unrecordedMedium")}</p>
             <p className="font-poppins text-lg font-bold text-gray-600 dark:text-gray-300">

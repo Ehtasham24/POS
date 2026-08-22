@@ -41,7 +41,12 @@ export default function UserMenu() {
         className="flex h-9 items-center gap-1.5 rounded-lg px-2 text-gray-600 hover:bg-surface-muted dark:text-gray-300 dark:hover:bg-gray-700"
       >
         <HiOutlineUserCircle className="text-xl" />
-        <span className="hidden max-w-[8rem] truncate text-sm font-medium sm:inline">
+        {/* This project's `sm:` is a max-width/mobile breakpoint (tailwind.config.js), not
+            Tailwind's default min-width — so hiding by default and showing `sm:inline`
+            had this backwards: hidden on spacious desktop, shown on the narrowest phones
+            where header space is tightest. sm:hidden collapses it to icon-only exactly
+            where room is actually short. */}
+        <span className="max-w-[8rem] truncate text-sm font-medium sm:hidden">
           {user.displayName}
         </span>
       </button>

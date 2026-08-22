@@ -172,7 +172,11 @@ export default function BankPaymentsPage() {
 
         <div className="overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] table-fixed border-collapse">
+            {/* min-w raised and the actions column given an explicit width — same fix
+                SalesHistory's own expanded-items table already needed once it grew a
+                second action button (Void + Refund): two buttons ("Mark as Paid" +
+                "Cancel") don't fit in table-fixed's leftover space without one. */}
+            <table className="w-full min-w-[820px] table-fixed border-collapse">
               <thead className="bg-surface-subtle dark:bg-gray-800">
                 <tr>
                   <th className="w-36 text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -187,7 +191,7 @@ export default function BankPaymentsPage() {
                   <th className="w-36 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("paymentMediums.status")}
                   </th>
-                  <th className="px-2 py-3"></th>
+                  <th className="w-56 px-2 py-3"></th>
                 </tr>
               </thead>
               {loading ? (
