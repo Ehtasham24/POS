@@ -21,34 +21,51 @@ const withReference = (row) => {
   return { ...rest, referenceCode: formatIntentRef(row.id), qrDataUrl: qr_data_url };
 };
 
-// Opens a pending bank-transfer payment: snapshots the cart + computes what's actually
-// owed (mirrors checkoutSale's own cartTotal/creditToApply math exactly, since confirmIntent
-// below hands this same cart straight to checkoutSale later) and builds a QR for it.
-// Deliberately does NOT touch products/lots/sales/sale_transactions/store credit at all —
-// only confirmIntent does that, via the real checkoutSale, once payment is actually
-// confirmed. No stock is reserved by generating a QR; an abandoned scan costs nothing.
-const createIntent = async (items, requestingUser, { voucherCode, storeCreditRedeemed } = {}) => {
+const CHANNELS = ["bank_transfer", "jazzcash", "easypaisa"];
+
+// Opens a pending payment: snapshots the cart + computes what's actually owed (mirrors
+// checkoutSale's own cartTotal/creditToApply math exactly, since confirmIntent below hands
+// this same cart straight to checkoutSale later). Deliberately does NOT touch products/
+// lots/sales/sale_transactions/store credit at all — only confirmIntent does that, via the
+// real checkoutSale, once payment is actually confirmed. No stock is reserved by opening an
+// intent; an abandoned one costs nothing.
+//
+// channel='bank_transfer' (default) builds our own Raast QR, same as always. channel=
+// 'jazzcash'/'easypaisa' skips that entirely — Controller/paymentGatewayController.js
+// takes it from here, calling that gateway's own initiate API (jazzCashService.js etc.)
+// using this row's gateway_txn_ref, and confirmIntent below is reused unchanged either way.
+const createIntent = async (
+  items,
+  requestingUser,
+  { voucherCode, storeCreditRedeemed, channel = "bank_transfer" } = {}
+) => {
   if (!Array.isArray(items) || items.length === 0) {
     throw new ApiError(400, "Cart is empty");
   }
+  if (!CHANNELS.includes(channel)) {
+    throw new ApiError(400, `Unknown payment channel "${channel}"`);
+  }
 
-  const settings = await getSettings();
-  const bankDetails = {
-    bankName: settings.bank_name,
-    accountTitle: settings.bank_account_title,
-    accountNumber: settings.bank_account_number,
-    iban: settings.bank_iban,
-  };
-  // IBAN specifically — not "account number OR IBAN" — because the real Raast QR payload
-  // (utils/bankQr.js) only has a slot for the IBAN (tag 04); there's no field for a plain
-  // account number in the verified format. bankName/accountTitle stay required too even
-  // though they're not encoded in the QR itself — they're shown next to it on the checkout
-  // screen (BankTransferQrModal.jsx) so there's a human-readable confirmation of the account.
-  if (!bankDetails.bankName || !bankDetails.accountTitle || !bankDetails.iban) {
-    throw new ApiError(
-      400,
-      "Bank IBAN isn't set up yet — add your bank name, account title, and IBAN on the Company page first"
-    );
+  let bankDetails = null;
+  if (channel === "bank_transfer") {
+    const settings = await getSettings();
+    bankDetails = {
+      bankName: settings.bank_name,
+      accountTitle: settings.bank_account_title,
+      accountNumber: settings.bank_account_number,
+      iban: settings.bank_iban,
+    };
+    // IBAN specifically — not "account number OR IBAN" — because the real Raast QR payload
+    // (utils/bankQr.js) only has a slot for the IBAN (tag 04); there's no field for a plain
+    // account number in the verified format. bankName/accountTitle stay required too even
+    // though they're not encoded in the QR itself — they're shown next to it on the checkout
+    // screen (BankTransferQrModal.jsx) so there's a human-readable confirmation of the account.
+    if (!bankDetails.bankName || !bankDetails.accountTitle || !bankDetails.iban) {
+      throw new ApiError(
+        400,
+        "Bank IBAN isn't set up yet — add your bank name, account title, and IBAN on the Company page first"
+      );
+    }
   }
 
   const cartTotal = items.reduce((sum, i) => sum + i.sellingPrice * i.quantity, 0);
@@ -56,21 +73,34 @@ const createIntent = async (items, requestingUser, { voucherCode, storeCreditRed
     storeCreditRedeemed > 0 ? Math.min(Number(storeCreditRedeemed), cartTotal) : 0;
   const amount = cartTotal - creditToApply;
   if (!(amount > 0)) {
-    throw new ApiError(400, "Nothing left to pay by bank transfer once store credit is applied");
+    throw new ApiError(400, "Nothing left to pay once store credit is applied");
   }
 
   const { rows } = await pool.query(
-    `INSERT INTO bank_payment_intents (cart_snapshot, amount, voucher_code, store_credit_redeemed, created_by)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
+    `INSERT INTO bank_payment_intents (cart_snapshot, amount, voucher_code, store_credit_redeemed, created_by, channel)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
     [
       JSON.stringify(items),
       amount,
       creditToApply > 0 ? voucherCode : null,
       creditToApply > 0 ? creditToApply : null,
       requestingUser.id,
+      channel,
     ]
   );
   const intent = rows[0];
+
+  if (channel !== "bank_transfer") {
+    // No QR — just stamp our own reference on the row now so it's stable the moment the
+    // gateway's initiate call needs it (that call happens next, in the controller, not here;
+    // this service stays gateway-agnostic).
+    const { rows: updatedRows } = await pool.query(
+      `UPDATE bank_payment_intents SET gateway_txn_ref = $2 WHERE id = $1 RETURNING *`,
+      [intent.id, formatIntentRef(intent.id)]
+    );
+    return withReference(updatedRows[0]);
+  }
+
   // The real Raast payload (utils/bankQr.js) has no slot for a reference code — it's a
   // fixed IBAN+amount+expiry+CRC structure, verified against a real bank-generated QR —
   // so unlike the earlier plain-text draft, referenceCode is display-only now (shown next
@@ -98,14 +128,49 @@ const getIntent = async (id) => {
   return withReference(rows[0]);
 };
 
+// How a gateway callback (JazzCash's pp_TxnRefNo, Easypaisa's order id) finds its way back
+// to the intent that created it — indexed in migration 016 for exactly this lookup.
+const getIntentByGatewayRef = async (gatewayTxnRef) => {
+  const { rows } = await pool.query(
+    `SELECT * FROM bank_payment_intents WHERE gateway_txn_ref = $1`,
+    [gatewayTxnRef]
+  );
+  if (!rows[0]) throw new ApiError(404, "No bank payment intent found for that gateway reference");
+  return withReference(rows[0]);
+};
+
+// Records the gateway's own last-known response code (e.g. JazzCash's pp_ResponseCode) —
+// distinct from last_confirm_error, which is about checkoutSale itself failing *after* the
+// gateway already reported success. A decline/timeout doesn't cancel the intent — the
+// customer may just retry the same payment — so this only leaves a support/debugging trail,
+// same "record it, let a human decide" shape as flagAmbiguous below.
+const recordGatewayResponse = async (id, code) => {
+  const { rows } = await pool.query(
+    `UPDATE bank_payment_intents SET gateway_response_code = $2 WHERE id = $1 RETURNING *`,
+    [id, code]
+  );
+  if (!rows[0]) throw new ApiError(404, "Bank payment intent not found");
+  return withReference(rows[0]);
+};
+
 // Owner/staff-facing list — Pending Bank Payments page and the header bell both use this,
-// filtered to status='awaiting_payment' for the common case.
-const listIntents = async ({ status } = {}) => {
+// filtered to status='awaiting_payment' for the common case. channel is optional too (e.g.
+// a future JazzCash-only view) — omitted, every channel is returned, same as before this
+// param existed.
+const listIntents = async ({ status, channel } = {}) => {
   const params = [];
-  let query = `SELECT * FROM bank_payment_intents`;
+  const conditions = [];
   if (status) {
     params.push(status);
-    query += ` WHERE status = $1`;
+    conditions.push(`status = $${params.length}`);
+  }
+  if (channel) {
+    params.push(channel);
+    conditions.push(`channel = $${params.length}`);
+  }
+  let query = `SELECT * FROM bank_payment_intents`;
+  if (conditions.length > 0) {
+    query += ` WHERE ${conditions.join(" AND ")}`;
   }
   query += ` ORDER BY created_at DESC`;
   const { rows } = await pool.query(query, params);
@@ -250,8 +315,11 @@ const requeueIntent = async (id, requestingUser) => {
 };
 
 module.exports = {
+  CHANNELS,
   createIntent,
   getIntent,
+  getIntentByGatewayRef,
+  recordGatewayResponse,
   listIntents,
   confirmIntent,
   cancelIntent,

@@ -16,6 +16,7 @@ const routesInventory = require("./Routes/API/inventoryRoutes");
 const routesContacts = require("./Routes/API/contactsRoutes");
 const routesBankPayment = require("./Routes/API/bankPaymentRoutes");
 const routesPaymentNotifications = require("./Routes/API/paymentNotificationRoutes");
+const routesPaymentGateway = require("./Routes/API/paymentGatewayRoutes");
 const routesPayment = require("./Routes/API/ThirdParty/PayFast/payFastRoutes");
 const routesAuth = require("./Routes/API/authRoutes");
 const routesUsers = require("./Routes/API/usersRoutes");
@@ -55,6 +56,7 @@ const Server = async () => {
   // logged out (see requireAuth.js's comment for the full reasoning).
   server.use(routesPayment); // third-party webhook, deliberately left public
   server.use(routesPaymentNotifications); // phone-forwarder webhook, gated by shared secret not auth
+  server.use(routesPaymentGateway); // JazzCash/Easypaisa: initiate gated by requireAuth per-route, callback verified by gateway signature not auth
   server.use(routesAuth); // public: login/logout; /me itself requires auth per-route
   server.use(routesHealth); // public: connectivity ping target
   server.use(routesUsers);
