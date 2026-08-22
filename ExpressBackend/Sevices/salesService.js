@@ -1,27 +1,7 @@
 const { pool } = require("../Db");
-const { getLotById, decrementLot } = require("./lotService");
 const { getSettings, getBusinessTimezone } = require("./settingsService");
 const storeCreditService = require("./storeCreditService");
 const ApiError = require("../utils/ApiError");
-
-// RETURNING * used to be discarded here — nothing on the client ever learned a sale's
-// id, which void needs (to reference "this specific sale" right after checkout, not just
-// ones already round-tripped through Sales History).
-const insertSales = async (sellingPrice, sellingQuantity, product_id, lotId, buyingPrice, soldBy) => {
-  try {
-    const { rows } = await pool.query(
-      `
-      INSERT INTO sales (selling_price, quantity, product_id, sale_time, lot_id, buying_price, sold_by)
-      VALUES ($1, $2, $3, NOW(), $4, $5, $6)
-      RETURNING *;
-    `,
-      [sellingPrice, sellingQuantity, product_id, lotId, buyingPrice, soldBy]
-    );
-    return rows[0];
-  } catch (err) {
-    throw new Error(err.message);
-  }
-};
 
 const getRecentSales = async () => {
   try {
@@ -113,93 +93,6 @@ const getRefundWindowDays = async () => {
   const settings = await getSettings();
   const days = Number(settings.refund_window_days);
   return Number.isFinite(days) && days > 0 ? days : null;
-};
-
-// Sale from a specific, manually-picked lot (batch-tracked products).
-// Decrements exactly that lot (and the product's cached total), and snapshots
-// the lot's buying price onto the sale so later price changes never rewrite past profit.
-const sellFromLot = async (sellingPrice, sellingQuantity, product_id, lotId, soldBy) => {
-  const lot = await getLotById(lotId);
-  if (!lot) {
-    return { messageSend: `Lot not found` };
-  }
-  if (String(lot.product_id) !== String(product_id)) {
-    return { messageSend: `That lot does not belong to this product` };
-  }
-
-  let updatedLot;
-  try {
-    updatedLot = await decrementLot(lotId, sellingQuantity);
-  } catch (err) {
-    return { messageSend: err.message };
-  }
-
-  const sale = await insertSales(sellingPrice, sellingQuantity, product_id, lotId, lot.buying_price, soldBy);
-
-  const { rows } = await pool.query(`SELECT quantity FROM products WHERE id = $1`, [product_id]);
-  const updatedQuantity = rows[0].quantity;
-
-  const threshold = await getLowStockThreshold();
-  let messageSend = "Sale processed successfully";
-  if (updatedQuantity < threshold) {
-    messageSend = `Inventory is less than ${threshold}`;
-  }
-
-  return { updatedQuantity, messageSend, lotRemaining: updatedLot.qty_remaining, saleId: sale.id };
-};
-
-const updateSalesRecord = async (sellingPrice, SellingQuantity, product_id, lotId, soldBy) => {
-  try {
-    if (lotId) {
-      return await sellFromLot(sellingPrice, SellingQuantity, product_id, lotId, soldBy);
-    }
-
-    const { rows } = await pool.query(
-      `SELECT quantity, buyingprice FROM products WHERE id = $1`,
-      [product_id]
-    );
-
-    const getQuantity = rows[0].quantity;
-
-    let messageSend = "";
-    let updatedQuantity = 0;
-    if (isNaN(getQuantity)) {
-      throw new Error("Invalid quantity value retrieved from the database");
-    }
-
-    if (isNaN(SellingQuantity)) {
-      throw new Error("Invalid selling quantity provided");
-    }
-
-    if (SellingQuantity > getQuantity) {
-      messageSend = "Insufficient inventory to process the sale";
-
-      return { messageSend };
-    } else {
-      const sale = await insertSales(sellingPrice, SellingQuantity, product_id, null, rows[0].buyingprice, soldBy);
-
-      updatedQuantity = getQuantity - SellingQuantity;
-
-      await pool.query(
-        `UPDATE products
-         SET quantity = $1
-         WHERE id = $2`,
-        [updatedQuantity, product_id]
-      );
-
-      // Check stock remaining AFTER this sale — not the pre-sale quantity — against the
-      // threshold, so the cashier is warned about the level the shelf is actually at now.
-      const threshold = await getLowStockThreshold();
-      messageSend =
-        updatedQuantity < threshold
-          ? `Inventory is less than ${threshold}`
-          : "Sale processed successfully";
-
-      return { updatedQuantity, messageSend, saleId: sale.id };
-    }
-  } catch (err) {
-    throw new Error(err.message);
-  }
 };
 
 // Receipt numbers are just the sale_transactions row's SERIAL id, formatted — Postgres
@@ -400,9 +293,11 @@ const fetchBilledHistory = async (
   // its line items does (see below), same as the category filter's "any item matches"
   // semantics, so a mixed transaction (one voided line + one active line) shows up under
   // both filters rather than getting hidden from either.
-  receiptNo = null // e.g. "RCPT-000123" — the receipt-number lookup a refund flow starts
+  receiptNo = null, // e.g. "RCPT-000123" — the receipt-number lookup a refund flow starts
   // from; parsed back to the raw transaction_id and matched exactly, no new endpoint needed
   // since this reuses the same conditions[]/params mechanism as every other filter here.
+  paymentMethod = null // 'cash' | 'card' | 'bank_transfer' — filters by the whole
+  // transaction's payment medium (sale_transactions.payment_method), not a per-item field.
 ) => {
   try {
     const hasDateFilter =
@@ -413,6 +308,7 @@ const fetchBilledHistory = async (
       ? parseInt(String(receiptNo).replace(/^RCPT-/i, ""), 10)
       : NaN;
     const hasReceiptFilter = Number.isFinite(parsedTransactionId);
+    const hasPaymentMethodFilter = ["cash", "card", "bank_transfer"].includes(paymentMethod);
 
     // A transaction "matches" the category filter if any item in it belongs to that
     // category — the product join is only needed to test that, not to restrict which
@@ -451,15 +347,26 @@ const fetchBilledHistory = async (
       params.push(parsedTransactionId);
       conditions.push(`s.transaction_id = $${params.length}`);
     }
+    if (hasPaymentMethodFilter) {
+      params.push(paymentMethod);
+      conditions.push(`st.payment_method = $${params.length}`);
+    }
     const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
     const joinClause = hasCategoryFilter
       ? "JOIN public.products p ON s.product_id = p.id"
+      : "";
+    // Only needed in these two queries when actually filtering by it — the final
+    // rows-fetching query below already joins sale_transactions unconditionally, for
+    // store_credit_applied/payment_method regardless of whether this filter is active.
+    const stJoinClause = hasPaymentMethodFilter
+      ? "LEFT JOIN public.sale_transactions st ON st.id = s.transaction_id"
       : "";
 
     const countResult = await pool.query(
       `SELECT COUNT(DISTINCT ${BATCH_KEY_EXPR}) AS total
        FROM public.sales s
        ${joinClause}
+       ${stJoinClause}
        ${whereClause};`,
       params
     );
@@ -472,6 +379,7 @@ const fetchBilledHistory = async (
       `SELECT ${BATCH_KEY_EXPR} AS batch_key, MAX(s.sale_time) AS batch_time
        FROM public.sales s
        ${joinClause}
+       ${stJoinClause}
        ${whereClause}
        GROUP BY batch_key
        ORDER BY batch_time DESC
@@ -490,7 +398,7 @@ const fetchBilledHistory = async (
               ${BATCH_KEY_EXPR} AS batch_key,
               p.productname, l.lot_code,
               COALESCE((SELECT SUM(r.quantity) FROM refunds r WHERE r.sale_id = s.id), 0) AS refunded_quantity,
-              st.store_credit_applied
+              st.store_credit_applied, st.payment_method
        FROM public.sales s
        JOIN public.products p ON s.product_id = p.id
        LEFT JOIN public.lots l ON s.lot_id = l.id
@@ -537,6 +445,8 @@ const fetchBilledHistory = async (
         // Same value on every row in a batch (it belongs to the whole transaction, not the
         // line item) — null for legacy sales with no transaction_id, same as receipt_no.
         store_credit_applied: row.store_credit_applied != null ? Number(row.store_credit_applied) : 0,
+        // 'cash' | 'card' | 'bank_transfer' | null (legacy sales with no transaction_id).
+        payment_method: row.payment_method,
       });
     });
 
@@ -757,7 +667,9 @@ const refundSale = async (
   }
 };
 
-const fetchSales = async (startDate, endDate) => {
+const PAYMENT_METHODS = ["cash", "card", "bank_transfer"];
+
+const fetchSales = async (startDate, endDate, paymentMethod = null) => {
   try {
     // Validate date inputs
     if (
@@ -782,7 +694,8 @@ const fetchSales = async (startDate, endDate) => {
     // it actually happens, not retroactively on the original sale's day. quantity/selling_
     // price/buying_price mean the same thing on both branches of the view, so every SUM/AVG
     // below keeps working unchanged; a refund's negative quantity does the subtraction for
-    // free.
+    // free. LEFT JOINs sale_transactions (migrations/015) to optionally filter by payment
+    // medium — legacy sales with no transaction_id simply never match a specific medium.
     const response = await pool.query(
       `SELECT
          p.productname,
@@ -796,10 +709,12 @@ const fetchSales = async (startDate, endDate) => {
        FROM sales_ledger s
        INNER JOIN Products p ON s.product_id = p.id
        INNER JOIN Categories c ON p.category_id = c.id  -- Join with Categories table to get category name
+       LEFT JOIN sale_transactions st ON st.id = s.transaction_id
        WHERE s.event_time BETWEEN $1 AND $2
+         AND ($3::text IS NULL OR st.payment_method = $3)
        GROUP BY p.productname, p.category_id, c.category_name  -- Group by necessary columns including category name
        ORDER BY profit_loss DESC`,
-      [startDate, endDate]
+      [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null]
     );
 
     // Extract sales data rows
@@ -821,7 +736,7 @@ const fetchSales = async (startDate, endDate) => {
   }
 };
 
-const fetchSalesByProfitLoss = async (startDate, endDate, type) => {
+const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = null) => {
   try {
     // Validate date inputs
     if (
@@ -860,11 +775,13 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type) => {
        FROM sales_ledger s
        INNER JOIN Products p ON s.product_id = p.id
        INNER JOIN Categories c ON p.category_id = c.id
+       LEFT JOIN sale_transactions st ON st.id = s.transaction_id
        WHERE s.event_time BETWEEN $1 AND $2
+         AND ($3::text IS NULL OR st.payment_method = $3)
        GROUP BY p.productname, p.category_id, c.category_name  -- Group by product name and category
        HAVING ${profitCondition} -- Apply the profit condition for profit-only items
        ORDER BY overall_profit_loss DESC`,
-      [startDate, endDate]
+      [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null]
     );
 
     // Extract sales data rows
@@ -887,7 +804,7 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type) => {
 };
 
 // Daily revenue/profit/units within a date range — powers the Sales Report trend chart.
-const fetchSalesTimeSeries = async (startDate, endDate) => {
+const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null) => {
   if (!startDate || !endDate || !isValidDate(startDate) || !isValidDate(endDate)) {
     throw new Error("Invalid date inputs. Please provide valid start and end dates.");
   }
@@ -905,21 +822,52 @@ const fetchSalesTimeSeries = async (startDate, endDate) => {
        SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit,
        SUM(s.quantity)::BIGINT AS units
      FROM sales_ledger s
+     LEFT JOIN sale_transactions st ON st.id = s.transaction_id
      WHERE s.event_time BETWEEN $1 AND $2
+       AND ($4::text IS NULL OR st.payment_method = $4)
      GROUP BY day
      ORDER BY day`,
-    [startDate, endDate, businessTimezone]
+    [startDate, endDate, businessTimezone, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null]
   );
 
   return response.rows;
 };
 
+// Cash/card/bank-transfer totals for a date range — powers both the Sales Report's summary
+// cards and the Payment Mediums page's, one function reused rather than duplicated. Revenue
+// (quantity * selling_price), not profit — a payment-medium breakdown is about how money
+// came in, which fetchSales/fetchSalesByProfitLoss's profit-per-product view doesn't answer.
+const fetchPaymentMediumTotals = async (startDate, endDate) => {
+  if (!startDate || !endDate || !isValidDate(startDate) || !isValidDate(endDate)) {
+    throw new Error("Invalid date inputs. Please provide valid start and end dates.");
+  }
+  const response = await pool.query(
+    `SELECT COALESCE(st.payment_method, 'unknown') AS payment_method,
+            SUM(s.quantity * s.selling_price)::BIGINT AS total
+     FROM sales_ledger s
+     LEFT JOIN sale_transactions st ON st.id = s.transaction_id
+     WHERE s.event_time BETWEEN $1 AND $2
+     GROUP BY COALESCE(st.payment_method, 'unknown')`,
+    [startDate, endDate]
+  );
+
+  // 'unknown' covers sales from before sale_transactions existed (migrations/008) — real
+  // historical revenue, not an error, so it's returned rather than silently dropped; the
+  // frontend only needs to show that card when it's actually nonzero.
+  const totals = { cash: 0, card: 0, bank_transfer: 0, unknown: 0 };
+  response.rows.forEach((row) => {
+    const key = row.payment_method in totals ? row.payment_method : "unknown";
+    totals[key] += Number(row.total);
+  });
+  return totals;
+};
+
 module.exports = {
-  updateSalesRecord,
   checkoutSale,
   fetchSales,
   fetchSalesByProfitLoss,
   fetchSalesTimeSeries,
+  fetchPaymentMediumTotals,
   getRecentSales,
   fetchBilledHistory,
   voidSale,

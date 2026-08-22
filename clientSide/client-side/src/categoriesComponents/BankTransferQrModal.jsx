@@ -60,11 +60,11 @@ export default function BankTransferQrModal({ isOpen, onClose, intent }) {
 
         {status === "confirmed" ? (
           <div className="w-full rounded-lg bg-success-50 px-4 py-3 text-sm font-semibold text-success-700 dark:bg-success-500/10 dark:text-success-500">
-            {t("bankPayments.statusConfirmed")}
+            {t("paymentMediums.statusConfirmed")}
           </div>
         ) : status === "cancelled" ? (
           <div className="w-full rounded-lg bg-danger-50 px-4 py-3 text-sm font-semibold text-danger-600 dark:bg-danger-500/10 dark:text-danger-400">
-            {t("bankPayments.statusCancelled")}
+            {t("paymentMediums.statusCancelled")}
           </div>
         ) : (
           <div className="w-full rounded-lg bg-surface-muted px-4 py-3 text-sm text-gray-600 dark:bg-gray-700 dark:text-gray-300">

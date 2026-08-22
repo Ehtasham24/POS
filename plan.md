@@ -1,5 +1,36 @@
 # Bank-Transfer QR Checkout with Gmail Auto-Confirmation
 
+## ⏸ Paused here (2026-08-22)
+
+Feature is functionally complete and live-tested on a real phone (see the SMS+email
+Status entries below) — the owner asked to hold further work on this specific feature
+and move to a different issue (payment-medium reporting, see the new
+`plan-payment-mediums.md` at the repo root). Nothing here is broken or half-done; this is
+a deliberate pause, not a blocker. To resume:
+
+- Current phone state: `PaymentNotificationForwarder` is installed and configured on the
+  test phone (JazzCash `com.techlogix.mobilinkcustomer`, Meezan Bank `invo8.meezan.mb`,
+  Gmail all ticked in "Apps to Monitor"; SMS senders `8079, 8558` — Meezan/RAAST and
+  JazzCash's real confirmed shortcodes). `NOTIFICATION_FORWARDER_SECRET` is set in this
+  machine's `ExpressBackend/Development.env` (gitignored, so a fresh machine needs its own).
+- Last real end-to-end attempt (Rs. 16, 2026-08-21) required a manual "Mark as Paid"
+  because the phone's SMS-sender allowlist had a typo (`"JazzCash-8558"` as one malformed
+  string instead of two comma-separated senders) — fixed on the phone since, not yet
+  re-verified with a fresh real payment.
+- `parsers/generic.js` was hardened the same day against a real false-positive risk found
+  via the test phone's actual SMS inbox: Meezan's RAAST shortcode (8079) sends both
+  incoming ("received") and outgoing ("sent") transaction texts from the same sender: the
+  parser now requires "received"/"credited" and rejects "sent" explicitly.
+- Two Android platform bugs were found and fixed via live device testing (not visible
+  from code review alone): `usesCleartextTraffic` was missing (API 28+ blocks plain-HTTP
+  by default, and the phone talks to the webhook on purpose-plain-HTTP port 4001), and a
+  `<queries>` manifest block was missing (Android 11+ blocks enumerating installed apps by
+  default, which was silently emptying the "Apps to Monitor" picker).
+- **Next step when resumed**: re-verify a real payment now auto-confirms with the fixed
+  sender list, then move on to the "Cannot be fully planned yet" items — most notably,
+  the generic parser is still unverified against Easypaisa/other-bank SMS text, only
+  JazzCash/Meezan.
+
 ## Context
 
 The owner wants customers to be able to pay by scanning a bank-linked QR code at checkout, and wants the POS to automatically detect that the money actually arrived — by watching the owner's Gmail inbox for the bank's payment-confirmation email — instead of a cashier having to manually check a phone and tell the system "yes, this one's paid." Today the app only supports cash and card, both settled synchronously at the register in one step.

@@ -5,9 +5,11 @@ const DateRangeSelector = ({
   startDate,
   endDate,
   filterType,
+  paymentMethod,
   onStartDateChange,
   onEndDateChange,
   onFilterChange,
+  onPaymentMethodChange,
 }) => {
   return (
     <div className="mb-4 flex flex-row md:flex-col flex-wrap items-end md:items-stretch gap-4 bg-white-A700 dark:bg-gray-900 rounded-xl2 p-4 border border-surface-border dark:border-gray-700">
@@ -45,6 +47,21 @@ const DateRangeSelector = ({
           <option value="all">All Products</option>
           <option value="profit">Profitable Products</option>
           <option value="loss">Loss-Making Products</option>
+        </select>
+      </div>
+      <div>
+        <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1 text-sm">
+          Payment Medium:
+        </label>
+        <select
+          value={paymentMethod}
+          onChange={onPaymentMethodChange}
+          className={inputClass}
+        >
+          <option value="">All Payment Mediums</option>
+          <option value="cash">Cash</option>
+          <option value="card">Card</option>
+          <option value="bank_transfer">Bank Transfer</option>
         </select>
       </div>
     </div>

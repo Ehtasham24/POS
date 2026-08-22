@@ -1,8 +1,8 @@
 {
   "files": {
-    "main.css": "/static/css/main.4a6fa324.css",
-    "main.js": "/static/js/main.aef81f97.js",
-    "static/js/578.7edcdfc7.chunk.js": "/static/js/578.7edcdfc7.chunk.js",
+    "main.css": "/static/css/main.3c70e17c.css",
+    "main.js": "/static/js/main.e3f88bb2.js",
+    "static/js/578.38a3c22f.chunk.js": "/static/js/578.38a3c22f.chunk.js",
     "static/js/949.c04c3347.chunk.js": "/static/js/949.c04c3347.chunk.js",
     "static/media/NotoNastaliqUrdu.woff2": "/static/media/NotoNastaliqUrdu.efb470b46e20fc314568.woff2",
     "static/media/PlayfairDisplayBold.ttf": "/static/media/PlayfairDisplayBold.c3c9165182044bf7f179.ttf",
@@ -12,13 +12,13 @@
     "static/media/PoppinsBold.ttf": "/static/media/PoppinsBold.cdb29a5d7ccf57ff05a3.ttf",
     "service-worker.js": "/service-worker.js",
     "index.html": "/index.html",
-    "main.4a6fa324.css.map": "/static/css/main.4a6fa324.css.map",
-    "main.aef81f97.js.map": "/static/js/main.aef81f97.js.map",
-    "578.7edcdfc7.chunk.js.map": "/static/js/578.7edcdfc7.chunk.js.map",
+    "main.3c70e17c.css.map": "/static/css/main.3c70e17c.css.map",
+    "main.e3f88bb2.js.map": "/static/js/main.e3f88bb2.js.map",
+    "578.38a3c22f.chunk.js.map": "/static/js/578.38a3c22f.chunk.js.map",
     "949.c04c3347.chunk.js.map": "/static/js/949.c04c3347.chunk.js.map"
   },
   "entrypoints": [
-    "static/css/main.4a6fa324.css",
-    "static/js/main.aef81f97.js"
+    "static/css/main.3c70e17c.css",
+    "static/js/main.e3f88bb2.js"
   ]
 }

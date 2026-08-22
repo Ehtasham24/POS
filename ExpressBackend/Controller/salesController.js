@@ -1,36 +1,20 @@
 const {
   getRecentSales,
-  updateSalesRecord,
   checkoutSale,
   fetchSales,
   fetchSalesByProfitLoss,
   fetchSalesTimeSeries,
+  fetchPaymentMediumTotals,
   fetchBilledHistory,
   voidSale,
   refundSale,
 } = require("../Sevices/salesService");
 const asyncHandler = require("../utils/asyncHandler");
 
-const PostSales = asyncHandler(async (req, res) => {
-  const { sellingPrice, quantity, productID, lotId } = req.body;
-  const { messageSend, updatedQuantity, saleId } = await updateSalesRecord(
-    sellingPrice,
-    quantity,
-    productID,
-    lotId,
-    req.user.id
-  );
-
-  res.status(200).json({
-    status: 200,
-    message: "Sales data received successfully",
-    data: { messageSend, updatedQuantity, saleId },
-  });
-});
-
-// Whole-cart checkout — see Sevices/salesService.js's checkoutSale for why this exists
-// alongside the older per-item PostSales above (receipt numbers need one atomic transaction
-// per checkout, not N independent inserts with no shared record of belonging together).
+// Whole-cart checkout — see Sevices/salesService.js's checkoutSale (receipt numbers need
+// one atomic transaction per checkout, not N independent inserts with no shared record of
+// belonging together — the old per-item PostSales/updateSalesRecord path this replaced is
+// gone; it never set sale_transactions/payment_method at all).
 const CheckoutSales = asyncHandler(async (req, res) => {
   const { items, paymentMethod, voucherCode, storeCreditRedeemed } = req.body;
   const result = await checkoutSale(items, paymentMethod, req.user, { voucherCode, storeCreditRedeemed });
@@ -51,7 +35,7 @@ const getRecentSale = asyncHandler(async (req, res) => {
 });
 
 const getBilledHistory = asyncHandler(async (req, res) => {
-  const { startDate, endDate, categoryId, page, pageSize, voidStatus, receiptNo } = req.query;
+  const { startDate, endDate, categoryId, page, pageSize, voidStatus, receiptNo, paymentMethod } = req.query;
   // A Cashier only ever sees their own sales from today — same route as Owner's full
   // history, just pre-filtered server-side (see salesService.js's fetchBilledHistory).
   const viewerFilter = req.user.role === "cashier" ? { soldBy: req.user.id } : null;
@@ -63,7 +47,8 @@ const getBilledHistory = asyncHandler(async (req, res) => {
     pageSize ? parseInt(pageSize, 10) : 30,
     viewerFilter,
     voidStatus,
-    receiptNo
+    receiptNo,
+    paymentMethod
   );
   res.status(200).send(result);
 });
@@ -88,13 +73,13 @@ const refundSaleController = asyncHandler(async (req, res) => {
 });
 
 const getSales = asyncHandler(async (req, res) => {
-  const { startDate, endDate } = req.body;
-  const response = await fetchSales(startDate, endDate);
+  const { startDate, endDate, paymentMethod } = req.body;
+  const response = await fetchSales(startDate, endDate, paymentMethod);
   res.status(200).send(response);
 });
 
 const getSalesByProfitLoss = asyncHandler(async (req, res) => {
-  const { startDate, endDate, type } = req.body;
+  const { startDate, endDate, type, paymentMethod } = req.body;
 
   if (!type || (type !== "profit" && type !== "loss")) {
     return res
@@ -102,22 +87,28 @@ const getSalesByProfitLoss = asyncHandler(async (req, res) => {
       .send({ error: 'Invalid type. Use "profit" or "loss".' });
   }
 
-  const response = await fetchSalesByProfitLoss(startDate, endDate, type);
+  const response = await fetchSalesByProfitLoss(startDate, endDate, type, paymentMethod);
   res.status(200).send(response);
 });
 
 const getSalesTimeSeries = asyncHandler(async (req, res) => {
+  const { startDate, endDate, paymentMethod } = req.body;
+  const response = await fetchSalesTimeSeries(startDate, endDate, paymentMethod);
+  res.status(200).send(response);
+});
+
+const getPaymentMediumTotals = asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.body;
-  const response = await fetchSalesTimeSeries(startDate, endDate);
+  const response = await fetchPaymentMediumTotals(startDate, endDate);
   res.status(200).send(response);
 });
 
 module.exports = {
-  PostSales,
   CheckoutSales,
   getSales,
   getSalesByProfitLoss,
   getSalesTimeSeries,
+  getPaymentMediumTotals,
   getRecentSale,
   getBilledHistory,
   voidSaleController,

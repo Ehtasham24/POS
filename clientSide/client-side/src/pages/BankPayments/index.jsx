@@ -1,7 +1,8 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { HiOutlineQrCode, HiOutlineExclamationTriangle } from "react-icons/hi2";
 import AppShell from "components/AppShell";
-import { SkeletonRows, EmptyState } from "components";
+import { SkeletonRows, EmptyState, PaymentMediumSummary } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { useTimezone } from "timezone/TimezoneContext";
@@ -15,13 +16,28 @@ const STATUS_BADGE_CLASS = {
   ambiguous: "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-400",
 };
 
+// Fixed "all time" range for this page's PaymentMediumSummary — unlike the Sales Report
+// (which has its own date picker), this is a snapshot page, so there's no selected range
+// to reuse; a date far enough in the past covers every real sale this app could have.
+const ALL_TIME_START = "2000-01-01T00:00";
+const allTimeEnd = () => {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
 // A pending bank-transfer sale has no sales/sale_transactions rows yet (see
 // ExpressBackend/Sevices/bankPaymentService.js's createIntent), so it structurally can't
 // show up in Sales History (built entirely on those tables) — this page is where it lives
 // until it's confirmed or cancelled. Any logged-in staff, not Owner-only — same trust level
 // as refunds and as this page's own routes (Routes/API/bankPaymentRoutes.js).
+//
+// Broadened from a bank-transfer-only page to a Payment Mediums overview: the summary cards
+// above cover all 3 mediums (cash/card/bank transfer) and link into Sales History, already
+// the real per-sale ledger — this page doesn't duplicate that table, it's a lens onto it.
 export default function BankPaymentsPage() {
   const toast = useToast();
+  const navigate = useNavigate();
   const { t } = useLanguage();
   const { formatDateTime } = useTimezone();
   const [intents, setIntents] = useState([]);
@@ -66,20 +82,20 @@ export default function BankPaymentsPage() {
 
   const statusLabel = (status) =>
     ({
-      awaiting_payment: t("bankPayments.statusAwaiting"),
-      confirmed: t("bankPayments.statusConfirmed"),
-      cancelled: t("bankPayments.statusCancelled"),
-      ambiguous: t("bankPayments.statusAmbiguous"),
+      awaiting_payment: t("paymentMediums.statusAwaiting"),
+      confirmed: t("paymentMediums.statusConfirmed"),
+      cancelled: t("paymentMediums.statusCancelled"),
+      ambiguous: t("paymentMediums.statusAmbiguous"),
     }[status] || status);
 
   const handleConfirm = async (id) => {
     setActioningId(id);
     try {
       await apiPatch(`/api/bank-payments/intents/${id}/confirm`);
-      toast.success(t("bankPayments.paidToast"));
+      toast.success(t("paymentMediums.paidToast"));
       await fetchIntents();
     } catch (error) {
-      toast.error(error.message || t("bankPayments.confirmError"));
+      toast.error(error.message || t("paymentMediums.confirmError"));
       await fetchIntents(); // last_confirm_error is now set server-side — refresh to show it
     } finally {
       setActioningId(null);
@@ -87,12 +103,12 @@ export default function BankPaymentsPage() {
   };
 
   const handleCancel = async (id) => {
-    const reason = window.prompt(t("bankPayments.cancelReasonPrompt"), "");
+    const reason = window.prompt(t("paymentMediums.cancelReasonPrompt"), "");
     if (reason === null) return; // cashier backed out of the prompt itself
     setActioningId(id);
     try {
       await apiPatch(`/api/bank-payments/intents/${id}/cancel`, { reason: reason || undefined });
-      toast.success(t("bankPayments.cancelledToast"));
+      toast.success(t("paymentMediums.cancelledToast"));
       await fetchIntents();
     } catch (error) {
       toast.error(error.message);
@@ -116,14 +132,24 @@ export default function BankPaymentsPage() {
   const pendingCount = intents.filter((i) => i.status === "awaiting_payment" || i.status === "ambiguous").length;
 
   return (
-    <AppShell title={t("bankPayments.title")}>
+    <AppShell title={t("paymentMediums.title")}>
       <div className="max-w-5xl">
+        <PaymentMediumSummary
+          startDate={ALL_TIME_START}
+          endDate={allTimeEnd()}
+          onMediumClick={(medium) => navigate(`/sales-history?paymentMethod=${medium}`)}
+        />
+
+        <p className="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400">
+          {t("paymentMediums.pendingSectionTitle")}
+        </p>
+
         <div className="mb-6 flex items-center gap-4 rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
           <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
             <HiOutlineQrCode className="text-xl text-primary-600 dark:text-primary-400" />
           </div>
           <div>
-            <p className="text-sm text-gray-500 dark:text-gray-400">{t("bankPayments.statusAwaiting")}</p>
+            <p className="text-sm text-gray-500 dark:text-gray-400">{t("paymentMediums.statusAwaiting")}</p>
             <p className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">{pendingCount}</p>
           </div>
         </div>
@@ -135,9 +161,9 @@ export default function BankPaymentsPage() {
           <div className="mb-6 flex items-start gap-3 rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
             <HiOutlineExclamationTriangle className="mt-0.5 shrink-0 text-lg" />
             <div>
-              <p className="font-semibold">{t("bankPayments.forwarderStale")}</p>
+              <p className="font-semibold">{t("paymentMediums.forwarderStale")}</p>
               <p className="mt-0.5 text-xs opacity-90">
-                {t("bankPayments.forwarderLastSeen")}:{" "}
+                {t("paymentMediums.forwarderLastSeen")}:{" "}
                 {formatDateTime(forwarderStatus.lastHeartbeatAt, { dateStyle: "medium", timeStyle: "short" })}
               </p>
             </div>
@@ -150,16 +176,16 @@ export default function BankPaymentsPage() {
               <thead className="bg-surface-subtle dark:bg-gray-800">
                 <tr>
                   <th className="w-36 text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    {t("bankPayments.reference")}
+                    {t("paymentMediums.reference")}
                   </th>
                   <th className="w-32 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    {t("bankPayments.amount")}
+                    {t("paymentMediums.amount")}
                   </th>
                   <th className="w-44 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    {t("bankPayments.created")}
+                    {t("paymentMediums.created")}
                   </th>
                   <th className="w-36 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
-                    {t("bankPayments.status")}
+                    {t("paymentMediums.status")}
                   </th>
                   <th className="px-2 py-3"></th>
                 </tr>
@@ -177,7 +203,7 @@ export default function BankPaymentsPage() {
                   {intents.length === 0 ? (
                     <tr>
                       <td colSpan={5} className="py-2">
-                        <EmptyState icon={HiOutlineQrCode} title={t("bankPayments.empty")} />
+                        <EmptyState icon={HiOutlineQrCode} title={t("paymentMediums.empty")} />
                       </td>
                     </tr>
                   ) : (
@@ -224,7 +250,7 @@ export default function BankPaymentsPage() {
                                     disabled={actioningId === intent.id}
                                     className="rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
                                   >
-                                    {t("bankPayments.markAsPaid")}
+                                    {t("paymentMediums.markAsPaid")}
                                   </button>
                                   <button
                                     type="button"
@@ -232,7 +258,7 @@ export default function BankPaymentsPage() {
                                     disabled={actioningId === intent.id}
                                     className="rounded-lg border border-surface-border px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
                                   >
-                                    {t("bankPayments.cancelPayment")}
+                                    {t("paymentMediums.cancelPayment")}
                                   </button>
                                   {intent.status === "ambiguous" && (
                                     <button
@@ -241,7 +267,7 @@ export default function BankPaymentsPage() {
                                       disabled={actioningId === intent.id}
                                       className="rounded-lg border border-surface-border px-3 py-1.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-surface-subtle disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
                                     >
-                                      {t("bankPayments.keepWaiting")}
+                                      {t("paymentMediums.keepWaiting")}
                                     </button>
                                   )}
                                 </div>
@@ -254,7 +280,7 @@ export default function BankPaymentsPage() {
                                 <div className="flex items-start gap-2 rounded-lg bg-danger-50 px-3 py-2 text-xs text-danger-600 dark:bg-danger-500/10 dark:text-danger-400">
                                   <HiOutlineExclamationTriangle className="mt-0.5 shrink-0" />
                                   <span>
-                                    {t("bankPayments.ambiguousExplanation")}:{" "}
+                                    {t("paymentMediums.ambiguousExplanation")}:{" "}
                                     {intent.match_candidates.alsoMatchedIntentIds
                                       .map((otherId) => `BTX-${String(otherId).padStart(6, "0")}`)
                                       .join(", ")}
@@ -269,7 +295,7 @@ export default function BankPaymentsPage() {
                                 <div className="flex items-start gap-2 rounded-lg bg-danger-50 px-3 py-2 text-xs text-danger-600 dark:bg-danger-500/10 dark:text-danger-400">
                                   <HiOutlineExclamationTriangle className="mt-0.5 shrink-0" />
                                   <span>
-                                    {t("bankPayments.lastError")}: {intent.last_confirm_error}
+                                    {t("paymentMediums.lastError")}: {intent.last_confirm_error}
                                   </span>
                                 </div>
                               </td>

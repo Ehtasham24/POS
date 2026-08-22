@@ -5,6 +5,7 @@ import GroupedSalesData from "./GroupedSalesData";
 import SalesCharts from "./SalesCharts";
 import ReportPrintHeader from "./ReportPrintHeader";
 import AppShell from "components/AppShell";
+import { PaymentMediumSummary } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiPost } from "utils/api";
@@ -36,6 +37,7 @@ const SalesDataComponent = () => {
   const [timeSeriesData, setTimeSeriesData] = useState([]);
   const [totalProfitLoss, setTotalProfitLoss] = useState(0);
   const [filterType, setFilterType] = useState("all");
+  const [paymentMethod, setPaymentMethod] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [startDate, setStartDate] = useState(startOfToday);
@@ -44,7 +46,11 @@ const SalesDataComponent = () => {
 
   const fetchTimeSeries = async () => {
     try {
-      const data = await apiPost("/api/Sales/timeseries", { startDate, endDate });
+      const data = await apiPost("/api/Sales/timeseries", {
+        startDate,
+        endDate,
+        paymentMethod: paymentMethod || undefined,
+      });
       setTimeSeriesData(data);
     } catch (err) {
       console.error("Error fetching sales trend:", err);
@@ -56,7 +62,7 @@ const SalesDataComponent = () => {
     setLoading(true);
     setError(null);
     let url = "/api/Sales";
-    let payload = { startDate, endDate };
+    let payload = { startDate, endDate, paymentMethod: paymentMethod || undefined };
 
     if (type !== "all") {
       url = "/api/Sales/filter";
@@ -78,7 +84,7 @@ const SalesDataComponent = () => {
   useEffect(() => {
     fetchSalesData(filterType);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterType, startDate, endDate]);
+  }, [filterType, startDate, endDate, paymentMethod]);
 
   // A printed page is always on white paper — force light mode for the print output even
   // if the app is currently in dark mode, otherwise dark: text/background colors would
@@ -130,9 +136,11 @@ const SalesDataComponent = () => {
           startDate={startDate}
           endDate={endDate}
           filterType={filterType}
+          paymentMethod={paymentMethod}
           onStartDateChange={(e) => setStartDate(e.target.value)}
           onEndDateChange={(e) => setEndDate(e.target.value)}
           onFilterChange={(e) => setFilterType(e.target.value)}
+          onPaymentMethodChange={(e) => setPaymentMethod(e.target.value)}
         />
 
         <PrintButton handlePrint={handlePrint} />
@@ -158,6 +166,11 @@ const SalesDataComponent = () => {
                 {totalProfitLoss}
               </span>
             </div>
+
+            <p className="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400">
+              {t("report.paymentMediumBreakdown")}
+            </p>
+            <PaymentMediumSummary startDate={startDate} endDate={endDate} />
 
             <SalesCharts ref={chartsRef} salesData={salesData} timeSeriesData={timeSeriesData} />
 

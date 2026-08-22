@@ -5,4 +5,16 @@ import EmptyState from "./EmptyState";
 import { Skeleton, SkeletonCards, SkeletonRows } from "./Skeleton";
 import Pagination from "./Pagination";
 import InfoTooltip from "./InfoTooltip";
-export { Text, Heading, Modal, EmptyState, Skeleton, SkeletonCards, SkeletonRows, Pagination, InfoTooltip };
+import PaymentMediumSummary from "./PaymentMediumSummary";
+export {
+  Text,
+  Heading,
+  Modal,
+  EmptyState,
+  Skeleton,
+  SkeletonCards,
+  SkeletonRows,
+  Pagination,
+  InfoTooltip,
+  PaymentMediumSummary,
+};

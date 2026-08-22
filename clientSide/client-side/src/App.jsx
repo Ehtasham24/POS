@@ -130,9 +130,11 @@ function App() {
                   }
                 />
                 {/* No roles restriction — confirming/cancelling a bank-transfer payment is
-                    any-staff, same trust level as refunds (see Routes/API/bankPaymentRoutes.js). */}
+                    any-staff, same trust level as refunds (see Routes/API/bankPaymentRoutes.js).
+                    Route renamed from /bank-payments to reflect the page now covering all 3
+                    payment mediums, not just the bank-transfer queue it still manages. */}
                 <Route
-                  path="/bank-payments"
+                  path="/payment-mediums"
                   element={
                     <ProtectedRoute>
                       <BankPayments />

@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Text, EmptyState, Pagination, Modal } from "components";
 import {
   HiOutlineClipboardDocumentList,
@@ -40,6 +41,14 @@ const batchStatus = (batch) => {
 const inputClass =
   "p-2.5 border border-surface-border dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100 rounded-lg shadow-sm focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500";
 
+// Reuses the exact labels CartPanel.jsx already shows at checkout (payment.cash/card/
+// bankTransfer) — same medium, same name, wherever it's shown in the app.
+const PAYMENT_MEDIUM_BADGE_CLASS = {
+  cash: "bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-500",
+  card: "bg-sky-50 text-sky-700 dark:bg-sky-500/10 dark:text-sky-400",
+  bank_transfer: "bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400",
+};
+
 // Local (not UTC) "YYYY-MM-DDTHH:mm" — the format <input type="datetime-local"> expects.
 const formatLocal = (date) => {
   const pad = (n) => String(n).padStart(2, "0");
@@ -67,11 +76,15 @@ export default function SalesHistoryPage() {
   const toast = useToast();
   const { t } = useLanguage();
   const { formatDateTime } = useTimezone();
+  const [searchParams] = useSearchParams();
   const [batches, setBatches] = useState([]);
   const [expandedIndex, setExpandedIndex] = useState(null);
   const [categories, setCategories] = useState([]);
   const [categoryId, setCategoryId] = useState("");
   const [voidStatus, setVoidStatus] = useState("all");
+  // Read once on mount — lets the Payment Mediums page link here pre-filtered
+  // (/sales-history?paymentMethod=cash), same as any other filter here otherwise.
+  const [paymentMethod, setPaymentMethod] = useState(() => searchParams.get("paymentMethod") || "");
   const [startDate, setStartDate] = useState(defaultStartDate);
   const [endDate, setEndDate] = useState(defaultEndDate);
   const [page, setPage] = useState(1);
@@ -125,6 +138,9 @@ export default function SalesHistoryPage() {
       if (receiptNoQuery.trim()) {
         params.set("receiptNo", receiptNoQuery.trim());
       }
+      if (paymentMethod) {
+        params.set("paymentMethod", paymentMethod);
+      }
 
       const data = await apiGet(`/api/BilledHistory?${params.toString()}`);
       // Backend already returns most-recent-first, one page (30 transactions) at a time
@@ -145,7 +161,7 @@ export default function SalesHistoryPage() {
   useEffect(() => {
     fetchHistory(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [startDate, endDate, categoryId, voidStatus]);
+  }, [startDate, endDate, categoryId, voidStatus, paymentMethod]);
 
   const goToPage = (p) => {
     if (p < 1 || p > totalPages || p === page) return;
@@ -276,6 +292,21 @@ export default function SalesHistoryPage() {
           </div>
           <div>
             <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1 text-sm">
+              {t("salesHistory.paymentMedium")}
+            </label>
+            <select
+              value={paymentMethod}
+              onChange={(e) => setPaymentMethod(e.target.value)}
+              className={inputClass}
+            >
+              <option value="">{t("salesHistory.allPaymentMediums")}</option>
+              <option value="cash">{t("payment.cash")}</option>
+              <option value="card">{t("payment.card")}</option>
+              <option value="bank_transfer">{t("payment.bankTransfer")}</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1 text-sm">
               {t("salesHistory.receiptNo")}
             </label>
             <input
@@ -293,7 +324,7 @@ export default function SalesHistoryPage() {
           >
             {t("salesHistory.search")}
           </button>
-          {(startDate || endDate || categoryId || voidStatus !== "all" || receiptNoQuery) && (
+          {(startDate || endDate || categoryId || voidStatus !== "all" || receiptNoQuery || paymentMethod) && (
             <button
               onClick={() => {
                 setStartDate("");
@@ -301,6 +332,7 @@ export default function SalesHistoryPage() {
                 setCategoryId("");
                 setVoidStatus("all");
                 setReceiptNoQuery("");
+                setPaymentMethod("");
                 // The auto-refetch effect isn't keyed on receiptNoQuery (see runReceiptSearch's
                 // comment), but startDate/endDate always have non-empty defaults, so clearing
                 // them here always changes them too — that alone re-triggers the effect, which
@@ -336,6 +368,9 @@ export default function SalesHistoryPage() {
                     {t("salesHistory.status")}
                   </th>
                   <th className="w-32 text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {t("salesHistory.paymentMedium")}
+                  </th>
+                  <th className="w-32 text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("salesHistory.total")}
                   </th>
                   <th className="w-28"></th>
@@ -344,7 +379,7 @@ export default function SalesHistoryPage() {
               <tbody className="divide-y divide-surface-border dark:divide-gray-800">
                 {batches.length === 0 ? (
                   <tr>
-                    <td colSpan={6} className="py-4">
+                    <td colSpan={7} className="py-4">
                       <EmptyState
                         icon={HiOutlineClipboardDocumentList}
                         title={loading ? t("salesHistory.loading") : t("salesHistory.empty")}
@@ -396,6 +431,18 @@ export default function SalesHistoryPage() {
                               </span>
                             )}
                           </td>
+                          <td className="px-3 py-3">
+                            {/* null for legacy sales with no transaction_id — nothing to badge */}
+                            {batch[0].payment_method && (
+                              <span
+                                className={`inline-flex max-w-full truncate rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  PAYMENT_MEDIUM_BADGE_CLASS[batch[0].payment_method] || ""
+                                }`}
+                              >
+                                {t(`payment.${batch[0].payment_method === "bank_transfer" ? "bankTransfer" : batch[0].payment_method}`)}
+                              </span>
+                            )}
+                          </td>
                           <td className="px-3 py-3 whitespace-nowrap font-medium text-gray-800 dark:text-gray-100">
                             Rs.{batchTotal(batch).toFixed(2)}
                           </td>
@@ -417,7 +464,7 @@ export default function SalesHistoryPage() {
                         {isExpanded && (
                           <tr className="bg-surface-subtle dark:bg-gray-800/40">
                             <td></td>
-                            <td colSpan={5} className="px-3 pb-4 pt-1">
+                            <td colSpan={6} className="px-3 pb-4 pt-1">
                               <div className="overflow-x-auto rounded-xl border border-surface-border dark:border-gray-700 bg-white-A700 dark:bg-gray-900">
                                 {/* Explicit px width on every column, same fix as the outer table
                                     (see its comment above) — table-layout:fixed is a GLOBAL rule

@@ -35,8 +35,8 @@ export default function PendingBankPaymentsBell() {
     return (
       <button
         type="button"
-        onClick={() => navigate("/bank-payments")}
-        aria-label={t("bankPayments.title")}
+        onClick={() => navigate("/payment-mediums")}
+        aria-label={t("paymentMediums.title")}
         className="flex h-10 w-10 items-center justify-center rounded-xl text-gray-600 hover:bg-surface-muted dark:text-gray-300 dark:hover:bg-gray-800"
       >
         <HiOutlineQrCode className="text-xl" />
@@ -47,8 +47,8 @@ export default function PendingBankPaymentsBell() {
   return (
     <button
       type="button"
-      onClick={() => navigate("/bank-payments")}
-      aria-label={t("bankPayments.title")}
+      onClick={() => navigate("/payment-mediums")}
+      aria-label={t("paymentMediums.title")}
       className="relative flex h-10 w-10 items-center justify-center rounded-xl text-gray-600 hover:bg-surface-muted dark:text-gray-300 dark:hover:bg-gray-800"
     >
       <HiOutlineQrCode className="text-xl" />

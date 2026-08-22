@@ -53,10 +53,12 @@ export const navItems = [
   },
   // No `roles` restriction — any staff can confirm/cancel a bank-transfer payment (same
   // trust level as refunds), so they can see this list too. See Routes/API/bankPaymentRoutes.js.
+  // Broadened from "Bank Payments" to cover all 3 mediums (cash/card/bank transfer), not
+  // just the bank-transfer queue this page still manages — see pages/BankPayments/index.jsx.
   {
-    to: "/bank-payments",
-    label: "Bank Payments",
-    labelKey: "nav.bankPayments",
+    to: "/payment-mediums",
+    label: "Payment Mediums",
+    labelKey: "nav.paymentMediums",
     icon: HiOutlineQrCode,
   },
   {
