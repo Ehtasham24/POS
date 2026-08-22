@@ -704,7 +704,12 @@ const fetchSales = async (startDate, endDate, paymentMethod = null) => {
          CAST(AVG(s.buying_price) AS INT) AS buyingprice,  -- avg cost actually paid across the sold units
          SUM(s.quantity) AS total_quantity_sold,
          CAST(AVG(s.selling_price) AS INT) AS avg_selling_price,  -- Cast average selling price to INT
-         CAST(AVG(s.selling_price - s.buying_price) AS INT) AS profit_loss,  -- Profit per piece as INT
+         -- Quantity-weighted (total profit / total units), not a plain AVG across rows —
+         -- a plain average gives every sale EVENT equal weight regardless of quantity, so
+         -- a couple of low-quantity, deeply-discounted/clearance sales could pull this
+         -- negative even while the bulk of real volume sold at a healthy margin, making it
+         -- contradict the (correctly weighted) overall_profit_loss's sign right next to it.
+         CAST(SUM(s.quantity * (s.selling_price - s.buying_price)) / NULLIF(SUM(s.quantity), 0) AS INT) AS profit_loss,
          SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
        FROM sales_ledger s
        INNER JOIN Products p ON s.product_id = p.id
@@ -770,7 +775,12 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = 
          CAST(AVG(s.buying_price) AS INT) AS buyingprice,  -- avg cost actually paid across the sold units
          SUM(s.quantity) AS total_quantity_sold,
          CAST(AVG(s.selling_price) AS INT) AS avg_selling_price,  -- Cast average selling price to INT
-         CAST(AVG(s.selling_price - s.buying_price) AS INT) AS profit_loss,  -- Profit per piece as INT
+         -- Quantity-weighted (total profit / total units), not a plain AVG across rows —
+         -- a plain average gives every sale EVENT equal weight regardless of quantity, so
+         -- a couple of low-quantity, deeply-discounted/clearance sales could pull this
+         -- negative even while the bulk of real volume sold at a healthy margin, making it
+         -- contradict the (correctly weighted) overall_profit_loss's sign right next to it.
+         CAST(SUM(s.quantity * (s.selling_price - s.buying_price)) / NULLIF(SUM(s.quantity), 0) AS INT) AS profit_loss,
          SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
        FROM sales_ledger s
        INNER JOIN Products p ON s.product_id = p.id
