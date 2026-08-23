@@ -10,6 +10,7 @@ import {
   HiOutlineMagnifyingGlass,
   HiOutlineCube,
   HiOutlineQrCode,
+  HiOutlineClock,
 } from "react-icons/hi2";
 import { addCart } from "cartRedux/cartSlice";
 import useDebounce from "hooks/useDebounce";
@@ -22,6 +23,7 @@ import AddProductModal from "categoriesComponents/addProductModel";
 import AddCategoryModal from "categoriesComponents/addCategoryModal";
 import UpdateProductModal from "categoriesComponents/updateProductModal";
 import CartDock from "categoriesComponents/CartDock";
+import OpenShiftModal from "categoriesComponents/OpenShiftModal";
 import { useToast } from "components/Toast/ToastContext";
 import { apiGet } from "utils/api";
 import * as offlineCache from "offline/cache";
@@ -42,6 +44,20 @@ export default function CategorieswithSidebarPage() {
   const [isAddProductOpen, setIsAddProductOpen] = useState(false);
   const [isAddCategoryOpen, setIsAddCategoryOpen] = useState(false);
   const [isUpdateProductOpen, setIsUpdateProductOpen] = useState(false);
+
+  // Selling requires an open shift (Sevices/salesService.js's checkoutSale/bankPaymentService's
+  // createIntent both reject with 409 otherwise) — surfaced here proactively, before a cashier
+  // builds a whole cart just to hit that wall at checkout. null = still loading; false = no
+  // shift open; an object = the open shift.
+  const [currentShift, setCurrentShift] = useState(null);
+  const [isOpenShiftModalOpen, setIsOpenShiftModalOpen] = useState(false);
+  const fetchCurrentShift = () => {
+    apiGet("/api/shifts/current")
+      .then((shift) => setCurrentShift(shift || false))
+      .catch(() => setCurrentShift(false));
+    // A failed check (offline/error) just shows the banner rather than blocking page load —
+    // this is advisory only, the real gate is server-side in checkoutSale/createIntent.
+  };
 
   // --- Sell search (name or lot code) ---
   const [query, setQuery] = useState("");
@@ -71,6 +87,7 @@ export default function CategorieswithSidebarPage() {
 
   useEffect(() => {
     fetchData();
+    fetchCurrentShift();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -211,6 +228,14 @@ export default function CategorieswithSidebarPage() {
         onCategoryAdded={fetchData}
       />
       <UpdateProductModal isOpen={isUpdateProductOpen} onClose={() => setIsUpdateProductOpen(false)} />
+      <OpenShiftModal
+        isOpen={isOpenShiftModalOpen}
+        onClose={() => setIsOpenShiftModalOpen(false)}
+        onOpened={() => {
+          setIsOpenShiftModalOpen(false);
+          fetchCurrentShift();
+        }}
+      />
 
       {/* Lot picker (batch-tracked products) */}
       <Modal
@@ -374,6 +399,23 @@ export default function CategorieswithSidebarPage() {
         }
       >
         <div className="cartDock:pr-96 pb-16 cartDock:pb-0">
+          {currentShift === false && (
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
+              <div className="flex items-center gap-3">
+                <HiOutlineClock className="text-xl text-amber-600 dark:text-amber-400" />
+                <p className="text-sm font-semibold text-amber-800 dark:text-amber-400">
+                  {t("shifts.noOpenShiftBanner")}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsOpenShiftModalOpen(true)}
+                className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-semibold text-white-A700 transition-colors hover:bg-amber-700"
+              >
+                {t("shifts.openShift")}
+              </button>
+            </div>
+          )}
           {/* Main column: sell search + category grid */}
           <div className="min-w-0">
             <div className="relative mb-6">

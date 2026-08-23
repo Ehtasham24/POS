@@ -428,6 +428,13 @@ const translations = {
       statusClosed: "Closed",
       viewDetail: "View",
       alreadyHaveOpenShift: "You already have an open shift — close it before opening another.",
+      noOpenShiftBanner: "No shift open — open one to start selling.",
+      statusNeedsReview: "Needs Review",
+      reconcile: "Reconcile",
+      reconcileSubmit: "Save Count",
+      reconcileSuccess: "Shift reconciled",
+      autoClosedExplanation:
+        "This shift was closed automatically after 15 minutes of inactivity — nobody counted the drawer yet. Count it now and enter the real total.",
     },
     report: {
       title: "Sales Report",
@@ -881,6 +888,13 @@ const translations = {
       statusClosed: "بند",
       viewDetail: "دیکھیں",
       alreadyHaveOpenShift: "آپ کی پہلے سے ایک شفٹ کھلی ہے — نئی کھولنے سے پہلے اسے بند کریں۔",
+      noOpenShiftBanner: "کوئی شفٹ کھلی نہیں — بیچنے کے لیے پہلے شفٹ کھولیں۔",
+      statusNeedsReview: "جائزے کی ضرورت",
+      reconcile: "ریکنسائل کریں",
+      reconcileSubmit: "گنتی محفوظ کریں",
+      reconcileSuccess: "شفٹ ریکنسائل ہو گئی",
+      autoClosedExplanation:
+        "یہ شفٹ 15 منٹ کی غیر فعالیت کے بعد خودکار طور پر بند ہوئی — ابھی تک کسی نے دراز نہیں گنا۔ اب گنیں اور اصل رقم درج کریں۔",
     },
     report: {
       title: "سیلز رپورٹ",

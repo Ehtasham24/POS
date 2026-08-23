@@ -10,6 +10,7 @@ import { apiGet } from "utils/api";
 import OpenShiftModal from "categoriesComponents/OpenShiftModal";
 import CloseShiftModal from "categoriesComponents/CloseShiftModal";
 import CashMovementModal from "categoriesComponents/CashMovementModal";
+import ReconcileShiftModal from "categoriesComponents/ReconcileShiftModal";
 
 // Variance color-coding mirrors Inventory's own status-badge pattern (pages/Inventory/
 // index.jsx's statusStyles) — green/amber/red for match/short/over, at a glance.
@@ -36,6 +37,7 @@ export default function ShiftsPage() {
   const [openModalOpen, setOpenModalOpen] = useState(false);
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [movementModalOpen, setMovementModalOpen] = useState(false);
+  const [reconcileItem, setReconcileItem] = useState(null);
 
   const fetchAll = async () => {
     try {
@@ -139,15 +141,16 @@ export default function ShiftsPage() {
                   <th className="w-24 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("shifts.variance")}
                   </th>
-                  <th className="w-24 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <th className="w-28 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("shifts.status")}
                   </th>
+                  <th className="w-28 px-2 py-3"></th>
                 </tr>
               </thead>
               {loading ? (
                 <tbody>
                   <tr>
-                    <td colSpan={isOwner ? 7 : 6}>
+                    <td colSpan={isOwner ? 8 : 7}>
                       <SkeletonRows count={3} />
                     </td>
                   </tr>
@@ -156,46 +159,67 @@ export default function ShiftsPage() {
                 <tbody className="divide-y divide-surface-border dark:divide-gray-800">
                   {history.length === 0 ? (
                     <tr>
-                      <td colSpan={isOwner ? 7 : 6} className="py-2">
+                      <td colSpan={isOwner ? 8 : 7} className="py-2">
                         <EmptyState icon={HiOutlineClock} title={t("shifts.noHistory")} />
                       </td>
                     </tr>
                   ) : (
-                    history.map((shift) => (
-                      <tr key={shift.id} className="transition-colors hover:bg-surface-subtle dark:hover:bg-gray-800/60">
-                        {isOwner && (
-                          <td className="truncate px-3 py-3 text-gray-800 dark:text-gray-100">
-                            {shift.opened_by_name || "—"}
+                    history.map((shift) => {
+                      const needsReview = shift.auto_closed && shift.counted_cash == null;
+                      const canReconcile = needsReview && (isOwner || shift.opened_by === user?.id);
+                      return (
+                        <tr key={shift.id} className="transition-colors hover:bg-surface-subtle dark:hover:bg-gray-800/60">
+                          {isOwner && (
+                            <td className="truncate px-3 py-3 text-gray-800 dark:text-gray-100">
+                              {shift.opened_by_name || "—"}
+                            </td>
+                          )}
+                          <td className="truncate px-2 py-3 text-gray-600 dark:text-gray-300">
+                            {formatDateTime(shift.opened_at, { dateStyle: "medium", timeStyle: "short" })}
                           </td>
-                        )}
-                        <td className="truncate px-2 py-3 text-gray-600 dark:text-gray-300">
-                          {formatDateTime(shift.opened_at, { dateStyle: "medium", timeStyle: "short" })}
-                        </td>
-                        <td className="px-2 py-3 text-gray-800 dark:text-gray-100">
-                          PKR {Number(shift.opening_float).toFixed(0)}
-                        </td>
-                        <td className="px-2 py-3 text-gray-800 dark:text-gray-100">
-                          {shift.expected_cash != null ? `PKR ${Number(shift.expected_cash).toFixed(0)}` : "—"}
-                        </td>
-                        <td className="px-2 py-3 text-gray-800 dark:text-gray-100">
-                          {shift.counted_cash != null ? `PKR ${Number(shift.counted_cash).toFixed(0)}` : "—"}
-                        </td>
-                        <td className={`px-2 py-3 font-semibold ${shift.variance != null ? varianceClass(shift.variance) : ""}`}>
-                          {shift.variance != null ? `PKR ${Number(shift.variance).toFixed(0)}` : "—"}
-                        </td>
-                        <td className="px-2 py-3">
-                          <span
-                            className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
-                              shift.status === "open"
-                                ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"
-                                : "bg-surface-muted text-gray-600 dark:bg-gray-700 dark:text-gray-300"
-                            }`}
-                          >
-                            {shift.status === "open" ? t("shifts.statusOpen") : t("shifts.statusClosed")}
-                          </span>
-                        </td>
-                      </tr>
-                    ))
+                          <td className="px-2 py-3 text-gray-800 dark:text-gray-100">
+                            PKR {Number(shift.opening_float).toFixed(0)}
+                          </td>
+                          <td className="px-2 py-3 text-gray-800 dark:text-gray-100">
+                            {shift.expected_cash != null ? `PKR ${Number(shift.expected_cash).toFixed(0)}` : "—"}
+                          </td>
+                          <td className="px-2 py-3 text-gray-800 dark:text-gray-100">
+                            {shift.counted_cash != null ? `PKR ${Number(shift.counted_cash).toFixed(0)}` : "—"}
+                          </td>
+                          <td className={`px-2 py-3 font-semibold ${shift.variance != null ? varianceClass(shift.variance) : ""}`}>
+                            {shift.variance != null ? `PKR ${Number(shift.variance).toFixed(0)}` : "—"}
+                          </td>
+                          <td className="px-2 py-3">
+                            {needsReview ? (
+                              <span className="inline-flex rounded-full bg-danger-50 px-2.5 py-1 text-xs font-semibold text-danger-600 dark:bg-danger-500/10 dark:text-danger-400">
+                                {t("shifts.statusNeedsReview")}
+                              </span>
+                            ) : (
+                              <span
+                                className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                  shift.status === "open"
+                                    ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"
+                                    : "bg-surface-muted text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+                                }`}
+                              >
+                                {shift.status === "open" ? t("shifts.statusOpen") : t("shifts.statusClosed")}
+                              </span>
+                            )}
+                          </td>
+                          <td className="px-2 py-3">
+                            {canReconcile && (
+                              <button
+                                type="button"
+                                onClick={() => setReconcileItem(shift)}
+                                className="rounded-lg border border-surface-border px-3 py-1.5 text-xs font-semibold text-gray-700 transition-colors hover:bg-surface-subtle dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
+                              >
+                                {t("shifts.reconcile")}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })
                   )}
                 </tbody>
               )}
@@ -231,6 +255,16 @@ export default function ShiftsPage() {
           />
         </>
       )}
+
+      <ReconcileShiftModal
+        isOpen={!!reconcileItem}
+        onClose={() => setReconcileItem(null)}
+        shift={reconcileItem}
+        onReconciled={() => {
+          setReconcileItem(null);
+          fetchAll();
+        }}
+      />
     </AppShell>
   );
 }

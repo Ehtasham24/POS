@@ -2,7 +2,7 @@ const { pool } = require("../Db");
 const { getSettings, getBusinessTimezone } = require("./settingsService");
 const storeCreditService = require("./storeCreditService");
 const { applyStockDelta } = require("./lotService");
-const { getOpenShift } = require("./shiftService");
+const { getOpenShift, touchActivity } = require("./shiftService");
 const ApiError = require("../utils/ApiError");
 
 const getRecentSales = async () => {
@@ -178,6 +178,9 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
       [requestingUser?.id || null, paymentMethod || null, creditToApply, openShift?.id || null]
     );
     const transactionId = txnRows[0].id;
+    // A real sale is exactly the "this shift is genuinely in use" signal the auto-close
+    // sweep (Sevices/shiftSweep.js) needs — resets the idle clock every time one happens.
+    await touchActivity(client, openShift?.id);
 
     if (creditToApply > 0) {
       await storeCreditService.redeemVoucher(client, {
@@ -649,6 +652,7 @@ const refundSale = async (
        RETURNING *`,
       [saleId, sale.transaction_id, qty, amount, refundMethod, condition, reason, requestingUser.id, contactId || null, openShift?.id || null]
     );
+    await touchActivity(client, openShift?.id);
 
     await client.query("COMMIT");
     return {

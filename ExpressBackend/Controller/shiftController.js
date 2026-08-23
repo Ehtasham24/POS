@@ -5,6 +5,7 @@ const {
   recordCashMovement,
   listShifts,
   getShiftDetail,
+  reconcileShift,
 } = require("../Sevices/shiftService");
 const asyncHandler = require("../utils/asyncHandler");
 
@@ -42,6 +43,12 @@ const GetShiftDetail = asyncHandler(async (req, res) => {
   res.send(shift);
 });
 
+const ReconcileShift = asyncHandler(async (req, res) => {
+  const { countedCash, notes } = req.body;
+  const shift = await reconcileShift(req.params.id, req.user, countedCash, notes);
+  res.send(shift);
+});
+
 module.exports = {
   OpenShift,
   GetCurrentShift,
@@ -49,4 +56,5 @@ module.exports = {
   RecordCashMovement,
   ListShifts,
   GetShiftDetail,
+  ReconcileShift,
 };

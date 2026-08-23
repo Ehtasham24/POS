@@ -24,6 +24,7 @@ const routesAuth = require("./Routes/API/authRoutes");
 const routesUsers = require("./Routes/API/usersRoutes");
 const routesHealth = require("./Routes/API/healthRoutes");
 const errorHandler = require("./Middleware/errorHandler");
+const { startShiftAutoCloseSweep } = require("./Sevices/shiftSweep");
 const cors = require("cors");
 
 const server = express();
@@ -131,6 +132,10 @@ const Server = async () => {
   http
     .createServer(webhookApp)
     .listen(webhookPort, () => console.log(`Phone-forwarder webhook listening on port ${webhookPort}`));
+
+  // Auto-closes an abandoned shift (crashed app, closed tab, forgotten to close) after 15
+  // minutes of no activity — see Sevices/shiftSweep.js and migrations/019.
+  startShiftAutoCloseSweep();
 };
 
 Server();

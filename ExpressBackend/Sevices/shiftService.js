@@ -1,6 +1,13 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 
+// How long a shift can go with no real activity (a sale, refund, or cash movement) before
+// Sevices/shiftSweep.js's periodic check treats it as abandoned — a crashed app, a closed
+// browser tab, a forgotten "Close Shift" click — and closes it automatically rather than
+// leaving it open forever (which would block that user from ever opening a new shift again,
+// migrations/017's one-open-shift-per-user constraint).
+const IDLE_MINUTES = 15;
+
 // Same self-or-owner shape voidSale (Sevices/salesService.js) already establishes: a
 // cashier acts on their own shift, an owner can act on anyone's.
 const assertCanAct = (shift, requestingUser) => {
@@ -76,6 +83,18 @@ const sumCashMovements = async (client, shiftId) => {
   return Number(rows[0].total);
 };
 
+// Bumps last_activity_at — called wherever a shift is genuinely being used (a sale/refund
+// attributed to it in checkoutSale/refundSale, a cash movement recorded below). Guarded to
+// status='open' so this is a harmless no-op if a race lets it run just after the shift
+// closed. Takes an executor (pool or an in-transaction client) so callers already inside a
+// transaction (checkoutSale, refundSale) can include this in the same commit/rollback.
+const touchActivity = async (executor, shiftId) => {
+  if (!shiftId) return;
+  await executor.query(`UPDATE shifts SET last_activity_at = NOW() WHERE id = $1 AND status = 'open'`, [
+    shiftId,
+  ]);
+};
+
 const closeShift = async (shiftId, requestingUser, countedCash, notes) => {
   const counted = Number(countedCash);
   if (!Number.isFinite(counted) || counted < 0) {
@@ -140,6 +159,7 @@ const recordCashMovement = async (shiftId, requestingUser, amount, reason, conta
      VALUES ($1, $2, $3, $4, $5) RETURNING *`,
     [shiftId, value, reason, contactId || null, requestingUser.id]
   );
+  await touchActivity(pool, shiftId);
   return inserted[0];
 };
 
@@ -207,11 +227,111 @@ const getShiftDetail = async (shiftId, requestingUser) => {
   return { ...shift, movements, expectedCashSoFar };
 };
 
+// Closes one abandoned shift — same expected_cash math as closeShift, but counted_cash/
+// variance are deliberately left NULL rather than assumed to match: nobody actually counted
+// the drawer, so pretending otherwise would silently hide a real shortage if one happened
+// during the idle window. auto_closed=true is what routes it to "needs review" on the Shifts
+// page and gates reconcileShift below. closed_by stays NULL — nobody closed it, the system did.
+const autoCloseOneShift = async (shiftId) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(`SELECT * FROM shifts WHERE id = $1 FOR UPDATE`, [shiftId]);
+    const shift = rows[0];
+    // Already closed by the time the sweep got to it (a human closed it in the race window
+    // between the sweep's SELECT and this lock) — nothing to do, not an error.
+    if (!shift || shift.status !== "open") {
+      await client.query("ROLLBACK");
+      return;
+    }
+
+    const [cashSales, cashRefunds, cashMovements] = await Promise.all([
+      sumCashSales(client, shiftId),
+      sumCashRefunds(client, shiftId),
+      sumCashMovements(client, shiftId),
+    ]);
+    const expectedCash = Number(shift.opening_float) + cashSales - cashRefunds + cashMovements;
+
+    await client.query(
+      `UPDATE shifts
+       SET status = 'closed', closed_at = NOW(), expected_cash = $2, auto_closed = true,
+           notes = $3
+       WHERE id = $1`,
+      [
+        shiftId,
+        expectedCash,
+        `Auto-closed after ${IDLE_MINUTES} minutes of inactivity — drawer wasn't counted, needs manual review.`,
+      ]
+    );
+    await client.query("COMMIT");
+  } catch (err) {
+    await client.query("ROLLBACK");
+    // A sweep failure for one shift shouldn't crash the whole process (Sevices/shiftSweep.js
+    // runs this on a timer) — logged and left open for the next sweep pass to retry.
+    console.error(`Failed to auto-close shift ${shiftId}:`, err);
+  } finally {
+    client.release();
+  }
+};
+
+// Called periodically by Sevices/shiftSweep.js. Returns how many shifts it closed, purely
+// for the sweep's own logging.
+const autoCloseIdleShifts = async () => {
+  const { rows: idle } = await pool.query(
+    `SELECT id FROM shifts WHERE status = 'open' AND last_activity_at < NOW() - ($1 || ' minutes')::interval`,
+    [IDLE_MINUTES]
+  );
+  for (const { id } of idle) {
+    await autoCloseOneShift(id);
+  }
+  return idle.length;
+};
+
+// Fills in the real counted_cash/variance for a shift the sweep above already auto-closed —
+// whoever eventually gets to the actual drawer (the same cashier next time they're in, or the
+// owner) records what was really there. Same self-or-owner check every other shift action
+// uses. Only valid once, and only for a shift that's actually in the "needs review" state.
+const reconcileShift = async (shiftId, requestingUser, countedCash, notes) => {
+  const counted = Number(countedCash);
+  if (!Number.isFinite(counted) || counted < 0) {
+    throw new ApiError(400, "Counted cash must be a non-negative number");
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const { rows } = await client.query(`SELECT * FROM shifts WHERE id = $1 FOR UPDATE`, [shiftId]);
+    const shift = rows[0];
+    if (!shift) throw new ApiError(404, "Shift not found");
+    if (!shift.auto_closed) throw new ApiError(409, "Only an auto-closed shift needs reconciling");
+    if (shift.counted_cash !== null) throw new ApiError(409, "This shift was already reconciled");
+    assertCanAct(shift, requestingUser);
+
+    const variance = counted - Number(shift.expected_cash);
+    const { rows: updated } = await client.query(
+      `UPDATE shifts SET counted_cash = $2, variance = $3, closed_by = $4, notes = COALESCE($5, notes)
+       WHERE id = $1 RETURNING *`,
+      [shiftId, counted, variance, requestingUser.id, notes || null]
+    );
+    await client.query("COMMIT");
+    return updated[0];
+  } catch (err) {
+    await client.query("ROLLBACK");
+    throw err instanceof ApiError ? err : new ApiError(500, err.message);
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
+  IDLE_MINUTES,
   getOpenShift,
   openShift,
   closeShift,
   recordCashMovement,
   listShifts,
   getShiftDetail,
+  touchActivity,
+  autoCloseIdleShifts,
+  reconcileShift,
 };

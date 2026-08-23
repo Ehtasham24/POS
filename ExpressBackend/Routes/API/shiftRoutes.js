@@ -7,6 +7,7 @@ const {
   RecordCashMovement,
   ListShifts,
   GetShiftDetail,
+  ReconcileShift,
 } = require("../../Controller/shiftController");
 const requireAuth = require("../../Middleware/requireAuth");
 
@@ -20,6 +21,7 @@ routes.get("/api/shifts/current", requireAuth, GetCurrentShift);
 routes.get("/api/shifts", requireAuth, ListShifts);
 routes.get("/api/shifts/:id", requireAuth, GetShiftDetail);
 routes.patch("/api/shifts/:id/close", requireAuth, CloseShift);
+routes.patch("/api/shifts/:id/reconcile", requireAuth, ReconcileShift);
 routes.post("/api/shifts/:id/cash-movement", requireAuth, RecordCashMovement);
 
 module.exports = routes;
