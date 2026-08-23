@@ -455,6 +455,11 @@ const translations = {
       filterOnlyVariance: "Only shifts with a variance",
       filterMinVariance: "Min variance",
       filterMaxVariance: "Max variance",
+      loadingDetail: "Loading shift details...",
+      detailSales: "Sales",
+      detailRefunds: "Refunds",
+      detailCashMovements: "Cash Movements",
+      detailEmpty: "None",
     },
     report: {
       title: "Sales Report",
@@ -935,6 +940,11 @@ const translations = {
       filterOnlyVariance: "صرف فرق والی شفٹس",
       filterMinVariance: "کم از کم فرق",
       filterMaxVariance: "زیادہ سے زیادہ فرق",
+      loadingDetail: "شفٹ کی تفصیلات لوڈ ہو رہی ہیں...",
+      detailSales: "سیلز",
+      detailRefunds: "ریفنڈز",
+      detailCashMovements: "نقدی کی نقل و حرکت",
+      detailEmpty: "کوئی نہیں",
     },
     report: {
       title: "سیلز رپورٹ",

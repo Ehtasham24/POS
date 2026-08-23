@@ -1,5 +1,11 @@
-import { useEffect, useState } from "react";
-import { HiOutlineClock, HiOutlineBanknotes, HiOutlinePlusCircle } from "react-icons/hi2";
+import React, { useEffect, useState } from "react";
+import {
+  HiOutlineClock,
+  HiOutlineBanknotes,
+  HiOutlinePlusCircle,
+  HiOutlineChevronDown,
+  HiOutlineChevronRight,
+} from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { SkeletonRows, EmptyState } from "components";
 import { useAuth } from "auth/AuthContext";
@@ -27,6 +33,147 @@ const varianceClass = (variance) => {
 const filterInputClass =
   "h-10 rounded-xl border border-surface-border bg-surface-subtle px-3 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100";
 
+const PAYMENT_METHOD_BADGE_CLASS = {
+  cash: "bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-500",
+  card: "bg-sky-50 text-sky-600 dark:bg-sky-500/10 dark:text-sky-400",
+  bank_transfer: "bg-primary-50 text-primary-600 dark:bg-primary-500/10 dark:text-primary-400",
+};
+
+// Everything that actually happened inside one shift — sales (any payment method, not just
+// cash), refunds, and cash movements — fetched lazily only once its row is expanded (same
+// pattern as pages/Inventory/index.jsx's LotsRow), via the same GET /api/shifts/:id
+// getShiftDetail already used for the live "expected so far" figure while a shift is open.
+function ShiftDetailRow({ shiftId, colSpan }) {
+  const { t } = useLanguage();
+  const { formatDateTime } = useTimezone();
+  const toast = useToast();
+  const [detail, setDetail] = useState(null);
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    apiGet(`/api/shifts/${shiftId}`)
+      .then((data) => {
+        if (!cancelled) setDetail(data);
+      })
+      .catch((error) => {
+        if (cancelled) return;
+        setLoadError(true);
+        toast.error(error.message);
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shiftId]);
+
+  return (
+    <tr>
+      <td colSpan={colSpan} className="bg-surface-subtle px-5 py-4 dark:bg-gray-900">
+        {loadError ? (
+          <p className="text-sm text-danger-600 dark:text-danger-400">
+            Couldn't load this shift's details — check your connection and try again.
+          </p>
+        ) : detail === null ? (
+          <p className="text-sm text-gray-500 dark:text-gray-400">{t("shifts.loadingDetail")}</p>
+        ) : (
+          <div className="grid gap-5 sm:grid-cols-1 md:grid-cols-1 lg:grid-cols-3">
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                {t("shifts.detailSales")} ({detail.sales.length})
+              </p>
+              {detail.sales.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t("shifts.detailEmpty")}</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {detail.sales.map((sale) => (
+                    <li key={sale.transaction_id} className="flex items-center justify-between gap-2 text-sm">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-mono text-gray-700 dark:text-gray-300">
+                          RCPT-{String(sale.transaction_id).padStart(6, "0")}
+                        </span>
+                        <span
+                          className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
+                            PAYMENT_METHOD_BADGE_CLASS[sale.payment_method] ||
+                            "bg-surface-muted text-gray-600 dark:bg-gray-700 dark:text-gray-300"
+                          }`}
+                        >
+                          {sale.payment_method ? t(`payment.${sale.payment_method === "bank_transfer" ? "bankTransfer" : sale.payment_method}`) : "—"}
+                        </span>
+                      </span>
+                      <span className="shrink-0 font-semibold text-gray-800 dark:text-gray-100">
+                        PKR {Number(sale.total).toFixed(0)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                {t("shifts.detailRefunds")} ({detail.refunds.length})
+              </p>
+              {detail.refunds.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t("shifts.detailEmpty")}</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {detail.refunds.map((refund) => (
+                    <li key={refund.id} className="text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-mono text-gray-700 dark:text-gray-300">
+                          REF-{String(refund.id).padStart(6, "0")}
+                        </span>
+                        <span className="shrink-0 font-semibold text-danger-600 dark:text-danger-400">
+                          -PKR {Number(refund.refund_amount).toFixed(0)}
+                        </span>
+                      </div>
+                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">{refund.reason}</p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+            <div>
+              <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                {t("shifts.detailCashMovements")} ({detail.movements.length})
+              </p>
+              {detail.movements.length === 0 ? (
+                <p className="text-sm text-gray-500 dark:text-gray-400">{t("shifts.detailEmpty")}</p>
+              ) : (
+                <ul className="space-y-1.5">
+                  {detail.movements.map((movement) => (
+                    <li key={movement.id} className="text-sm">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-gray-700 dark:text-gray-300">
+                          {formatDateTime(movement.recorded_at, { timeStyle: "short" })}
+                        </span>
+                        <span
+                          className={`shrink-0 font-semibold ${
+                            Number(movement.amount) < 0
+                              ? "text-danger-600 dark:text-danger-400"
+                              : "text-success-600 dark:text-success-500"
+                          }`}
+                        >
+                          {Number(movement.amount) > 0 ? "+" : ""}
+                          PKR {Number(movement.amount).toFixed(0)}
+                        </span>
+                      </div>
+                      <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                        {movement.reason}
+                        {movement.contact_name ? ` · ${movement.contact_name}` : ""}
+                      </p>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          </div>
+        )}
+      </td>
+    </tr>
+  );
+}
+
 export default function ShiftsPage() {
   const { user } = useAuth();
   const { t } = useLanguage();
@@ -41,6 +188,7 @@ export default function ShiftsPage() {
   const [closeModalOpen, setCloseModalOpen] = useState(false);
   const [movementModalOpen, setMovementModalOpen] = useState(false);
   const [reconcileItem, setReconcileItem] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
 
   // Filters — startDate/endDate/status/userId/onlyVariance/minVariance/maxVariance are all
   // handled server-side (Sevices/shiftService.js's listShifts), not filtered client-side, so
@@ -242,9 +390,10 @@ export default function ShiftsPage() {
         </div>
         <div className="overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[860px] table-fixed border-collapse">
+            <table className="w-full min-w-[890px] table-fixed border-collapse">
               <thead className="bg-surface-subtle dark:bg-gray-800">
                 <tr>
+                  <th className="w-8"></th>
                   {isOwner && (
                     <th className="w-32 text-left px-3 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                       {t("shifts.openedBy")}
@@ -277,7 +426,7 @@ export default function ShiftsPage() {
               {loading ? (
                 <tbody>
                   <tr>
-                    <td colSpan={isOwner ? 9 : 8}>
+                    <td colSpan={isOwner ? 10 : 9}>
                       <SkeletonRows count={3} />
                     </td>
                   </tr>
@@ -286,7 +435,7 @@ export default function ShiftsPage() {
                 <tbody className="divide-y divide-surface-border dark:divide-gray-800">
                   {history.length === 0 ? (
                     <tr>
-                      <td colSpan={isOwner ? 9 : 8} className="py-2">
+                      <td colSpan={isOwner ? 10 : 9} className="py-2">
                         <EmptyState icon={HiOutlineClock} title={t("shifts.noHistory")} />
                       </td>
                     </tr>
@@ -294,8 +443,19 @@ export default function ShiftsPage() {
                     history.map((shift) => {
                       const needsReview = shift.auto_closed && shift.counted_cash == null;
                       const canReconcile = needsReview && (isOwner || shift.opened_by === user?.id);
+                      const isExpanded = expandedId === shift.id;
                       return (
-                        <tr key={shift.id} className="transition-colors hover:bg-surface-subtle dark:hover:bg-gray-800/60">
+                        <React.Fragment key={shift.id}>
+                        <tr className="transition-colors hover:bg-surface-subtle dark:hover:bg-gray-800/60">
+                          <td className="pl-3">
+                            <button
+                              type="button"
+                              onClick={() => setExpandedId(isExpanded ? null : shift.id)}
+                              className="flex h-7 w-7 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+                            >
+                              {isExpanded ? <HiOutlineChevronDown /> : <HiOutlineChevronRight />}
+                            </button>
+                          </td>
                           {isOwner && (
                             <td className="truncate px-3 py-3 text-gray-800 dark:text-gray-100">
                               {shift.opened_by_name || "—"}
@@ -350,6 +510,10 @@ export default function ShiftsPage() {
                             )}
                           </td>
                         </tr>
+                        {isExpanded && (
+                          <ShiftDetailRow shiftId={shift.id} colSpan={isOwner ? 10 : 9} />
+                        )}
+                        </React.Fragment>
                       );
                     })
                   )}
