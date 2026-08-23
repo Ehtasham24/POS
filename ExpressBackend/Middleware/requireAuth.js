@@ -32,7 +32,20 @@ async function requireAuth(req, res, next) {
   // utils/auth.js), trusting a stale role/active flag would mean deactivating a cashier
   // (e.g. after they leave) wouldn't actually take effect until their token happened to
   // expire, weeks later.
-  const user = await findUserById(decoded.id);
+  //
+  // Wrapped in try/catch because this function is called directly by Express as
+  // middleware (router.use(requireAuth), not asyncHandler(requireAuth) — asyncHandler is
+  // only applied to controllers) — an unhandled rejection here (e.g. the DB pooler
+  // resetting an in-flight connection, pg-pool's own ECONNRESET) would otherwise crash
+  // the entire process instead of just failing this one request. Db.js's pool.on("error")
+  // only covers *idle* clients; this covers the same class of transient DB error hitting
+  // an *active* query.
+  let user;
+  try {
+    user = await findUserById(decoded.id);
+  } catch (err) {
+    return next(err instanceof ApiError ? err : new ApiError(503, "Database temporarily unavailable — please try again"));
+  }
   if (!user || !user.isActive) {
     return next(new ApiError(401, "Account no longer active"));
   }
