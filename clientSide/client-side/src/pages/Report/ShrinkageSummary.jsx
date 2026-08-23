@@ -44,7 +44,7 @@ export default function ShrinkageSummary({ startDate, endDate }) {
   }
 
   return (
-    <div className="mb-6 rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
+    <div className="print-avoid-break mb-6 rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
       <p className="mb-3 text-sm font-semibold text-gray-500 dark:text-gray-400">{t("report.shrinkageTitle")}</p>
       <div className="mb-4 flex flex-wrap gap-6">
         <div>

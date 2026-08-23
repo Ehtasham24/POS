@@ -66,6 +66,19 @@
     top: 0;
     width: 100%;
   }
+  /* Recharts keeps its tooltip content (.recharts-default-tooltip) at its OWN inline
+     visibility:hidden until something is actively hovered, which never happens on a
+     static print — the blanket rule above (needed so nothing legitimate stays hidden by
+     this app's own screen-only "hidden"/dark-mode classes) forces that back to visible
+     too, so every chart printed a small dark rounded box (the tooltip's own empty
+     background) resting at its default top-left position. Excluded back out here, after
+     the blanket rule, so declaration order wins — confirmed live via a real
+     Page.printToPDF render, and the exact class name confirmed by inspecting the live
+     DOM rather than guessed from Recharts' docs (an earlier attempt targeted
+     .recharts-tooltip-wrapper, which doesn't exist in this Recharts version). */
+  .print-area .recharts-default-tooltip {
+    visibility: hidden !important;
+  }
 }
 
 /* Mirrors the @media print rules above exactly, but toggled by JS (Report.jsx's
@@ -87,4 +100,20 @@
   left: 0;
   top: 0;
   width: 100%;
+}
+.is-printing .print-area .recharts-default-tooltip {
+  visibility: hidden !important;
+}
+
+/* Keeps one report "card" (a chart, a category's table, a summary card) from being split
+   across a page boundary when printed — confirmed live via Page.printToPDF: without this,
+   a card's heading could land at the bottom of one page while its actual content started
+   fresh on the next. break-inside is the modern property; page-break-inside is kept
+   alongside it for engines that only understand the older alias. Applied per-component
+   (SalesCharts.jsx's ChartCard, GroupedSalesData.jsx, PaymentMediumSummary/index.jsx,
+   Report/ShrinkageSummary.jsx) rather than to .print-area's children generically, since
+   not everything printed is a "card" worth protecting this way. */
+.print-avoid-break {
+  break-inside: avoid;
+  page-break-inside: avoid;
 }

@@ -51,7 +51,7 @@ const ColorDot = ({ color }) => (
 );
 
 const ChartCard = ({ title, children }) => (
-  <div className="rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-800 dark:bg-gray-900">
+  <div className="print-avoid-break rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-800 dark:bg-gray-900">
     <h3 className="mb-4 font-poppins text-base font-bold text-gray-800 dark:text-gray-100">
       {title}
     </h3>
@@ -237,9 +237,19 @@ const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData 
                 ResponsiveContainer's height budget with the pie itself, and on this card's
                 fixed height it was shrinking the circle's usable radius unevenly and
                 clipping it into a half-moon. A plain HTML legend keeps the full height
-                free for the pie. */}
-            <ResponsiveContainer key={remountKey} width="100%" height={240}>
-              <PieChart>
+                free for the pie.
+
+                Fixed-size <PieChart>, deliberately NOT wrapped in <ResponsiveContainer> —
+                confirmed live via a real Page.printToPDF render: when this card gets
+                relocated to the next page (print-avoid-break, see tailwind.css), recharts'
+                width/height measurement can get captured mid-relocation and cached wrong,
+                re-clipping the exact same "half-moon" this fixed layout was already once
+                fixed for, on print specifically. The circle's own outerRadius is a fixed
+                pixel value regardless of container width anyway, so this chart never
+                actually benefited from ResponsiveContainer's dynamic width measurement —
+                removing it removes the one thing that measurement could get wrong. */}
+            <div className="flex justify-center">
+              <PieChart key={remountKey} width={280} height={240}>
                 <Tooltip
                   contentStyle={TOOLTIP_STYLE}
                   labelStyle={TOOLTIP_LABEL_STYLE}
@@ -257,7 +267,7 @@ const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData 
                   ))}
                 </Pie>
               </PieChart>
-            </ResponsiveContainer>
+            </div>
             <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
               {categoryShare.map((entry, index) => (
                 <span key={entry.name} className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">

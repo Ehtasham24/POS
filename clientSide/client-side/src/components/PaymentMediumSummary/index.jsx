@@ -64,7 +64,7 @@ export default function PaymentMediumSummary({ startDate, endDate, onMediumClick
             key={medium}
             type={onMediumClick ? "button" : undefined}
             onClick={onMediumClick ? () => onMediumClick(medium) : undefined}
-            className={`flex items-center gap-4 rounded-2xl border border-surface-border bg-white-A700 p-5 text-left shadow-card dark:border-gray-700 dark:bg-gray-800 ${
+            className={`print-avoid-break flex items-center gap-4 rounded-2xl border border-surface-border bg-white-A700 p-5 text-left shadow-card dark:border-gray-700 dark:bg-gray-800 ${
               onMediumClick ? "transition-colors hover:bg-surface-subtle dark:hover:bg-gray-800/60" : ""
             }`}
           >
@@ -89,7 +89,7 @@ export default function PaymentMediumSummary({ startDate, endDate, onMediumClick
         // tailwind.config.js) forces the grid to grow implicit columns to satisfy the
         // span, silently pulling every OTHER card back into that wider implicit grid
         // too. sm:col-span-1 keeps the span inside whatever the grid actually has.
-        <div className="col-span-3 flex items-center gap-4 rounded-2xl border border-dashed border-surface-border bg-surface-subtle p-4 dark:border-gray-700 dark:bg-gray-800/40 sm:col-span-1">
+        <div className="print-avoid-break col-span-3 flex items-center gap-4 rounded-2xl border border-dashed border-surface-border bg-surface-subtle p-4 dark:border-gray-700 dark:bg-gray-800/40 sm:col-span-1">
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">{t("report.unrecordedMedium")}</p>
             <p className="font-poppins text-lg font-bold text-gray-600 dark:text-gray-300">

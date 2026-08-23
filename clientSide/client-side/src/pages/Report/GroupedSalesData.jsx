@@ -6,7 +6,7 @@ const GroupedSalesData = ({ groupedData }) => {
     return (
       <div
         key={categoryId}
-        className="mb-6 bg-white-A700 dark:bg-gray-900 rounded-xl2 shadow-card p-6"
+        className="print-avoid-break mb-6 bg-white-A700 dark:bg-gray-900 rounded-xl2 shadow-card p-6"
       >
         <h2 className="text-2xl font-semibold text-gray-800 dark:text-gray-100 mb-3">
           Category:{" "}
