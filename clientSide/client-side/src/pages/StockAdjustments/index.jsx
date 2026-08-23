@@ -60,20 +60,29 @@ export default function StockAdjustmentsPage() {
 
   return (
     <AppShell title={t("stockAdjustments.title")}>
+      {/* w-44/w-40 are deliberate — @tailwindcss/forms' base reset makes a bare
+          type="date" input stretch to width:100%, so it fills the whole flex row edge to
+          edge without an explicit width (confirmed live: this was exactly the reported
+          bug). <select> isn't affected by that reset but still gets a width so it doesn't
+          resize with whichever option is selected. */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <input
           type="date"
           value={startDate}
           onChange={(e) => setStartDate(e.target.value)}
-          className={inputClass}
+          className={`${inputClass} w-44`}
         />
         <input
           type="date"
           value={endDate}
           onChange={(e) => setEndDate(e.target.value)}
-          className={inputClass}
+          className={`${inputClass} w-44`}
         />
-        <select value={reasonFilter} onChange={(e) => setReasonFilter(e.target.value)} className={inputClass}>
+        <select
+          value={reasonFilter}
+          onChange={(e) => setReasonFilter(e.target.value)}
+          className={`${inputClass} w-48`}
+        >
           <option value="all">{t("stockAdjustments.allReasons")}</option>
           {REASON_FILTER_OPTIONS.map((code) => (
             <option key={code} value={code}>
@@ -85,23 +94,27 @@ export default function StockAdjustmentsPage() {
 
       <div className="overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
         <div className="overflow-x-auto">
-          <table className="w-full min-w-[760px] border-collapse">
+          {/* table-fixed + explicit %-widths (matching pages/Inventory/index.jsx's own
+              table) — without it, columns auto-size by content and the long formatted
+              date/time squeezed Product down to wrapping across two lines while leaving
+              dead space after the last column (confirmed live: this was the reported bug). */}
+          <table className="w-full min-w-[760px] table-fixed border-collapse">
             <thead className="bg-surface-subtle dark:bg-gray-800">
               <tr>
                 <th className="w-8"></th>
-                <th className="px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="w-[19%] px-3 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   {t("stockAdjustments.date")}
                 </th>
-                <th className="px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="w-[27%] px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   {t("inventory.product")}
                 </th>
-                <th className="px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="w-[14%] px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   {t("stockAdjustments.quantityChange")}
                 </th>
-                <th className="px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="w-[20%] px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   {t("inventory.adjustStockReason")}
                 </th>
-                <th className="px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                <th className="w-[18%] px-2 py-3 text-left text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                   {t("stockAdjustments.adjustedBy")}
                 </th>
               </tr>
@@ -140,7 +153,12 @@ export default function StockAdjustmentsPage() {
                               </button>
                             )}
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3 text-gray-600 dark:text-gray-300">
+                          {/* No whitespace-nowrap here — with table-fixed's narrow, fixed-
+                              width columns, nowrap text that doesn't fit overflows visibly
+                              into the next cell instead of being clipped (confirmed live:
+                              this is what caused the date to overlap a long product name).
+                              Wrapping onto two lines here is the safe default. */}
+                          <td className="px-3 py-3 text-gray-600 dark:text-gray-300">
                             {formatDateTime(row.adjusted_at, { dateStyle: "medium", timeStyle: "short" })}
                           </td>
                           <td className="px-2 py-3 font-medium text-gray-800 dark:text-gray-100">

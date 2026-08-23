@@ -165,26 +165,43 @@ export default function ShiftsPage() {
         )}
 
         <p className="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400">{t("shifts.history")}</p>
+        {/* w-XX on every field below is deliberate, not cosmetic — @tailwindcss/forms'
+            base reset sets text-like inputs (including type="date") to width:100%, so
+            without an explicit width each one stretches to fill the whole flex row edge to
+            edge instead of sitting compactly next to the others (confirmed live: this was
+            exactly the bug reported). <select> isn't affected by that reset, but is still
+            given a width here so it doesn't jump around based on the length of whichever
+            option is currently selected. One fixed width for every breakpoint, same as the
+            Min/Max variance inputs below already do — confirmed to look fine down to a
+            390px phone screen, no need for this project's inverted sm:/md: overrides here. */}
         <div className="mb-4 flex flex-wrap items-center gap-3">
           <input
             type="date"
             value={filterStartDate}
             onChange={(e) => setFilterStartDate(e.target.value)}
-            className={filterInputClass}
+            className={`${filterInputClass} w-44`}
           />
           <input
             type="date"
             value={filterEndDate}
             onChange={(e) => setFilterEndDate(e.target.value)}
-            className={filterInputClass}
+            className={`${filterInputClass} w-44`}
           />
-          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={filterInputClass}>
+          <select
+            value={filterStatus}
+            onChange={(e) => setFilterStatus(e.target.value)}
+            className={`${filterInputClass} w-40`}
+          >
             <option value="all">{t("shifts.filterAllStatuses")}</option>
             <option value="open">{t("shifts.statusOpen")}</option>
             <option value="closed">{t("shifts.statusClosed")}</option>
           </select>
           {isOwner && (
-            <select value={filterUserId} onChange={(e) => setFilterUserId(e.target.value)} className={filterInputClass}>
+            <select
+              value={filterUserId}
+              onChange={(e) => setFilterUserId(e.target.value)}
+              className={`${filterInputClass} w-40`}
+            >
               <option value="all">{t("shifts.filterAllUsers")}</option>
               {users.map((u) => (
                 <option key={u.id} value={u.id}>
