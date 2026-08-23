@@ -1,8 +1,10 @@
 import React, { useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import {
   HiOutlineArchiveBoxXMark,
   HiOutlineChevronDown,
   HiOutlineChevronRight,
+  HiOutlineXMark,
 } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { EmptyState, SkeletonRows } from "components";
@@ -10,6 +12,14 @@ import { useLanguage } from "i18n/LanguageContext";
 import { useTimezone } from "timezone/TimezoneContext";
 import { useToast } from "components/Toast/ToastContext";
 import { apiGet } from "utils/api";
+
+// The Sales Report's own date range is datetime-local ("YYYY-MM-DDTHH:mm"); this page's
+// own date filter is plain date-only, one step coarser — "View Detail" links land here with
+// the former, so it's truncated to what this page's <input type="date"> can actually
+// display. Never loses anything in practice: the Report's own default ranges (and the vast
+// majority of real use) are whole-day windows anyway, where date-only covers the identical
+// period.
+const toDateOnly = (value) => (value ? value.split("T")[0] : "");
 
 const REASON_LABEL_KEY = {
   restock: "inventory.adjustStockReasonRestock",
@@ -34,10 +44,16 @@ export default function StockAdjustmentsPage() {
   const { formatDateTime } = useTimezone();
   const toast = useToast();
 
+  // Seeded from the URL once on mount — this is how the Sales Report's Shrinkage section
+  // ("View Detail" on a reason or a product row, ShrinkageSummary.jsx) lands here already
+  // scoped to exactly that reason/product and date range, without this page needing to know
+  // anything about the Report it might have been reached from.
+  const [searchParams] = useSearchParams();
   const [adjustments, setAdjustments] = useState(null);
-  const [reasonFilter, setReasonFilter] = useState("all");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [reasonFilter, setReasonFilter] = useState(() => searchParams.get("reasonCode") || "all");
+  const [startDate, setStartDate] = useState(() => toDateOnly(searchParams.get("startDate")));
+  const [endDate, setEndDate] = useState(() => toDateOnly(searchParams.get("endDate")));
+  const [productFilter, setProductFilter] = useState(() => searchParams.get("productId") || "");
   const [expandedId, setExpandedId] = useState(null);
 
   const fetchAdjustments = async () => {
@@ -46,6 +62,7 @@ export default function StockAdjustmentsPage() {
       if (reasonFilter !== "all") params.set("reasonCode", reasonFilter);
       if (startDate) params.set("startDate", startDate);
       if (endDate) params.set("endDate", endDate);
+      if (productFilter) params.set("productId", productFilter);
       const query = params.toString();
       setAdjustments(await apiGet(`/api/stock-adjustments${query ? `?${query}` : ""}`));
     } catch (error) {
@@ -56,7 +73,7 @@ export default function StockAdjustmentsPage() {
   useEffect(() => {
     fetchAdjustments();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reasonFilter, startDate, endDate]);
+  }, [reasonFilter, startDate, endDate, productFilter]);
 
   return (
     <AppShell title={t("stockAdjustments.title")}>
@@ -91,6 +108,26 @@ export default function StockAdjustmentsPage() {
           ))}
         </select>
       </div>
+
+      {/* No product-picker control in the filter bar above — this only ever gets set by
+          arriving via a "View Detail" link (ShrinkageSummary.jsx), never typed in here
+          directly, so a removable chip is enough rather than a full searchable dropdown. */}
+      {productFilter && (
+        <div className="mb-4 flex items-center gap-2">
+          <span className="inline-flex items-center gap-2 rounded-full bg-primary-50 px-3 py-1.5 text-sm font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
+            {t("stockAdjustments.filteredByProduct")}:{" "}
+            {adjustments?.find((row) => String(row.product_id) === String(productFilter))?.productname ||
+              `#${productFilter}`}
+            <button
+              type="button"
+              onClick={() => setProductFilter("")}
+              className="rounded-full p-0.5 hover:bg-primary-100 dark:hover:bg-primary-500/20"
+            >
+              <HiOutlineXMark />
+            </button>
+          </span>
+        </div>
+      )}
 
       <div className="overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
         <div className="overflow-x-auto">

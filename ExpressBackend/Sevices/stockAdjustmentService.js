@@ -1,5 +1,6 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
+const { dateRangeCondition } = require("../utils/dateRangeFilter");
 const { applyStockDelta } = require("./lotService");
 
 // 'restock' is the only positive-quantity reason meant for routine use — a plain (non-batch-
@@ -54,8 +55,7 @@ const listAdjustments = async ({ productId, startDate, endDate, reasonCode } = {
     conditions.push(`a.product_id = $${params.length}`);
   }
   if (startDate && endDate) {
-    params.push(startDate, endDate);
-    conditions.push(`a.adjusted_at BETWEEN $${params.length - 1} AND $${params.length}`);
+    conditions.push(dateRangeCondition(params, "a.adjusted_at", startDate, endDate));
   }
   if (reasonCode) {
     params.push(reasonCode);

@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiGet } from "utils/api";
 
@@ -16,7 +17,18 @@ const REASON_LABEL_KEY = {
 // which this component's fetch-and-render shape mirrors.
 export default function ShrinkageSummary({ startDate, endDate }) {
   const { t } = useLanguage();
+  const navigate = useNavigate();
   const [summary, setSummary] = useState(null);
+
+  // Same date range already selected on this report — carried over so "View Detail" lands
+  // on exactly the same window the shrinkage figure being clicked was computed from,
+  // filtered down to just that one reason or product (Stock Adjustments page reads these
+  // via useSearchParams). No schema change needed for this — reason_code/product_id were
+  // already on every row returned by getShrinkageSummary (Sevices/stockAdjustmentService.js).
+  const viewDetail = (extraParams) => {
+    const params = new URLSearchParams({ startDate, endDate, ...extraParams });
+    navigate(`/stock-adjustments?${params.toString()}`);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -65,10 +77,19 @@ export default function ShrinkageSummary({ startDate, endDate }) {
           </p>
           <ul className="space-y-1 text-sm">
             {summary.byReason.map((row) => (
-              <li key={row.reason_code} className="flex items-center justify-between text-gray-700 dark:text-gray-300">
-                <span>{t(REASON_LABEL_KEY[row.reason_code] || row.reason_code)}</span>
-                <span className="font-medium text-gray-800 dark:text-gray-100">
-                  {row.units_lost} · Rs.{Number(row.cost_impact).toFixed(0)}
+              <li key={row.reason_code} className="flex items-center justify-between gap-2 text-gray-700 dark:text-gray-300">
+                <span className="truncate">{t(REASON_LABEL_KEY[row.reason_code] || row.reason_code)}</span>
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="font-medium text-gray-800 dark:text-gray-100">
+                    {row.units_lost} · Rs.{Number(row.cost_impact).toFixed(0)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => viewDetail({ reasonCode: row.reason_code })}
+                    className="whitespace-nowrap text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400"
+                  >
+                    {t("report.viewDetail")}
+                  </button>
                 </span>
               </li>
             ))}
@@ -80,10 +101,19 @@ export default function ShrinkageSummary({ startDate, endDate }) {
           </p>
           <ul className="space-y-1 text-sm">
             {summary.byProduct.slice(0, 5).map((row) => (
-              <li key={row.product_id} className="flex items-center justify-between text-gray-700 dark:text-gray-300">
+              <li key={row.product_id} className="flex items-center justify-between gap-2 text-gray-700 dark:text-gray-300">
                 <span className="truncate">{row.productname}</span>
-                <span className="font-medium text-gray-800 dark:text-gray-100">
-                  {row.units_lost} · Rs.{Number(row.cost_impact).toFixed(0)}
+                <span className="flex shrink-0 items-center gap-2">
+                  <span className="font-medium text-gray-800 dark:text-gray-100">
+                    {row.units_lost} · Rs.{Number(row.cost_impact).toFixed(0)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => viewDetail({ productId: row.product_id })}
+                    className="whitespace-nowrap text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400"
+                  >
+                    {t("report.viewDetail")}
+                  </button>
                 </span>
               </li>
             ))}

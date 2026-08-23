@@ -1,5 +1,6 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
+const { dateRangeCondition } = require("../utils/dateRangeFilter");
 
 // How long a shift can go with no real activity (a sale, refund, or cash movement) before
 // Sevices/shiftSweep.js's periodic check treats it as abandoned — a crashed app, a closed
@@ -186,8 +187,7 @@ const listShifts = async (
     conditions.push(`status = $${params.length}`);
   }
   if (startDate && endDate) {
-    params.push(startDate, endDate);
-    conditions.push(`opened_at BETWEEN $${params.length - 1} AND $${params.length}`);
+    conditions.push(dateRangeCondition(params, "opened_at", startDate, endDate));
   }
   if (onlyVariance) {
     conditions.push(`variance IS NOT NULL AND variance <> 0`);

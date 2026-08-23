@@ -466,32 +466,38 @@ export default function SalesHistoryPage() {
                             <td></td>
                             <td colSpan={6} className="px-3 pb-4 pt-1">
                               <div className="overflow-x-auto rounded-xl border border-surface-border dark:border-gray-700 bg-white-A700 dark:bg-gray-900">
-                                {/* Explicit px width on every column, same fix as the outer table
-                                    (see its comment above) — table-layout:fixed is a GLOBAL rule
-                                    (styles/index.css), so it applies here too. The actions column
-                                    used to only ever hold one "Void" button at w-24 (96px); adding
-                                    a second Refund button next to it without widening this column
-                                    overflowed both buttons' text into the Line Total column right
-                                    next to it. Widened + min-w raised accordingly. */}
-                                <table className="w-full min-w-[800px] table-fixed border-collapse">
+                                {/* %-widths sized to fit inside the OUTER table's own min-w-[720px]
+                                    scrollable area (720 minus this cell's own padding/border), not a
+                                    fixed px min-w of its own — a wider min-w here than the outer
+                                    table's meant this table got its own second, independent
+                                    horizontal scrollbar, and the Refund button (in the actions
+                                    column, off past the right edge) was invisible below ~870px wide
+                                    with no visible way to reach it (confirmed live via
+                                    getBoundingClientRect: nothing was actually overlapping, it was
+                                    just clipped past the viewport edge). Letting the actions column
+                                    wrap its two buttons onto two lines (flex-wrap below) instead of
+                                    forcing them onto one keeps this table's min-w low enough to
+                                    always fit within the outer table's own scroll area, so this
+                                    table never needs a scrollbar of its own. */}
+                                <table className="w-full min-w-[680px] table-fixed border-collapse">
                                   <thead>
                                     <tr className="border-b border-surface-border dark:border-gray-700">
-                                      <th className="w-52 text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                      <th className="w-[28%] text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                         {t("inventory.product")}
                                       </th>
-                                      <th className="w-24 text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                      <th className="w-[14%] text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                         {t("salesHistory.buyingPrice")}
                                       </th>
-                                      <th className="w-24 text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                      <th className="w-[14%] text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                         {t("salesHistory.sellingPrice")}
                                       </th>
-                                      <th className="w-16 text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                      <th className="w-[10%] text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                         {t("inventory.qty")}
                                       </th>
-                                      <th className="w-28 text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                                      <th className="w-[17%] text-left px-3 py-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                                         {t("salesHistory.lineTotal")}
                                       </th>
-                                      <th className="w-56"></th>
+                                      <th className="w-[17%]"></th>
                                     </tr>
                                   </thead>
                                   <tbody className="divide-y divide-surface-border dark:divide-gray-800">
@@ -535,7 +541,11 @@ export default function SalesHistoryPage() {
                                           Rs.{(sale.selling_price * sale.quantity).toFixed(2)}
                                         </td>
                                         <td className="px-3 py-2 text-right">
-                                          <div className="flex justify-end gap-1.5">
+                                          {/* flex-wrap, not a single forced line — Void+Refund
+                                              side by side don't fit this column's narrower %-width
+                                              (see table's own comment above), so they stack onto a
+                                              second line instead of forcing the column wider. */}
+                                          <div className="flex flex-wrap justify-end gap-1.5">
                                             {sale.is_voided ? (
                                               <span
                                                 className="inline-flex rounded-full bg-surface-muted px-2 py-1 text-[11px] font-semibold text-gray-500 dark:bg-gray-700 dark:text-gray-400"

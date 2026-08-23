@@ -300,6 +300,7 @@ const translations = {
       traceability: "Traceability",
       lotReceivedAt: "Lot Received",
       lotReceivedBy: "Accepted By",
+      filteredByProduct: "Filtered by product",
     },
     productList: {
       title: "Product List",
@@ -481,6 +482,7 @@ const translations = {
       shrinkageByReason: "By Reason",
       shrinkageByProduct: "By Product",
       shrinkageEmpty: "No stock adjustments recorded in this period.",
+      viewDetail: "View Detail",
     },
     notFound: {
       title: "Page not found",
@@ -785,6 +787,7 @@ const translations = {
       traceability: "ٹریسیبلٹی",
       lotReceivedAt: "لاٹ موصول ہوئی",
       lotReceivedBy: "کس نے قبول کیا",
+      filteredByProduct: "پروڈکٹ کے مطابق فلٹر شدہ",
     },
     productList: {
       title: "پروڈکٹ لسٹ",
@@ -966,6 +969,7 @@ const translations = {
       shrinkageByReason: "وجہ کے مطابق",
       shrinkageByProduct: "پروڈکٹ کے مطابق",
       shrinkageEmpty: "اس مدت میں کوئی اسٹاک ایڈجسٹمنٹ درج نہیں ہوئی۔",
+      viewDetail: "تفصیل دیکھیں",
     },
     notFound: {
       title: "صفحہ نہیں ملا",
