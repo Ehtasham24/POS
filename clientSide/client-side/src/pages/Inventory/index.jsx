@@ -11,11 +11,13 @@ import {
   HiOutlinePencil,
   HiOutlineTrash,
   HiOutlineArchiveBoxArrowDown,
+  HiOutlineAdjustmentsHorizontal,
 } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { Modal, Skeleton, SkeletonRows, EmptyState } from "components";
 import EditProductModal from "categoriesComponents/editProductModal";
 import UpdateProductModal from "categoriesComponents/updateProductModal";
+import AdjustStockModal from "categoriesComponents/AdjustStockModal";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { useTimezone } from "timezone/TimezoneContext";
@@ -34,7 +36,7 @@ const statusLabelKeys = {
   out_of_stock: "inventory.outOfStock",
 };
 
-function RowActionsMenu({ onEdit, onUpdate, onDelete }) {
+function RowActionsMenu({ onEdit, onUpdate, onAdjust, onDelete }) {
   const { t } = useLanguage();
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
@@ -81,6 +83,17 @@ function RowActionsMenu({ onEdit, onUpdate, onDelete }) {
           >
             <HiOutlineArchiveBoxArrowDown className="text-base" />
             {t("pos.update")}
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              onAdjust();
+            }}
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-gray-800 transition-colors hover:bg-surface-subtle dark:text-gray-100 dark:hover:bg-gray-700"
+          >
+            <HiOutlineAdjustmentsHorizontal className="text-base" />
+            {t("inventory.adjustStock")}
           </button>
           <button
             type="button"
@@ -201,6 +214,7 @@ export default function InventoryPage() {
   const [expandedId, setExpandedId] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [updateItem, setUpdateItem] = useState(null);
+  const [adjustItem, setAdjustItem] = useState(null);
   const [deleteItem, setDeleteItem] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
@@ -452,6 +466,7 @@ export default function InventoryPage() {
                         <RowActionsMenu
                           onEdit={() => setEditItem(item)}
                           onUpdate={() => setUpdateItem(item)}
+                          onAdjust={() => setAdjustItem(item)}
                           onDelete={() => setDeleteItem(item)}
                         />
                       </td>
@@ -490,6 +505,16 @@ export default function InventoryPage() {
         }
       }
       onChanged={fetchInventory}
+    />
+
+    <AdjustStockModal
+      isOpen={!!adjustItem}
+      onClose={() => setAdjustItem(null)}
+      product={adjustItem}
+      onAdjusted={() => {
+        setAdjustItem(null);
+        fetchInventory();
+      }}
     />
 
     <Modal isOpen={!!deleteItem} onClose={() => setDeleteItem(null)} title={t("common.delete")}>

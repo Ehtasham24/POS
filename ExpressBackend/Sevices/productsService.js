@@ -82,19 +82,38 @@ const postItems = async (name, buying_price, quantity, category_id, batchOptions
 
 const updateItems = async (name, price, quantity, category_id, id) => {
   try {
+    // Quantity can only go UP through this plain edit path — a decrease needs a reason
+    // (Stock Adjustment, Sevices/stockAdjustmentService.js) so shrinkage/theft/miscounts
+    // leave an audit trail instead of silently overwriting the number. Raising it (received
+    // more stock of a simple, non-batch-tracked product) isn't the direction fraud/error
+    // hides in, so that stays allowed here. Checked here, not just in the frontend modals,
+    // so it can't be bypassed by calling this endpoint directly.
+    const { rows: currentRows } = await pool.query(`SELECT "quantity" FROM "products" WHERE id = $1`, [id]);
+    if (currentRows.length === 0) {
+      throw new ApiError(404, `No item with id: ${id} found`);
+    }
+    const currentQuantity = Number(currentRows[0].quantity);
+    const newQuantity = Number(quantity);
+    if (Number.isFinite(newQuantity) && newQuantity < currentQuantity) {
+      throw new ApiError(
+        400,
+        `Quantity can only be increased here — to lower it, use "Adjust Stock" on the Inventory page so the reason is recorded.`
+      );
+    }
+
     const result = await pool.query(
-      `UPDATE "products" 
-       SET productname=$1, buyingprice=$2, "quantity"=$3, "category_id"=$4 
-       WHERE id=$5 
+      `UPDATE "products"
+       SET productname=$1, buyingprice=$2, "quantity"=$3, "category_id"=$4
+       WHERE id=$5
        RETURNING *`,
       [name, price, quantity, category_id, id]
     );
     if (result.rowCount === 0) {
-      throw new Error(`No item with id: ${id} found`);
-    } else {
-      return result.rows; // Return rows
+      throw new ApiError(404, `No item with id: ${id} found`);
     }
+    return result.rows; // Return rows
   } catch (err) {
+    if (err instanceof ApiError) throw err;
     console.error(err);
     throw new Error("Service error");
   }

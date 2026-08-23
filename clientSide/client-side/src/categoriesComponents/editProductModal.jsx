@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
+import { useLanguage } from "i18n/LanguageContext";
 import { apiGet, apiPut } from "utils/api";
 
 const inputClass =
@@ -9,6 +10,7 @@ const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gra
 
 const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
   const toast = useToast();
+  const { t } = useLanguage();
   const [formData, setFormData] = useState({
     name: "",
     buying_price: "",
@@ -49,6 +51,14 @@ const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    // Quantity can only go up here — a decrease needs "Adjust Stock" (Inventory page) so
+    // it's reason-coded and attributed instead of a silent overwrite. Checked client-side
+    // for immediate feedback; Sevices/productsService.js's updateItems enforces the same
+    // floor server-side so it can't be bypassed by calling the API directly.
+    if (!product.batch_tracked && Number(formData.quantity) < Number(product.quantity)) {
+      toast.error(t("inventory.quantityDecreaseBlocked"));
+      return;
+    }
     try {
       await apiPut(`/products/${product.id}`, {
         name: formData.name,

@@ -10,6 +10,7 @@ import Inventory from "pages/Inventory";
 import Contacts from "pages/Contacts";
 import StoreCredit from "pages/StoreCredit";
 import BankPayments from "pages/BankPayments";
+import Shifts from "pages/Shifts";
 import LoginPage from "pages/Login";
 import NotFound from "pages/NotFound";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
@@ -138,6 +139,16 @@ function App() {
                   element={
                     <ProtectedRoute>
                       <BankPayments />
+                    </ProtectedRoute>
+                  }
+                />
+                {/* No roles restriction — shift open/close is self-service for any staff;
+                    shiftService.js scopes what each role can see/act on. */}
+                <Route
+                  path="/shifts"
+                  element={
+                    <ProtectedRoute>
+                      <Shifts />
                     </ProtectedRoute>
                   }
                 />

@@ -1,6 +1,8 @@
 const { pool } = require("../Db");
 const { getSettings, getBusinessTimezone } = require("./settingsService");
 const storeCreditService = require("./storeCreditService");
+const { applyStockDelta } = require("./lotService");
+const { getOpenShift } = require("./shiftService");
 const ApiError = require("../utils/ApiError");
 
 const getRecentSales = async () => {
@@ -154,10 +156,17 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
     // (Sevices/PaymentNotifications/matchingService.js) confirms a bank-transfer intent
     // with no logged-in staff behind it at all. sold_by is nullable for exactly this
     // reason (see migrations/006_users_and_auth.sql's own comment on nullable sold_by).
+    //
+    // shift_id is stamped the same way — whichever shift (migrations/017) is currently open
+    // for this user, or null if none is (no shift open, or requestingUser is null). This is
+    // the ONLY place a sale gets attributed to a shift; closeShift later sums cash sales by
+    // this column, not by a time window, so two staff with simultaneously-open shifts never
+    // get cross-attributed.
+    const openShift = await getOpenShift(requestingUser?.id);
     const { rows: txnRows } = await client.query(
-      `INSERT INTO sale_transactions (sold_by, payment_method, store_credit_applied)
-       VALUES ($1, $2, $3) RETURNING id`,
-      [requestingUser?.id || null, paymentMethod || null, creditToApply]
+      `INSERT INTO sale_transactions (sold_by, payment_method, store_credit_applied, shift_id)
+       VALUES ($1, $2, $3, $4) RETURNING id`,
+      [requestingUser?.id || null, paymentMethod || null, creditToApply, openShift?.id || null]
     );
     const transactionId = txnRows[0].id;
 
@@ -180,47 +189,20 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
         throw new ApiError(400, `Invalid quantity for product ${productID}`);
       }
 
+      // Shared with stockAdjustmentService.js via lotService.js's applyStockDelta — same
+      // FOR UPDATE-locked, throws-on-insufficient-stock primitive either way, just a
+      // negative delta here (a sale spends stock down) vs. either sign for an adjustment.
       let buyingPrice;
-      if (lotId) {
-        const { rows: lotRows } = await client.query(
-          `SELECT * FROM lots WHERE id = $1 FOR UPDATE`,
-          [lotId]
-        );
-        const lot = lotRows[0];
-        if (!lot) throw new ApiError(404, `Lot not found for product ${productID}`);
-        if (String(lot.product_id) !== String(productID)) {
-          throw new ApiError(400, `That lot does not belong to product ${productID}`);
+      try {
+        ({ buyingPrice } = await applyStockDelta(client, { productId: productID, lotId, delta: -qty }));
+      } catch (err) {
+        // Re-worded only where checkoutSale had a more specific existing message than
+        // applyStockDelta's generic ones, so anything already surfaced to a cashier reads
+        // the same as it did before this extraction.
+        if (err instanceof ApiError && err.status === 404) {
+          throw new ApiError(404, lotId ? `Lot not found for product ${productID}` : `Product ${productID} not found`);
         }
-        if (qty > lot.qty_remaining) {
-          throw new ApiError(
-            409,
-            `Insufficient stock in lot ${lot.lot_code} (${lot.qty_remaining} remaining)`
-          );
-        }
-        await client.query(`UPDATE lots SET qty_remaining = qty_remaining - $2 WHERE id = $1`, [
-          lotId,
-          qty,
-        ]);
-        await client.query(`UPDATE products SET quantity = quantity - $2 WHERE id = $1`, [
-          productID,
-          qty,
-        ]);
-        buyingPrice = lot.buying_price;
-      } else {
-        const { rows: productRows } = await client.query(
-          `SELECT quantity, buyingprice FROM products WHERE id = $1 FOR UPDATE`,
-          [productID]
-        );
-        const product = productRows[0];
-        if (!product) throw new ApiError(404, `Product ${productID} not found`);
-        if (qty > product.quantity) {
-          throw new ApiError(409, `Insufficient inventory for product ${productID}`);
-        }
-        await client.query(`UPDATE products SET quantity = quantity - $2 WHERE id = $1`, [
-          productID,
-          qty,
-        ]);
-        buyingPrice = product.buyingprice;
+        throw err;
       }
 
       const { rows: saleRows } = await client.query(
@@ -643,14 +625,20 @@ const refundSale = async (
       }
     }
 
+    // shift_id reflects whichever shift is open for whoever's processing THIS refund right
+    // now — deliberately not the original sale's shift. A refund's cash impact hits the
+    // drawer at refund time, possibly days later and by different staff than rang up the
+    // original sale, so it belongs in whichever shift is open when the cash actually leaves.
+    const openShift = await getOpenShift(requestingUser?.id);
+
     // When refundMethod is store_credit, this row IS the voucher — its own refund_amount is
     // the initial value, its own id (formatted below as REF-XXXXXX) is the redemption code.
     // No separate "issue" step needed (see storeCreditService.js / migrations/011).
     const { rows: inserted } = await client.query(
-      `INSERT INTO refunds (sale_id, transaction_id, quantity, refund_amount, refund_method, condition, reason, refunded_by, contact_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+      `INSERT INTO refunds (sale_id, transaction_id, quantity, refund_amount, refund_method, condition, reason, refunded_by, contact_id, shift_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING *`,
-      [saleId, sale.transaction_id, qty, amount, refundMethod, condition, reason, requestingUser.id, contactId || null]
+      [saleId, sale.transaction_id, qty, amount, refundMethod, condition, reason, requestingUser.id, contactId || null, openShift?.id || null]
     );
 
     await client.query("COMMIT");

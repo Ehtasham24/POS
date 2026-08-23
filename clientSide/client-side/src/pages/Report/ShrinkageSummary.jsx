@@ -1,0 +1,95 @@
+import { useEffect, useState } from "react";
+import { useLanguage } from "i18n/LanguageContext";
+import { apiGet } from "utils/api";
+
+const REASON_LABEL_KEY = {
+  damaged: "inventory.adjustStockReasonDamaged",
+  expired: "inventory.adjustStockReasonExpired",
+  theft: "inventory.adjustStockReasonTheft",
+  count_correction: "inventory.adjustStockReasonCountCorrection",
+  other: "inventory.adjustStockReasonOther",
+};
+
+// Total units and cost impact of shrinkage (Sevices/stockAdjustmentService.js's
+// getShrinkageSummary) for the selected date range — the piece that finally puts stock
+// adjustments' cost somewhere visible on the Sales Report, next to PaymentMediumSummary
+// which this component's fetch-and-render shape mirrors.
+export default function ShrinkageSummary({ startDate, endDate }) {
+  const { t } = useLanguage();
+  const [summary, setSummary] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setSummary(null);
+    apiGet(`/api/stock-adjustments/summary?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`)
+      .then((data) => {
+        if (!cancelled) setSummary(data);
+      })
+      .catch((error) => console.error("Error fetching shrinkage summary:", error));
+    return () => {
+      cancelled = true;
+    };
+  }, [startDate, endDate]);
+
+  if (!summary) {
+    return <div className="mb-6 h-24 animate-pulse rounded-2xl bg-surface-muted dark:bg-gray-800" />;
+  }
+
+  if (summary.totalUnitsLost === 0) {
+    return (
+      <div className="mb-6 rounded-2xl border border-dashed border-surface-border bg-surface-subtle p-4 text-sm text-gray-500 dark:border-gray-700 dark:bg-gray-800/40 dark:text-gray-400">
+        {t("report.shrinkageEmpty")}
+      </div>
+    );
+  }
+
+  return (
+    <div className="mb-6 rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
+      <p className="mb-3 text-sm font-semibold text-gray-500 dark:text-gray-400">{t("report.shrinkageTitle")}</p>
+      <div className="mb-4 flex flex-wrap gap-6">
+        <div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{t("report.shrinkageUnitsLost")}</p>
+          <p className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">{summary.totalUnitsLost}</p>
+        </div>
+        <div>
+          <p className="text-xs text-gray-500 dark:text-gray-400">{t("report.shrinkageCostImpact")}</p>
+          <p className="font-poppins text-xl font-bold text-danger-600 dark:text-danger-400">
+            Rs.{Number(summary.totalCostImpact).toFixed(0)}
+          </p>
+        </div>
+      </div>
+      <div className="grid gap-4 sm:grid-cols-1 md:grid-cols-2">
+        <div>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {t("report.shrinkageByReason")}
+          </p>
+          <ul className="space-y-1 text-sm">
+            {summary.byReason.map((row) => (
+              <li key={row.reason_code} className="flex items-center justify-between text-gray-700 dark:text-gray-300">
+                <span>{t(REASON_LABEL_KEY[row.reason_code] || row.reason_code)}</span>
+                <span className="font-medium text-gray-800 dark:text-gray-100">
+                  {row.units_lost} · Rs.{Number(row.cost_impact).toFixed(0)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+            {t("report.shrinkageByProduct")}
+          </p>
+          <ul className="space-y-1 text-sm">
+            {summary.byProduct.slice(0, 5).map((row) => (
+              <li key={row.product_id} className="flex items-center justify-between text-gray-700 dark:text-gray-300">
+                <span className="truncate">{row.productname}</span>
+                <span className="font-medium text-gray-800 dark:text-gray-100">
+                  {row.units_lost} · Rs.{Number(row.cost_impact).toFixed(0)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      </div>
+    </div>
+  );
+}

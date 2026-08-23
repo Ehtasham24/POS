@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
+import { useLanguage } from "i18n/LanguageContext";
 import useDebounce from "hooks/useDebounce";
 import { HiOutlineMagnifyingGlass, HiOutlineCube, HiOutlinePlusCircle } from "react-icons/hi2";
 import PriceEntryField from "./PriceEntryField";
@@ -16,6 +17,7 @@ const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gra
 // product" entry point (Categories toolbar's Update button).
 const UpdateProductModal = ({ isOpen, onClose, initialProduct, onChanged }) => {
   const toast = useToast();
+  const { t } = useLanguage();
 
   // --- Searchable product picker ---
   const [query, setQuery] = useState("");
@@ -133,6 +135,14 @@ const UpdateProductModal = ({ isOpen, onClose, initialProduct, onChanged }) => {
 
   const handleSaveSimple = async (e) => {
     e.preventDefault();
+    // Quantity can only go up here — a decrease needs "Adjust Stock" (Inventory page) so
+    // it's reason-coded and attributed instead of a silent overwrite. Checked client-side
+    // for immediate feedback; Sevices/productsService.js's updateItems enforces the same
+    // floor server-side so it can't be bypassed by calling the API directly.
+    if (Number(formData.quantity) < Number(selectedProduct.quantity)) {
+      toast.error(t("inventory.quantityDecreaseBlocked"));
+      return;
+    }
     try {
       await apiPut(`/products/${selectedProduct.product_id}`, {
         name: formData.name,

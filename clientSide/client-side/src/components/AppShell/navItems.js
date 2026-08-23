@@ -9,6 +9,7 @@ import {
   HiOutlineBuildingOffice2,
   HiOutlineReceiptRefund,
   HiOutlineQrCode,
+  HiOutlineClock,
 } from "react-icons/hi2";
 
 // `roles` omitted = visible to everyone logged in (Owner and Cashier alike). A Cashier's
@@ -60,6 +61,15 @@ export const navItems = [
     label: "Payment Mediums",
     labelKey: "nav.paymentMediums",
     icon: HiOutlineQrCode,
+  },
+  // No `roles` restriction — shift open/close is self-service for any staff (like voiding
+  // one's own same-day sale); an Owner sees every shift here too. See
+  // Routes/API/shiftRoutes.js and Sevices/shiftService.js's self-vs-owner scoping.
+  {
+    to: "/shifts",
+    label: "Shifts",
+    labelKey: "nav.shifts",
+    icon: HiOutlineClock,
   },
   {
     to: "/report",

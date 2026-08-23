@@ -17,6 +17,8 @@ const routesContacts = require("./Routes/API/contactsRoutes");
 const routesBankPayment = require("./Routes/API/bankPaymentRoutes");
 const routesPaymentNotifications = require("./Routes/API/paymentNotificationRoutes");
 const routesPaymentGateway = require("./Routes/API/paymentGatewayRoutes");
+const routesShifts = require("./Routes/API/shiftRoutes");
+const routesStockAdjustments = require("./Routes/API/stockAdjustmentRoutes");
 const routesPayment = require("./Routes/API/ThirdParty/PayFast/payFastRoutes");
 const routesAuth = require("./Routes/API/authRoutes");
 const routesUsers = require("./Routes/API/usersRoutes");
@@ -70,6 +72,8 @@ const Server = async () => {
   server.use(routesInventory);
   server.use(routesContacts);
   server.use(routesBankPayment);
+  server.use(routesShifts);
+  server.use(routesStockAdjustments);
 
   // Serve static files from the React app
   server.use(

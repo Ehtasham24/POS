@@ -1,4 +1,5 @@
 const { pool } = require("../Db");
+const ApiError = require("../utils/ApiError");
 
 const VOWELS = new Set(["A", "E", "I", "O", "U"]);
 
@@ -177,6 +178,63 @@ const decrementLot = async (lotId, quantity) => {
   return updated[0];
 };
 
+// Shared "move a signed quantity in or out of a lot-or-plain-product, keeping products.quantity
+// in sync" primitive — extracted from what used to be duplicated inline in checkoutSale
+// (Sevices/salesService.js) and used fresh by stockAdjustmentService.js, instead of a third
+// copy. Always strict (FOR UPDATE-locked, throws rather than silently skipping) — appropriate
+// for both callers, since a sale and an adjustment are each a single deliberate action that
+// should fail loudly if something's inconsistent. This is NOT used by refundSale's own stock
+// restore, which is deliberately more lenient (best-effort, skips quietly if the original lot
+// was since deleted) — different enough semantics that forcing it through here would be a
+// behavior change, not a refactor.
+//
+// client: an in-transaction pg client (caller owns BEGIN/COMMIT/ROLLBACK).
+// delta: signed — negative decrements (a sale, a shrinkage adjustment), positive increments
+// (a correction-up). Returns the buying price to snapshot (the lot's own cost if lotId is
+// given, else the product's current buyingprice). updatedQuantity is the RESULTING count of
+// whichever row was actually locked (the lot's own qty_remaining when lotId is given — NOT
+// products.quantity, which is a multi-lot aggregate and can differ) — a caller that needs
+// the product-level aggregate specifically (e.g. checkoutSale's low-stock check) should
+// still read products.quantity itself, not rely on this value for that.
+const applyStockDelta = async (client, { productId, lotId, delta }) => {
+  const change = Number(delta);
+  if (!Number.isFinite(change) || change === 0) {
+    throw new ApiError(400, "Stock change must be a non-zero number");
+  }
+
+  if (lotId) {
+    const { rows: lotRows } = await client.query(`SELECT * FROM lots WHERE id = $1 FOR UPDATE`, [lotId]);
+    const lot = lotRows[0];
+    if (!lot) throw new ApiError(404, `Lot ${lotId} not found`);
+    if (String(lot.product_id) !== String(productId)) {
+      throw new ApiError(400, `Lot ${lotId} does not belong to product ${productId}`);
+    }
+    const resulting = Number(lot.qty_remaining) + change;
+    if (resulting < 0) {
+      throw new ApiError(409, `Insufficient stock in lot ${lot.lot_code} (${lot.qty_remaining} remaining)`);
+    }
+    const { rows: updatedLot } = await client.query(
+      `UPDATE lots SET qty_remaining = qty_remaining + $2 WHERE id = $1 RETURNING qty_remaining`,
+      [lotId, change]
+    );
+    await client.query(`UPDATE products SET quantity = quantity + $2 WHERE id = $1`, [productId, change]);
+    return { buyingPrice: lot.buying_price, updatedQuantity: updatedLot[0].qty_remaining };
+  }
+
+  const { rows: productRows } = await client.query(
+    `SELECT quantity, buyingprice FROM products WHERE id = $1 FOR UPDATE`,
+    [productId]
+  );
+  const product = productRows[0];
+  if (!product) throw new ApiError(404, `Product ${productId} not found`);
+  const resulting = Number(product.quantity) + change;
+  if (resulting < 0) {
+    throw new ApiError(409, `Insufficient inventory for product ${productId}`);
+  }
+  await client.query(`UPDATE products SET quantity = quantity + $2 WHERE id = $1`, [productId, change]);
+  return { buyingPrice: product.buyingprice, updatedQuantity: resulting };
+};
+
 module.exports = {
   generatePrefix,
   vendorPrefix,
@@ -187,4 +245,5 @@ module.exports = {
   getLotById,
   getLotByCode,
   decrementLot,
+  applyStockDelta,
 };

@@ -4,6 +4,7 @@ import PrintButton from "./PrintBtn";
 import GroupedSalesData from "./GroupedSalesData";
 import SalesCharts from "./SalesCharts";
 import ReportPrintHeader from "./ReportPrintHeader";
+import ShrinkageSummary from "./ShrinkageSummary";
 import AppShell from "components/AppShell";
 import { PaymentMediumSummary } from "components";
 import { useToast } from "components/Toast/ToastContext";
@@ -171,6 +172,8 @@ const SalesDataComponent = () => {
               {t("report.paymentMediumBreakdown")}
             </p>
             <PaymentMediumSummary startDate={startDate} endDate={endDate} />
+
+            <ShrinkageSummary startDate={startDate} endDate={endDate} />
 
             <SalesCharts ref={chartsRef} salesData={salesData} timeSeriesData={timeSeriesData} />
 
