@@ -153,16 +153,25 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
     await client.query("BEGIN");
 
     // requestingUser can be null here — the notification-forwarder auto-matcher
-    // (Sevices/PaymentNotifications/matchingService.js) confirms a bank-transfer intent
-    // with no logged-in staff behind it at all. sold_by is nullable for exactly this
-    // reason (see migrations/006_users_and_auth.sql's own comment on nullable sold_by).
-    //
-    // shift_id is stamped the same way — whichever shift (migrations/017) is currently open
-    // for this user, or null if none is (no shift open, or requestingUser is null). This is
-    // the ONLY place a sale gets attributed to a shift; closeShift later sums cash sales by
-    // this column, not by a time window, so two staff with simultaneously-open shifts never
-    // get cross-attributed.
+    // (Sevices/PaymentNotifications/matchingService.js) and the JazzCash/Easypaisa webhook
+    // callbacks (Controller/paymentGatewayController.js) confirm a pending intent with no
+    // logged-in staff behind it at all, possibly minutes or hours after the customer paid —
+    // there's no one present who could have "opened a shift" for that. A shift is only
+    // required when a real person is at the keyboard right now: a live checkout (always has
+    // req.user, requireAuth-gated) or a staff member manually clicking "Mark as Paid" on a
+    // pending payment (also passes a real requestingUser) — either way, requestingUser being
+    // set is exactly the signal that this is a live, human-initiated sale, not an automated
+    // confirmation with nobody around to have clocked in.
     const openShift = await getOpenShift(requestingUser?.id);
+    if (requestingUser && !openShift) {
+      throw new ApiError(409, "Open a shift before making a sale — see the Shifts page");
+    }
+
+    // shift_id is stamped the same way — whichever shift (migrations/017) is currently open
+    // for this user, or null if none is (requestingUser is null, the automated-confirmation
+    // case above). This is the ONLY place a sale gets attributed to a shift; closeShift later
+    // sums cash sales by this column, not by a time window, so two staff with simultaneously-
+    // open shifts never get cross-attributed.
     const { rows: txnRows } = await client.query(
       `INSERT INTO sale_transactions (sold_by, payment_method, store_credit_applied, shift_id)
        VALUES ($1, $2, $3, $4) RETURNING id`,

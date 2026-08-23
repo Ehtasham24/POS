@@ -2,6 +2,7 @@ const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { checkoutSale } = require("./salesService");
 const { getSettings } = require("./settingsService");
+const { getOpenShift } = require("./shiftService");
 const { buildQrPayload, generateQrDataUrl } = require("../utils/bankQr");
 
 // Same idea as salesService.js's formatReceiptNo/formatRefundNo — a display reference
@@ -44,6 +45,13 @@ const createIntent = async (
   }
   if (!CHANNELS.includes(channel)) {
     throw new ApiError(400, `Unknown payment channel "${channel}"`);
+  }
+  // Checked here too, not just in checkoutSale's own guard — a QR/JazzCash/Easypaisa intent
+  // means the customer may pay within seconds of this call returning. Catching a missing
+  // shift only at confirmIntent (after the money's already moved) would be far worse than
+  // catching it now, before the customer scans anything.
+  if (!(await getOpenShift(requestingUser.id))) {
+    throw new ApiError(409, "Open a shift before making a sale — see the Shifts page");
   }
 
   let bankDetails = null;
