@@ -7,6 +7,7 @@ import CreditDebit from "pages/CreditDebit";
 import Settings from "pages/Settings";
 import Company from "pages/Company";
 import Inventory from "pages/Inventory";
+import StockAdjustments from "pages/StockAdjustments";
 import Contacts from "pages/Contacts";
 import StoreCredit from "pages/StoreCredit";
 import BankPayments from "pages/BankPayments";
@@ -111,6 +112,14 @@ function App() {
                   element={
                     <ProtectedRoute roles={OWNER_ONLY}>
                       <Inventory />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/stock-adjustments"
+                  element={
+                    <ProtectedRoute roles={OWNER_ONLY}>
+                      <StockAdjustments />
                     </ProtectedRoute>
                   }
                 />

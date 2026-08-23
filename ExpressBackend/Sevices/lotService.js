@@ -78,8 +78,13 @@ const generateLotCode = async (vendorId, productId) => {
 };
 
 // Creates the first (or an additional) lot for a product from a vendor and syncs the
-// product's cached aggregate quantity + batch_tracked flag.
-const createLot = async (productId, { vendor_id, buying_price, quantity }) => {
+// product's cached aggregate quantity + batch_tracked flag. receivedByUserId is who's
+// logged in and recording this delivery — auto-captured (Controller/productsController.js
+// passes req.user.id), same attribution pattern as sales.sold_by/stock_adjustments.
+// adjusted_by, not a manually-typed field — so "who accepted this stock" is always
+// traceable and can't be misattributed. Optional/nullable so nothing breaks for any
+// pre-existing lot created before this column existed.
+const createLot = async (productId, { vendor_id, buying_price, quantity }, receivedByUserId = null) => {
   if (!vendor_id) throw new Error("A vendor is required to create a lot");
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty <= 0) throw new Error("Quantity must be a positive number");
@@ -87,10 +92,10 @@ const createLot = async (productId, { vendor_id, buying_price, quantity }) => {
   const lotCode = await generateLotCode(vendor_id, productId);
 
   const { rows } = await pool.query(
-    `INSERT INTO lots (product_id, vendor_id, lot_code, buying_price, qty_received, qty_remaining)
-     VALUES ($1, $2, $3, $4, $5, $5)
+    `INSERT INTO lots (product_id, vendor_id, lot_code, buying_price, qty_received, qty_remaining, received_by)
+     VALUES ($1, $2, $3, $4, $5, $5, $6)
      RETURNING *`,
-    [productId, vendor_id, lotCode, buying_price, qty]
+    [productId, vendor_id, lotCode, buying_price, qty, receivedByUserId]
   );
 
   await pool.query(
@@ -123,9 +128,10 @@ const addStockToLot = async (lotId, quantity) => {
 
 const getLotsForProduct = async (productId) => {
   const result = await pool.query(
-    `SELECT l.*, c.name AS vendor_name
+    `SELECT l.*, c.name AS vendor_name, u.display_name AS received_by_name
      FROM lots l
      LEFT JOIN contacts c ON c.id = l.vendor_id
+     LEFT JOIN users u ON u.id = l.received_by
      WHERE l.product_id = $1
      ORDER BY l.received_at`,
     [productId]
@@ -135,9 +141,10 @@ const getLotsForProduct = async (productId) => {
 
 const getLotById = async (lotId) => {
   const result = await pool.query(
-    `SELECT l.*, c.name AS vendor_name
+    `SELECT l.*, c.name AS vendor_name, u.display_name AS received_by_name
      FROM lots l
      LEFT JOIN contacts c ON c.id = l.vendor_id
+     LEFT JOIN users u ON u.id = l.received_by
      WHERE l.id = $1`,
     [lotId]
   );

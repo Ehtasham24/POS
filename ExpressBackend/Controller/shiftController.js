@@ -33,8 +33,16 @@ const RecordCashMovement = asyncHandler(async (req, res) => {
 });
 
 const ListShifts = asyncHandler(async (req, res) => {
-  const { status } = req.query;
-  const shifts = await listShifts(req.user, { status });
+  const { status, startDate, endDate, userId, onlyVariance, minVariance, maxVariance } = req.query;
+  const shifts = await listShifts(req.user, {
+    status,
+    startDate,
+    endDate,
+    userId,
+    onlyVariance: onlyVariance === "true",
+    minVariance,
+    maxVariance,
+  });
   res.send(shifts);
 });
 

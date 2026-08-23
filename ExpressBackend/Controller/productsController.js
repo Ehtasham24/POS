@@ -30,7 +30,7 @@ const GetProductLots = asyncHandler(async (req, res) => {
 const PostProductLot = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { vendor_id, buying_price, quantity } = req.body;
-  const lot = await createLot(id, { vendor_id, buying_price, quantity });
+  const lot = await createLot(id, { vendor_id, buying_price, quantity }, req.user.id);
   res.status(201).send(lot);
 });
 
@@ -75,18 +75,16 @@ const PostItems = asyncHandler(async (req, res) => {
 
 const UpdateItems = asyncHandler(async (req, res) => {
   const id = req.params.id;
-  const { name, price, Quantity, Category_id } = req.body;
+  // Quantity is deliberately not accepted here at all anymore — see productsService.js's
+  // updateItems comment. Any Quantity a caller still sends (an old cached frontend build,
+  // a direct API call) is simply ignored, not just rejected, so there's no error message to
+  // keep in sync either.
+  const { name, price, Category_id } = req.body;
   const nameLower = name.toLowerCase();
 
-  const result = await updateItems(
-    nameLower,
-    price,
-    Quantity,
-    Category_id,
-    id
-  );
+  const result = await updateItems(nameLower, price, Category_id, id);
   res.send({
-    message: `Item with id: ${id} updated with name: ${nameLower} & price: ${price} and Quantity: ${Quantity} ${result}`,
+    message: `Item with id: ${id} updated with name: ${nameLower} & price: ${price}`,
   });
 });
 

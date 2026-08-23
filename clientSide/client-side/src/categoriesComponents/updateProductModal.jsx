@@ -135,19 +135,13 @@ const UpdateProductModal = ({ isOpen, onClose, initialProduct, onChanged }) => {
 
   const handleSaveSimple = async (e) => {
     e.preventDefault();
-    // Quantity can only go up here — a decrease needs "Adjust Stock" (Inventory page) so
-    // it's reason-coded and attributed instead of a silent overwrite. Checked client-side
-    // for immediate feedback; Sevices/productsService.js's updateItems enforces the same
-    // floor server-side so it can't be bypassed by calling the API directly.
-    if (Number(formData.quantity) < Number(selectedProduct.quantity)) {
-      toast.error(t("inventory.quantityDecreaseBlocked"));
-      return;
-    }
+    // Quantity is never sent here anymore — Sevices/productsService.js's updateItems
+    // doesn't accept it either way. Every change goes through "Adjust Stock" (Inventory
+    // page) instead, so it's always reason-coded and attributed, not a silent overwrite.
     try {
       await apiPut(`/products/${selectedProduct.product_id}`, {
         name: formData.name,
         price: formData.buying_price,
-        Quantity: formData.quantity,
         Category_id: formData.category_id,
       });
       toast.success("Product updated successfully!");
@@ -294,21 +288,15 @@ const UpdateProductModal = ({ isOpen, onClose, initialProduct, onChanged }) => {
                     required
                   />
                 </div>
+                {/* Read-only — every quantity change (up or down) goes through "Adjust
+                    Stock" on the Inventory page instead, so it's always reason-coded and
+                    attributed rather than a silent overwrite. */}
                 <div>
-                  <label htmlFor="up_quantity" className={labelClass}>
-                    Quantity
-                  </label>
-                  <input
-                    type="number"
-                    name="quantity"
-                    id="up_quantity"
-                    value={formData.quantity}
-                    onChange={handleChange}
-                    className={inputClass}
-                    min="0"
-                    step="1"
-                    required
-                  />
+                  <label className={labelClass}>{t("inventory.qty")}</label>
+                  <div className="mt-2 rounded-lg border border-dashed border-surface-border bg-surface-subtle px-3 py-2.5 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                    {formData.quantity}
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("inventory.quantityLockedHint")}</p>
                 </div>
               </>
             )}

@@ -8,8 +8,9 @@ const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-2 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
 const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gray-100";
 
-const REASON_CODES = ["damaged", "expired", "theft", "count_correction", "other"];
+const REASON_CODES = ["restock", "damaged", "expired", "theft", "count_correction", "other"];
 const reasonLabelKey = {
+  restock: "inventory.adjustStockReasonRestock",
   damaged: "inventory.adjustStockReasonDamaged",
   expired: "inventory.adjustStockReasonExpired",
   theft: "inventory.adjustStockReasonTheft",

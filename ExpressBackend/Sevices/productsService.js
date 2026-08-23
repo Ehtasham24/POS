@@ -80,33 +80,21 @@ const postItems = async (name, buying_price, quantity, category_id, batchOptions
   }
 };
 
-const updateItems = async (name, price, quantity, category_id, id) => {
+// quantity is intentionally NOT a parameter here (and not in the SET clause below) — every
+// quantity change, up or down, now goes exclusively through Stock Adjustment
+// (Sevices/stockAdjustmentService.js) or, for a batch-tracked product, through creating/
+// adding to a lot — both leave a reason/attribution trail, unlike a plain edit silently
+// overwriting the number. This edit path only ever touches name/price/category, and does so
+// regardless of what a caller sends for quantity, so it can't be reintroduced by calling this
+// endpoint directly even if a future frontend change forgot to drop the field.
+const updateItems = async (name, price, category_id, id) => {
   try {
-    // Quantity can only go UP through this plain edit path — a decrease needs a reason
-    // (Stock Adjustment, Sevices/stockAdjustmentService.js) so shrinkage/theft/miscounts
-    // leave an audit trail instead of silently overwriting the number. Raising it (received
-    // more stock of a simple, non-batch-tracked product) isn't the direction fraud/error
-    // hides in, so that stays allowed here. Checked here, not just in the frontend modals,
-    // so it can't be bypassed by calling this endpoint directly.
-    const { rows: currentRows } = await pool.query(`SELECT "quantity" FROM "products" WHERE id = $1`, [id]);
-    if (currentRows.length === 0) {
-      throw new ApiError(404, `No item with id: ${id} found`);
-    }
-    const currentQuantity = Number(currentRows[0].quantity);
-    const newQuantity = Number(quantity);
-    if (Number.isFinite(newQuantity) && newQuantity < currentQuantity) {
-      throw new ApiError(
-        400,
-        `Quantity can only be increased here — to lower it, use "Adjust Stock" on the Inventory page so the reason is recorded.`
-      );
-    }
-
     const result = await pool.query(
       `UPDATE "products"
-       SET productname=$1, buyingprice=$2, "quantity"=$3, "category_id"=$4
-       WHERE id=$5
+       SET productname=$1, buyingprice=$2, "category_id"=$3
+       WHERE id=$4
        RETURNING *`,
-      [name, price, quantity, category_id, id]
+      [name, price, category_id, id]
     );
     if (result.rowCount === 0) {
       throw new ApiError(404, `No item with id: ${id} found`);

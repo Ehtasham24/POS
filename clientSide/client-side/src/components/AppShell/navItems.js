@@ -10,6 +10,7 @@ import {
   HiOutlineReceiptRefund,
   HiOutlineQrCode,
   HiOutlineClock,
+  HiOutlineArchiveBoxXMark,
 } from "react-icons/hi2";
 
 // `roles` omitted = visible to everyone logged in (Owner and Cashier alike). A Cashier's
@@ -23,6 +24,16 @@ export const navItems = [
     label: "Inventory",
     labelKey: "nav.inventory",
     icon: HiOutlineArchiveBox,
+    roles: ["owner"],
+  },
+  // Owner-only, same as Inventory — the full restock/damage/expiry/theft/count-correction
+  // history (Sevices/stockAdjustmentService.js), each traceable back to the lot it came
+  // from where one exists.
+  {
+    to: "/stock-adjustments",
+    label: "Stock Adjustments",
+    labelKey: "nav.stockAdjustments",
+    icon: HiOutlineArchiveBoxXMark,
     roles: ["owner"],
   },
   {

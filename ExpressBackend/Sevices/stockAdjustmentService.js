@@ -2,7 +2,12 @@ const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { applyStockDelta } = require("./lotService");
 
-const REASON_CODES = ["damaged", "expired", "theft", "count_correction", "other"];
+// 'restock' is the only positive-quantity reason meant for routine use — a plain (non-batch-
+// tracked) product legitimately receiving more stock, now that Update/Edit Product no longer
+// accept a quantity change at all (Sevices/productsService.js). The other reasons are all
+// losses/corrections; a positive quantity_change under one of those (e.g. "found a
+// miscounted unit") is still allowed, just not the expected routine case.
+const REASON_CODES = ["damaged", "expired", "theft", "count_correction", "restock", "other"];
 
 // Mirrors checkoutSale's own transaction shape (Sevices/salesService.js) exactly — a single
 // deliberate stock-changing action, FOR UPDATE-locked, throws rather than silently
@@ -58,11 +63,21 @@ const listAdjustments = async ({ productId, startDate, endDate, reasonCode } = {
   }
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
 
+  // Full chain back to the original delivery when the adjustment is against a lot: the
+  // lot's own vendor/received date/received-by, not just the adjustment's own attribution —
+  // this is what actually answers "where did this specific unit come from, and who accepted
+  // it" for a discarded/damaged/expired item, not just "who discarded it."
   const { rows } = await pool.query(
-    `SELECT a.*, p.productname, l.lot_code, u.display_name AS adjusted_by_name
+    `SELECT a.*, p.productname, p.batch_tracked,
+            l.lot_code, l.received_at AS lot_received_at,
+            u.display_name AS adjusted_by_name,
+            vendor.name AS lot_vendor_name,
+            receiver.display_name AS lot_received_by_name
      FROM stock_adjustments a
      JOIN products p ON p.id = a.product_id
      LEFT JOIN lots l ON l.id = a.lot_id
+     LEFT JOIN contacts vendor ON vendor.id = l.vendor_id
+     LEFT JOIN users receiver ON receiver.id = l.received_by
      LEFT JOIN users u ON u.id = a.adjusted_by
      ${where}
      ORDER BY a.adjusted_at DESC`,

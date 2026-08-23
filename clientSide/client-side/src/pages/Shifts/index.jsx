@@ -24,6 +24,9 @@ const varianceClass = (variance) => {
 // restriction — see navItems.js/App.jsx) — a cashier manages their own shift, an owner sees
 // and can act on everyone's (Sevices/shiftService.js's self-vs-owner scoping, same shape
 // voidSale already established for sales).
+const filterInputClass =
+  "h-10 rounded-xl border border-surface-border bg-surface-subtle px-3 text-sm dark:border-gray-700 dark:bg-gray-800 dark:text-gray-100";
+
 export default function ShiftsPage() {
   const { user } = useAuth();
   const { t } = useLanguage();
@@ -39,22 +42,68 @@ export default function ShiftsPage() {
   const [movementModalOpen, setMovementModalOpen] = useState(false);
   const [reconcileItem, setReconcileItem] = useState(null);
 
-  const fetchAll = async () => {
+  // Filters — startDate/endDate/status/userId/onlyVariance/minVariance/maxVariance are all
+  // handled server-side (Sevices/shiftService.js's listShifts), not filtered client-side, so
+  // a large history stays fast to query. userId/variance-range are owner-only in the UI since
+  // a cashier is already pinned to their own shifts server-side regardless.
+  const [users, setUsers] = useState([]);
+  const [filterStartDate, setFilterStartDate] = useState("");
+  const [filterEndDate, setFilterEndDate] = useState("");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterUserId, setFilterUserId] = useState("all");
+  const [filterOnlyVariance, setFilterOnlyVariance] = useState(false);
+  const [filterMinVariance, setFilterMinVariance] = useState("");
+  const [filterMaxVariance, setFilterMaxVariance] = useState("");
+
+  const fetchCurrentShift = async () => {
     try {
-      const [current, shifts] = await Promise.all([apiGet("/api/shifts/current"), apiGet("/api/shifts")]);
-      setCurrentShift(current);
-      setHistory(shifts);
+      setCurrentShift(await apiGet("/api/shifts/current"));
     } catch (error) {
-      toast.error(error.message || "Couldn't load shifts.");
+      toast.error(error.message || "Couldn't load your current shift.");
+    }
+  };
+
+  const fetchHistory = async () => {
+    try {
+      const params = new URLSearchParams();
+      if (filterStartDate) params.set("startDate", filterStartDate);
+      if (filterEndDate) params.set("endDate", filterEndDate);
+      if (filterStatus !== "all") params.set("status", filterStatus);
+      if (isOwner && filterUserId !== "all") params.set("userId", filterUserId);
+      if (filterOnlyVariance) params.set("onlyVariance", "true");
+      if (filterMinVariance !== "") params.set("minVariance", filterMinVariance);
+      if (filterMaxVariance !== "") params.set("maxVariance", filterMaxVariance);
+      const query = params.toString();
+      setHistory(await apiGet(`/api/shifts${query ? `?${query}` : ""}`));
+    } catch (error) {
+      toast.error(error.message || "Couldn't load shift history.");
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchAll();
+    fetchCurrentShift();
+    if (isOwner) {
+      apiGet("/api/users")
+        .then(setUsers)
+        .catch((error) => console.error("Error fetching users:", error));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    fetchHistory();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filterStartDate, filterEndDate, filterStatus, filterUserId, filterOnlyVariance, filterMinVariance, filterMaxVariance]);
+
+  // Both the "current shift" card and the history table below need to refresh after any
+  // action (open/close/reconcile) — kept as one helper so every modal's onXxx callback below
+  // doesn't need to know which of the two actually changed.
+  const refreshAll = () => {
+    fetchCurrentShift();
+    fetchHistory();
+  };
 
   return (
     <AppShell title={t("shifts.title")}>
@@ -116,9 +165,67 @@ export default function ShiftsPage() {
         )}
 
         <p className="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400">{t("shifts.history")}</p>
+        <div className="mb-4 flex flex-wrap items-center gap-3">
+          <input
+            type="date"
+            value={filterStartDate}
+            onChange={(e) => setFilterStartDate(e.target.value)}
+            className={filterInputClass}
+          />
+          <input
+            type="date"
+            value={filterEndDate}
+            onChange={(e) => setFilterEndDate(e.target.value)}
+            className={filterInputClass}
+          />
+          <select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)} className={filterInputClass}>
+            <option value="all">{t("shifts.filterAllStatuses")}</option>
+            <option value="open">{t("shifts.statusOpen")}</option>
+            <option value="closed">{t("shifts.statusClosed")}</option>
+          </select>
+          {isOwner && (
+            <select value={filterUserId} onChange={(e) => setFilterUserId(e.target.value)} className={filterInputClass}>
+              <option value="all">{t("shifts.filterAllUsers")}</option>
+              {users.map((u) => (
+                <option key={u.id} value={u.id}>
+                  {u.displayName}
+                </option>
+              ))}
+            </select>
+          )}
+          {isOwner && (
+            <label className="flex h-10 items-center gap-2 rounded-xl border border-surface-border bg-surface-subtle px-3 text-sm text-gray-700 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-200">
+              <input
+                type="checkbox"
+                checked={filterOnlyVariance}
+                onChange={(e) => setFilterOnlyVariance(e.target.checked)}
+                className="h-4 w-4 rounded border-surface-border text-primary-600 focus:ring-primary-500"
+              />
+              {t("shifts.filterOnlyVariance")}
+            </label>
+          )}
+          {isOwner && (
+            <>
+              <input
+                type="number"
+                value={filterMinVariance}
+                onChange={(e) => setFilterMinVariance(e.target.value)}
+                placeholder={t("shifts.filterMinVariance")}
+                className={`${filterInputClass} w-32`}
+              />
+              <input
+                type="number"
+                value={filterMaxVariance}
+                onChange={(e) => setFilterMaxVariance(e.target.value)}
+                placeholder={t("shifts.filterMaxVariance")}
+                className={`${filterInputClass} w-32`}
+              />
+            </>
+          )}
+        </div>
         <div className="overflow-hidden rounded-2xl border border-surface-border dark:border-gray-800">
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] table-fixed border-collapse">
+            <table className="w-full min-w-[860px] table-fixed border-collapse">
               <thead className="bg-surface-subtle dark:bg-gray-800">
                 <tr>
                   {isOwner && (
@@ -126,10 +233,13 @@ export default function ShiftsPage() {
                       {t("shifts.openedBy")}
                     </th>
                   )}
-                  <th className="w-40 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <th className="w-36 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("shifts.openedAt")}
                   </th>
-                  <th className="w-28 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  <th className="w-36 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    {t("shifts.closedAt")}
+                  </th>
+                  <th className="w-24 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
                     {t("shifts.openingFloat")}
                   </th>
                   <th className="w-28 text-left px-2 py-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -150,7 +260,7 @@ export default function ShiftsPage() {
               {loading ? (
                 <tbody>
                   <tr>
-                    <td colSpan={isOwner ? 8 : 7}>
+                    <td colSpan={isOwner ? 9 : 8}>
                       <SkeletonRows count={3} />
                     </td>
                   </tr>
@@ -159,7 +269,7 @@ export default function ShiftsPage() {
                 <tbody className="divide-y divide-surface-border dark:divide-gray-800">
                   {history.length === 0 ? (
                     <tr>
-                      <td colSpan={isOwner ? 8 : 7} className="py-2">
+                      <td colSpan={isOwner ? 9 : 8} className="py-2">
                         <EmptyState icon={HiOutlineClock} title={t("shifts.noHistory")} />
                       </td>
                     </tr>
@@ -176,6 +286,11 @@ export default function ShiftsPage() {
                           )}
                           <td className="truncate px-2 py-3 text-gray-600 dark:text-gray-300">
                             {formatDateTime(shift.opened_at, { dateStyle: "medium", timeStyle: "short" })}
+                          </td>
+                          <td className="truncate px-2 py-3 text-gray-600 dark:text-gray-300">
+                            {shift.closed_at
+                              ? formatDateTime(shift.closed_at, { dateStyle: "medium", timeStyle: "short" })
+                              : "—"}
                           </td>
                           <td className="px-2 py-3 text-gray-800 dark:text-gray-100">
                             PKR {Number(shift.opening_float).toFixed(0)}
@@ -233,7 +348,7 @@ export default function ShiftsPage() {
         onClose={() => setOpenModalOpen(false)}
         onOpened={() => {
           setOpenModalOpen(false);
-          fetchAll();
+          refreshAll();
         }}
       />
       {currentShift && (
@@ -244,7 +359,7 @@ export default function ShiftsPage() {
             shiftId={currentShift.id}
             onClosed={() => {
               setCloseModalOpen(false);
-              fetchAll();
+              refreshAll();
             }}
           />
           <CashMovementModal
@@ -262,7 +377,7 @@ export default function ShiftsPage() {
         shift={reconcileItem}
         onReconciled={() => {
           setReconcileItem(null);
-          fetchAll();
+          refreshAll();
         }}
       />
     </AppShell>

@@ -165,16 +165,40 @@ const recordCashMovement = async (shiftId, requestingUser, amount, reason, conta
 
 // Cashiers see only their own shifts; owners see everyone's — same split fetchBilledHistory
 // (Sevices/salesService.js) already applies to Sales History via its viewerFilter param.
-const listShifts = async (requestingUser, { status } = {}) => {
+// userId/onlyVariance/minVariance/maxVariance are owner-only filters (a cashier is already
+// pinned to their own shifts by the block above, so userId is simply ignored for them rather
+// than erroring — there's nothing more specific it could narrow down to).
+const listShifts = async (
+  requestingUser,
+  { status, startDate, endDate, userId, onlyVariance, minVariance, maxVariance } = {}
+) => {
   const params = [];
   const conditions = [];
   if (requestingUser?.role !== "owner") {
     params.push(requestingUser.id);
     conditions.push(`opened_by = $${params.length}`);
+  } else if (userId) {
+    params.push(userId);
+    conditions.push(`opened_by = $${params.length}`);
   }
   if (status) {
     params.push(status);
     conditions.push(`status = $${params.length}`);
+  }
+  if (startDate && endDate) {
+    params.push(startDate, endDate);
+    conditions.push(`opened_at BETWEEN $${params.length - 1} AND $${params.length}`);
+  }
+  if (onlyVariance) {
+    conditions.push(`variance IS NOT NULL AND variance <> 0`);
+  }
+  if (minVariance !== undefined && minVariance !== null && minVariance !== "") {
+    params.push(Number(minVariance));
+    conditions.push(`variance >= $${params.length}`);
+  }
+  if (maxVariance !== undefined && maxVariance !== null && maxVariance !== "") {
+    params.push(Number(maxVariance));
+    conditions.push(`variance <= $${params.length}`);
   }
   const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
   const { rows } = await pool.query(
