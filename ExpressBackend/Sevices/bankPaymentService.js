@@ -35,6 +35,10 @@ const CHANNELS = ["bank_transfer", "jazzcash", "easypaisa"];
 // 'jazzcash'/'easypaisa' skips that entirely — Controller/paymentGatewayController.js
 // takes it from here, calling that gateway's own initiate API (jazzCashService.js etc.)
 // using this row's gateway_txn_ref, and confirmIntent below is reused unchanged either way.
+//
+// requestingUser is always a real, logged-in user here (this route is requireAuth-gated,
+// never called by a webhook) — its shopId is what the intent itself, and every sale later
+// confirmed from it, belongs to.
 const createIntent = async (
   items,
   requestingUser,
@@ -56,7 +60,7 @@ const createIntent = async (
 
   let bankDetails = null;
   if (channel === "bank_transfer") {
-    const settings = await getSettings();
+    const settings = await getSettings(requestingUser.shopId);
     bankDetails = {
       bankName: settings.bank_name,
       accountTitle: settings.bank_account_title,
@@ -85,8 +89,8 @@ const createIntent = async (
   }
 
   const { rows } = await pool.query(
-    `INSERT INTO bank_payment_intents (cart_snapshot, amount, voucher_code, store_credit_redeemed, created_by, channel)
-     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    `INSERT INTO bank_payment_intents (cart_snapshot, amount, voucher_code, store_credit_redeemed, created_by, channel, shop_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
     [
       JSON.stringify(items),
       amount,
@@ -94,6 +98,7 @@ const createIntent = async (
       creditToApply > 0 ? creditToApply : null,
       requestingUser.id,
       channel,
+      requestingUser.shopId,
     ]
   );
   const intent = rows[0];
@@ -130,14 +135,21 @@ const createIntent = async (
   return withReference(updatedRows[0]);
 };
 
-const getIntent = async (id) => {
-  const { rows } = await pool.query(`SELECT * FROM bank_payment_intents WHERE id = $1`, [id]);
+const getIntent = async (id, shopId) => {
+  const { rows } = await pool.query(
+    `SELECT * FROM bank_payment_intents WHERE id = $1 AND shop_id = $2`,
+    [id, shopId]
+  );
   if (!rows[0]) throw new ApiError(404, "Bank payment intent not found");
   return withReference(rows[0]);
 };
 
 // How a gateway callback (JazzCash's pp_TxnRefNo, Easypaisa's order id) finds its way back
-// to the intent that created it — indexed in migration 016 for exactly this lookup.
+// to the intent that created it — indexed in migration 016 for exactly this lookup. No
+// shopId here: this is called from the gateway's own callback route (no session, no
+// req.shop), and gateway_txn_ref is a value this app itself generated (formatIntentRef,
+// a global-serial-backed reference) — it can't collide across shops the way a human-chosen
+// name could, so there's no "wrong shop" a lookup by this value alone could land on.
 const getIntentByGatewayRef = async (gatewayTxnRef) => {
   const { rows } = await pool.query(
     `SELECT * FROM bank_payment_intents WHERE gateway_txn_ref = $1`,
@@ -151,7 +163,9 @@ const getIntentByGatewayRef = async (gatewayTxnRef) => {
 // distinct from last_confirm_error, which is about checkoutSale itself failing *after* the
 // gateway already reported success. A decline/timeout doesn't cancel the intent — the
 // customer may just retry the same payment — so this only leaves a support/debugging trail,
-// same "record it, let a human decide" shape as flagAmbiguous below.
+// same "record it, let a human decide" shape as flagAmbiguous below. No shopId: same gateway-
+// callback context as getIntentByGatewayRef above, acting on an id it already legitimately
+// resolved from that lookup.
 const recordGatewayResponse = async (id, code) => {
   const { rows } = await pool.query(
     `UPDATE bank_payment_intents SET gateway_response_code = $2 WHERE id = $1 RETURNING *`,
@@ -165,9 +179,9 @@ const recordGatewayResponse = async (id, code) => {
 // filtered to status='awaiting_payment' for the common case. channel is optional too (e.g.
 // a future JazzCash-only view) — omitted, every channel is returned, same as before this
 // param existed.
-const listIntents = async ({ status, channel } = {}) => {
-  const params = [];
-  const conditions = [];
+const listIntents = async ({ status, channel } = {}, shopId) => {
+  const params = [shopId];
+  const conditions = ["shop_id = $1"];
   if (status) {
     params.push(status);
     conditions.push(`status = $${params.length}`);
@@ -176,11 +190,7 @@ const listIntents = async ({ status, channel } = {}) => {
     params.push(channel);
     conditions.push(`channel = $${params.length}`);
   }
-  let query = `SELECT * FROM bank_payment_intents`;
-  if (conditions.length > 0) {
-    query += ` WHERE ${conditions.join(" AND ")}`;
-  }
-  query += ` ORDER BY created_at DESC`;
+  const query = `SELECT * FROM bank_payment_intents WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`;
   const { rows } = await pool.query(query, params);
   return rows.map(withReference);
 };
@@ -192,6 +202,14 @@ const listIntents = async ({ status, channel } = {}) => {
 // notification-forwarder auto-matcher (Sevices/PaymentNotifications/matchingService.js)
 // call this exact same function a human's "Mark as Paid" click does — there is only ever
 // one confirm code path, manual or automatic.
+//
+// Deliberately fetched by id ALONE, not id+shop_id — the automated path (requestingUser:
+// null) doesn't know which shop a given intent id belongs to ahead of time; that's exactly
+// what this lookup is for. Once the row is in hand, intent.shop_id (not requestingUser's)
+// is what gets passed to checkoutSale — the intent itself is always the source of truth for
+// which shop a sale belongs to. A manual confirm (requestingUser set) additionally checks
+// that the intent actually belongs to that user's own shop, so an Owner can't confirm (or
+// even discover the existence of) another shop's pending payment by guessing its id.
 const confirmIntent = async (id, { requestingUser, autoConfirmed = false, matchedSourceText = null } = {}) => {
   const client = await pool.connect();
   try {
@@ -208,6 +226,11 @@ const confirmIntent = async (id, { requestingUser, autoConfirmed = false, matche
     );
     const intent = rows[0];
     if (!intent) throw new ApiError(404, "Bank payment intent not found");
+    if (requestingUser && String(intent.shop_id) !== String(requestingUser.shopId)) {
+      // Same 404 as "doesn't exist" — an Owner probing another shop's intent ids learns
+      // nothing beyond what a nonexistent id would also tell them.
+      throw new ApiError(404, "Bank payment intent not found");
+    }
     if (intent.status === "confirmed") throw new ApiError(409, "This payment was already confirmed");
     if (intent.status === "cancelled") throw new ApiError(409, "This payment was already cancelled — it can't be confirmed");
 
@@ -217,7 +240,7 @@ const confirmIntent = async (id, { requestingUser, autoConfirmed = false, matche
       // function's `client`) — a stock or voucher-balance conflict there rolls back only
       // that inner transaction. This outer transaction (and the row lock above) is
       // untouched either way, so the error-recording branch below always runs cleanly.
-      result = await checkoutSale(intent.cart_snapshot, "bank_transfer", requestingUser, {
+      result = await checkoutSale(intent.cart_snapshot, "bank_transfer", requestingUser, intent.shop_id, {
         voucherCode: intent.voucher_code || undefined,
         storeCreditRedeemed: intent.store_credit_redeemed || undefined,
       });
@@ -258,8 +281,8 @@ const cancelIntent = async (id, requestingUser, reason) => {
     await client.query("BEGIN");
 
     const { rows } = await client.query(
-      `SELECT * FROM bank_payment_intents WHERE id = $1 FOR UPDATE`,
-      [id]
+      `SELECT * FROM bank_payment_intents WHERE id = $1 AND shop_id = $2 FOR UPDATE`,
+      [id, requestingUser.shopId]
     );
     const intent = rows[0];
     if (!intent) throw new ApiError(404, "Bank payment intent not found");
@@ -289,7 +312,11 @@ const cancelIntent = async (id, requestingUser, reason) => {
 // pending intent, or one intent matches more than one incoming notification — "never
 // guess" (plan.md): every intent involved gets flagged for a human to sort out rather
 // than any of them being auto-confirmed. `id -> candidates` lets each intent record only
-// the specific conflicting notification(s)/intent(s) relevant to it.
+// the specific conflicting notification(s)/intent(s) relevant to it. No shopId — same
+// reasoning as confirmIntent's automated path: matchingService.js finds these candidate
+// ids itself (see its own file for the current single-forwarder limitation), and each
+// UPDATE here acts only on an id it already found, not a name/list a shop boundary needs
+// to gate.
 const flagAmbiguous = async (candidatesByIntentId) => {
   const ids = Object.keys(candidatesByIntentId);
   if (ids.length === 0) return [];
@@ -314,9 +341,9 @@ const requeueIntent = async (id, requestingUser) => {
   const { rows } = await pool.query(
     `UPDATE bank_payment_intents
      SET status = 'awaiting_payment', match_candidates = NULL, resolution_note = $2
-     WHERE id = $1 AND status = 'ambiguous'
+     WHERE id = $1 AND shop_id = $3 AND status = 'ambiguous'
      RETURNING *`,
-    [id, requestingUser?.id ? `Requeued by user ${requestingUser.id}` : null]
+    [id, requestingUser?.id ? `Requeued by user ${requestingUser.id}` : null, requestingUser.shopId]
   );
   if (!rows[0]) throw new ApiError(404, "No ambiguous bank payment intent found with that id");
   return withReference(rows[0]);

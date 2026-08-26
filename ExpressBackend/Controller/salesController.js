@@ -17,7 +17,7 @@ const asyncHandler = require("../utils/asyncHandler");
 // gone; it never set sale_transactions/payment_method at all).
 const CheckoutSales = asyncHandler(async (req, res) => {
   const { items, paymentMethod, voucherCode, storeCreditRedeemed } = req.body;
-  const result = await checkoutSale(items, paymentMethod, req.user, { voucherCode, storeCreditRedeemed });
+  const result = await checkoutSale(items, paymentMethod, req.user, req.user.shopId, { voucherCode, storeCreditRedeemed });
 
   res.status(200).json({
     status: 200,
@@ -27,7 +27,7 @@ const CheckoutSales = asyncHandler(async (req, res) => {
 });
 
 const getRecentSale = asyncHandler(async (req, res) => {
-  const sales = await getRecentSales();
+  const sales = await getRecentSales(req.user.shopId);
   res.status(200).json({
     message: "Recent sales grouped by timestamp fetched successfully",
     data: sales,
@@ -48,7 +48,8 @@ const getBilledHistory = asyncHandler(async (req, res) => {
     viewerFilter,
     voidStatus,
     receiptNo,
-    paymentMethod
+    paymentMethod,
+    req.user.shopId
   );
   res.status(200).send(result);
 });
@@ -74,7 +75,7 @@ const refundSaleController = asyncHandler(async (req, res) => {
 
 const getSales = asyncHandler(async (req, res) => {
   const { startDate, endDate, paymentMethod } = req.body;
-  const response = await fetchSales(startDate, endDate, paymentMethod);
+  const response = await fetchSales(startDate, endDate, paymentMethod, req.user.shopId);
   res.status(200).send(response);
 });
 
@@ -87,19 +88,19 @@ const getSalesByProfitLoss = asyncHandler(async (req, res) => {
       .send({ error: 'Invalid type. Use "profit" or "loss".' });
   }
 
-  const response = await fetchSalesByProfitLoss(startDate, endDate, type, paymentMethod);
+  const response = await fetchSalesByProfitLoss(startDate, endDate, type, paymentMethod, req.user.shopId);
   res.status(200).send(response);
 });
 
 const getSalesTimeSeries = asyncHandler(async (req, res) => {
   const { startDate, endDate, paymentMethod } = req.body;
-  const response = await fetchSalesTimeSeries(startDate, endDate, paymentMethod);
+  const response = await fetchSalesTimeSeries(startDate, endDate, paymentMethod, req.user.shopId);
   res.status(200).send(response);
 });
 
 const getPaymentMediumTotals = asyncHandler(async (req, res) => {
   const { startDate, endDate } = req.body;
-  const response = await fetchPaymentMediumTotals(startDate, endDate);
+  const response = await fetchPaymentMediumTotals(startDate, endDate, req.user.shopId);
   res.status(200).send(response);
 });
 

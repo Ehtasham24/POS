@@ -31,13 +31,17 @@ const vendorPrefix = (name) => {
   return (letters || "VENDOR").slice(0, 10);
 };
 
-// Atomically reserves the next lot number for this (vendor, product) pair.
-const nextLotSerial = async (vendorId, productId) => {
+// Atomically reserves the next lot number for this (shop, vendor, product) triple —
+// lot_sequences' primary key is now (shop_id, vendor_id, product_id) (migration 021), so
+// two shops using the exact same vendor id (impossible in practice, since vendors are
+// per-shop contacts too, but kept explicit rather than assumed) each keep their own
+// independent counter.
+const nextLotSerial = async (vendorId, productId, shopId) => {
   const result = await pool.query(
-    `INSERT INTO lot_sequences(vendor_id, product_id, last_number) VALUES ($1, $2, 1)
-     ON CONFLICT (vendor_id, product_id) DO UPDATE SET last_number = lot_sequences.last_number + 1
+    `INSERT INTO lot_sequences(vendor_id, product_id, last_number, shop_id) VALUES ($1, $2, 1, $3)
+     ON CONFLICT (shop_id, vendor_id, product_id) DO UPDATE SET last_number = lot_sequences.last_number + 1
      RETURNING last_number`,
-    [vendorId, productId]
+    [vendorId, productId, shopId]
   );
   return result.rows[0].last_number;
 };
@@ -49,15 +53,15 @@ const nextLotSerial = async (vendorId, productId) => {
 // product") collapse to the same 3-letter prefix. Combined with each (vendor, product)
 // pair keeping its own independent serial counter starting at 1, that means two entirely
 // different products could each land on the exact same code, e.g. both "MAAZ-TST-001" —
-// which actually happened. lot_code must be globally unique (it's looked up on its own in
+// which actually happened. lot_code must be unique per shop (it's looked up on its own in
 // getLotByCode, with no product_id to disambiguate — scan-to-sell would resolve to the
-// wrong product), so after building a candidate, re-check it against every lot, not just
-// this product's own, and keep advancing this pair's serial until the code is actually
-// free.
-const generateLotCode = async (vendorId, productId) => {
+// wrong product within that shop), so after building a candidate, re-check it against
+// every lot in THIS shop, not just this product's own, and keep advancing this pair's
+// serial until the code is actually free.
+const generateLotCode = async (vendorId, productId, shopId) => {
   const [{ rows: vendorRows }, { rows: productRows }] = await Promise.all([
-    pool.query(`SELECT name FROM contacts WHERE id = $1`, [vendorId]),
-    pool.query(`SELECT productname FROM products WHERE id = $1`, [productId]),
+    pool.query(`SELECT name FROM contacts WHERE id = $1 AND shop_id = $2`, [vendorId, shopId]),
+    pool.query(`SELECT productname FROM products WHERE id = $1 AND shop_id = $2`, [productId, shopId]),
   ]);
   if (!vendorRows[0]) throw new Error("Vendor not found");
   if (!productRows[0]) throw new Error("Product not found");
@@ -67,12 +71,15 @@ const generateLotCode = async (vendorId, productId) => {
 
   const MAX_ATTEMPTS = 50;
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-    const serial = await nextLotSerial(vendorId, productId);
+    const serial = await nextLotSerial(vendorId, productId, shopId);
     const candidate = `${vPrefix}-${pPrefix}-${String(serial).padStart(3, "0")}`;
-    const { rows: existing } = await pool.query(`SELECT 1 FROM lots WHERE lot_code = $1`, [candidate]);
+    const { rows: existing } = await pool.query(
+      `SELECT 1 FROM lots WHERE lot_code = $1 AND shop_id = $2`,
+      [candidate, shopId]
+    );
     if (existing.length === 0) return candidate;
-    // Taken by some other product — loop and pull the next serial for this (vendor,
-    // product) pair instead.
+    // Taken by some other product in this shop — loop and pull the next serial for this
+    // (vendor, product) pair instead.
   }
   throw new Error("Could not generate a unique lot code — too many collisions");
 };
@@ -84,18 +91,28 @@ const generateLotCode = async (vendorId, productId) => {
 // adjusted_by, not a manually-typed field — so "who accepted this stock" is always
 // traceable and can't be misattributed. Optional/nullable so nothing breaks for any
 // pre-existing lot created before this column existed.
-const createLot = async (productId, { vendor_id, buying_price, quantity }, receivedByUserId = null) => {
+//
+// productId is verified against shopId before anything else — otherwise a request
+// carrying another shop's product id would silently attach a new lot (and a vendor
+// lookup, via generateLotCode) to a product this shop doesn't own.
+const createLot = async (productId, { vendor_id, buying_price, quantity }, receivedByUserId = null, shopId) => {
   if (!vendor_id) throw new Error("A vendor is required to create a lot");
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty <= 0) throw new Error("Quantity must be a positive number");
 
-  const lotCode = await generateLotCode(vendor_id, productId);
+  const { rows: productCheck } = await pool.query(`SELECT id FROM products WHERE id = $1 AND shop_id = $2`, [
+    productId,
+    shopId,
+  ]);
+  if (!productCheck[0]) throw new ApiError(404, `Product ${productId} not found`);
+
+  const lotCode = await generateLotCode(vendor_id, productId, shopId);
 
   const { rows } = await pool.query(
-    `INSERT INTO lots (product_id, vendor_id, lot_code, buying_price, qty_received, qty_remaining, received_by)
-     VALUES ($1, $2, $3, $4, $5, $5, $6)
+    `INSERT INTO lots (product_id, vendor_id, lot_code, buying_price, qty_received, qty_remaining, received_by, shop_id)
+     VALUES ($1, $2, $3, $4, $5, $5, $6, $7)
      RETURNING *`,
-    [productId, vendor_id, lotCode, buying_price, qty, receivedByUserId]
+    [productId, vendor_id, lotCode, buying_price, qty, receivedByUserId, shopId]
   );
 
   await pool.query(
@@ -107,14 +124,14 @@ const createLot = async (productId, { vendor_id, buying_price, quantity }, recei
 };
 
 // Adds quantity to an existing lot at that lot's existing price (same batch = same cost).
-const addStockToLot = async (lotId, quantity) => {
+const addStockToLot = async (lotId, quantity, shopId) => {
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty <= 0) throw new Error("Quantity must be a positive number");
 
   const { rows } = await pool.query(
     `UPDATE lots SET qty_received = qty_received + $2, qty_remaining = qty_remaining + $2
-     WHERE id = $1 RETURNING *`,
-    [lotId, qty]
+     WHERE id = $1 AND shop_id = $3 RETURNING *`,
+    [lotId, qty, shopId]
   );
   if (!rows[0]) throw new Error("Lot not found");
 
@@ -126,47 +143,52 @@ const addStockToLot = async (lotId, quantity) => {
   return rows[0];
 };
 
-const getLotsForProduct = async (productId) => {
+const getLotsForProduct = async (productId, shopId) => {
   const result = await pool.query(
     `SELECT l.*, c.name AS vendor_name, u.display_name AS received_by_name
      FROM lots l
      LEFT JOIN contacts c ON c.id = l.vendor_id
      LEFT JOIN users u ON u.id = l.received_by
-     WHERE l.product_id = $1
+     WHERE l.product_id = $1 AND l.shop_id = $2
      ORDER BY l.received_at`,
-    [productId]
+    [productId, shopId]
   );
   return result.rows;
 };
 
-const getLotById = async (lotId) => {
+const getLotById = async (lotId, shopId) => {
   const result = await pool.query(
     `SELECT l.*, c.name AS vendor_name, u.display_name AS received_by_name
      FROM lots l
      LEFT JOIN contacts c ON c.id = l.vendor_id
      LEFT JOIN users u ON u.id = l.received_by
-     WHERE l.id = $1`,
-    [lotId]
+     WHERE l.id = $1 AND l.shop_id = $2`,
+    [lotId, shopId]
   );
   return result.rows[0] || null;
 };
 
-const getLotByCode = async (lotCode) => {
+// This is the fix for what used to be a genuinely global lookup — lot_code is only unique
+// PER SHOP now (migration 021's Landmine 3 fix), so a code alone is no longer enough to
+// find the right row: without shopId, this could return a different shop's lot entirely
+// for a scan that happens to match its code, or (before that migration) simply couldn't
+// have two shops using the same code at all.
+const getLotByCode = async (lotCode, shopId) => {
   const result = await pool.query(
     `SELECT l.*, c.name AS vendor_name, p.productname, p.category_id
      FROM lots l
      JOIN products p ON p.id = l.product_id
      LEFT JOIN contacts c ON c.id = l.vendor_id
-     WHERE l.lot_code = $1`,
-    [lotCode]
+     WHERE l.lot_code = $1 AND l.shop_id = $2`,
+    [lotCode, shopId]
   );
   return result.rows[0] || null;
 };
 
 // Decrements a lot's remaining quantity (a sale) and keeps the product's cached total in sync.
-const decrementLot = async (lotId, quantity) => {
+const decrementLot = async (lotId, quantity, shopId) => {
   const qty = Number(quantity);
-  const { rows } = await pool.query(`SELECT * FROM lots WHERE id = $1`, [lotId]);
+  const { rows } = await pool.query(`SELECT * FROM lots WHERE id = $1 AND shop_id = $2`, [lotId, shopId]);
   const lot = rows[0];
   if (!lot) throw new Error("Lot not found");
   if (qty > lot.qty_remaining) {
@@ -197,20 +219,26 @@ const decrementLot = async (lotId, quantity) => {
 //
 // client: an in-transaction pg client (caller owns BEGIN/COMMIT/ROLLBACK).
 // delta: signed — negative decrements (a sale, a shrinkage adjustment), positive increments
-// (a correction-up). Returns the buying price to snapshot (the lot's own cost if lotId is
-// given, else the product's current buyingprice). updatedQuantity is the RESULTING count of
-// whichever row was actually locked (the lot's own qty_remaining when lotId is given — NOT
-// products.quantity, which is a multi-lot aggregate and can differ) — a caller that needs
-// the product-level aggregate specifically (e.g. checkoutSale's low-stock check) should
-// still read products.quantity itself, not rely on this value for that.
-const applyStockDelta = async (client, { productId, lotId, delta }) => {
+// (a correction-up). shopId is checked on both the lot and the plain-product lookup — a
+// cart item whose id belongs to another shop resolves to the same 404 an actually-deleted
+// product would, rather than ever touching that other shop's stock. Returns the buying
+// price to snapshot (the lot's own cost if lotId is given, else the product's current
+// buyingprice). updatedQuantity is the RESULTING count of whichever row was actually locked
+// (the lot's own qty_remaining when lotId is given — NOT products.quantity, which is a
+// multi-lot aggregate and can differ) — a caller that needs the product-level aggregate
+// specifically (e.g. checkoutSale's low-stock check) should still read products.quantity
+// itself, not rely on this value for that.
+const applyStockDelta = async (client, { productId, lotId, delta, shopId }) => {
   const change = Number(delta);
   if (!Number.isFinite(change) || change === 0) {
     throw new ApiError(400, "Stock change must be a non-zero number");
   }
 
   if (lotId) {
-    const { rows: lotRows } = await client.query(`SELECT * FROM lots WHERE id = $1 FOR UPDATE`, [lotId]);
+    const { rows: lotRows } = await client.query(
+      `SELECT * FROM lots WHERE id = $1 AND shop_id = $2 FOR UPDATE`,
+      [lotId, shopId]
+    );
     const lot = lotRows[0];
     if (!lot) throw new ApiError(404, `Lot ${lotId} not found`);
     if (String(lot.product_id) !== String(productId)) {
@@ -229,8 +257,8 @@ const applyStockDelta = async (client, { productId, lotId, delta }) => {
   }
 
   const { rows: productRows } = await client.query(
-    `SELECT quantity, buyingprice FROM products WHERE id = $1 FOR UPDATE`,
-    [productId]
+    `SELECT quantity, buyingprice FROM products WHERE id = $1 AND shop_id = $2 FOR UPDATE`,
+    [productId, shopId]
   );
   const product = productRows[0];
   if (!product) throw new ApiError(404, `Product ${productId} not found`);

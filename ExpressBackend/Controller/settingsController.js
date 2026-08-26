@@ -2,7 +2,7 @@ const { getSettings, updateSetting, DEFAULT_TIMEZONE } = require("../Sevices/set
 const asyncHandler = require("../utils/asyncHandler");
 
 const GetSettings = asyncHandler(async (req, res) => {
-  const settings = await getSettings();
+  const settings = await getSettings(req.user.shopId);
   // Computed, not stored — lets the Settings UI show what "Auto" actually resolves to
   // without a separate request, and gives every other page a fallback when settings.timezone
   // itself is unset (see utils/timezone.js's resolveTimezone on the frontend).
@@ -14,7 +14,7 @@ const UpdateSettings = asyncHandler(async (req, res) => {
   if (!key || value === undefined) {
     return res.status(400).send({ message: "key and value are required" });
   }
-  const updated = await updateSetting(key, value);
+  const updated = await updateSetting(key, value, req.user.shopId);
   res.send(updated);
 });
 

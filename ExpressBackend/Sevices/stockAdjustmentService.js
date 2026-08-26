@@ -28,13 +28,18 @@ const createAdjustment = async (requestingUser, { productId, lotId, quantityChan
   try {
     await client.query("BEGIN");
 
-    const { buyingPrice } = await applyStockDelta(client, { productId, lotId, delta: change });
+    const { buyingPrice } = await applyStockDelta(client, {
+      productId,
+      lotId,
+      delta: change,
+      shopId: requestingUser.shopId,
+    });
 
     const { rows } = await client.query(
-      `INSERT INTO stock_adjustments (product_id, lot_id, quantity_change, buying_price, reason_code, note, adjusted_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+      `INSERT INTO stock_adjustments (product_id, lot_id, quantity_change, buying_price, reason_code, note, adjusted_by, shop_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING *`,
-      [productId, lotId || null, change, buyingPrice, reasonCode, note || null, requestingUser.id]
+      [productId, lotId || null, change, buyingPrice, reasonCode, note || null, requestingUser.id, requestingUser.shopId]
     );
 
     await client.query("COMMIT");
@@ -47,9 +52,9 @@ const createAdjustment = async (requestingUser, { productId, lotId, quantityChan
   }
 };
 
-const listAdjustments = async ({ productId, startDate, endDate, reasonCode } = {}) => {
-  const params = [];
-  const conditions = [];
+const listAdjustments = async ({ productId, startDate, endDate, reasonCode } = {}, shopId) => {
+  const params = [shopId];
+  const conditions = ["a.shop_id = $1"];
   if (productId) {
     params.push(productId);
     conditions.push(`a.product_id = $${params.length}`);
@@ -61,7 +66,7 @@ const listAdjustments = async ({ productId, startDate, endDate, reasonCode } = {
     params.push(reasonCode);
     conditions.push(`a.reason_code = $${params.length}`);
   }
-  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const where = `WHERE ${conditions.join(" AND ")}`;
 
   // Full chain back to the original delivery when the adjustment is against a lot: the
   // lot's own vendor/received date/received-by, not just the adjustment's own attribution —
@@ -90,13 +95,13 @@ const listAdjustments = async ({ productId, startDate, endDate, reasonCode } = {
 // adjustment is a correction-up/found-stock, not a loss) for the Sales Report's Shrinkage
 // section, both overall and broken down by reason/product — this is what finally puts
 // shrinkage cost somewhere visible, instead of it silently vanishing from every report.
-const getShrinkageSummary = async (startDate, endDate) => {
+const getShrinkageSummary = async (startDate, endDate, shopId) => {
   const { rows: totals } = await pool.query(
     `SELECT COALESCE(SUM(-quantity_change), 0) AS total_units_lost,
             COALESCE(SUM(-quantity_change * buying_price), 0) AS total_cost_impact
      FROM stock_adjustments
-     WHERE adjusted_at BETWEEN $1 AND $2 AND quantity_change < 0`,
-    [startDate, endDate]
+     WHERE adjusted_at BETWEEN $1 AND $2 AND quantity_change < 0 AND shop_id = $3`,
+    [startDate, endDate, shopId]
   );
 
   const { rows: byReason } = await pool.query(
@@ -104,22 +109,28 @@ const getShrinkageSummary = async (startDate, endDate) => {
             SUM(-quantity_change) AS units_lost,
             SUM(-quantity_change * buying_price) AS cost_impact
      FROM stock_adjustments
-     WHERE adjusted_at BETWEEN $1 AND $2 AND quantity_change < 0
+     WHERE adjusted_at BETWEEN $1 AND $2 AND quantity_change < 0 AND shop_id = $3
      GROUP BY reason_code
      ORDER BY cost_impact DESC`,
-    [startDate, endDate]
+    [startDate, endDate, shopId]
   );
 
+  // GROUP BY includes a.shop_id alongside product_id/productname — same fail-safe reasoning
+  // as salesService.js's fetchSales: two shops can now share a product name (migration 021),
+  // so grouping only by product_id (itself already shop-specific, since a product row only
+  // ever belongs to one shop) is actually already safe here — shop_id is added purely for
+  // consistency/defense-in-depth with the WHERE filter, not because product_id alone could
+  // actually merge two shops' rows.
   const { rows: byProduct } = await pool.query(
     `SELECT a.product_id, p.productname,
             SUM(-a.quantity_change) AS units_lost,
             SUM(-a.quantity_change * a.buying_price) AS cost_impact
      FROM stock_adjustments a
      JOIN products p ON p.id = a.product_id
-     WHERE a.adjusted_at BETWEEN $1 AND $2 AND a.quantity_change < 0
-     GROUP BY a.product_id, p.productname
+     WHERE a.adjusted_at BETWEEN $1 AND $2 AND a.quantity_change < 0 AND a.shop_id = $3
+     GROUP BY a.product_id, p.productname, a.shop_id
      ORDER BY cost_impact DESC`,
-    [startDate, endDate]
+    [startDate, endDate, shopId]
   );
 
   return {

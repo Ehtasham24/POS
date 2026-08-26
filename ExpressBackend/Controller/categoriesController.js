@@ -6,13 +6,13 @@ const {
 const asyncHandler = require("../utils/asyncHandler");
 
 const GetCategories = asyncHandler(async (req, res) => {
-  const result = await getCategories();
+  const result = await getCategories(req.user.shopId);
   res.send(result.rows);
 });
 
 const GetProductsForCategories = asyncHandler(async (req, res) => {
   const id = req.params.id;
-  const result = await getProductsForCategory(id);
+  const result = await getProductsForCategory(id, req.user.shopId);
   res.send(result.rows);
 });
 
@@ -21,7 +21,7 @@ const PostCategory = asyncHandler(async (req, res) => {
   if (!category_name || !category_name.trim()) {
     return res.status(400).send({ message: "Category name is required" });
   }
-  const result = await createCategory(category_name.trim());
+  const result = await createCategory(category_name.trim(), req.user.shopId);
   res.status(201).send(result.rows[0]);
 });
 

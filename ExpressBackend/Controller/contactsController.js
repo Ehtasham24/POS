@@ -3,7 +3,7 @@ const asyncHandler = require("../utils/asyncHandler");
 
 const GetContacts = asyncHandler(async (req, res) => {
   const { type } = req.query;
-  const contacts = await getContacts(type);
+  const contacts = await getContacts(type, req.user.shopId);
   res.send(contacts);
 });
 
@@ -12,13 +12,13 @@ const PostContact = asyncHandler(async (req, res) => {
   if (!name || !name.trim()) {
     return res.status(400).send({ message: "Name is required" });
   }
-  const contact = await createContact(req.body);
+  const contact = await createContact(req.body, req.user.shopId);
   res.status(201).send(contact);
 });
 
 const UpdateContact = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const contact = await updateContact(id, req.body);
+  const contact = await updateContact(id, req.body, req.user.shopId);
   if (!contact) {
     return res.status(404).send({ message: `No contact with id: ${id}` });
   }

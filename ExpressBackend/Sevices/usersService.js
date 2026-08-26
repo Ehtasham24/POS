@@ -11,14 +11,20 @@ const toPublicUser = (row) => ({
   createdAt: row.created_at,
 });
 
-const listUsers = async () => {
+const listUsers = async (shopId) => {
   const { rows } = await pool.query(
-    "SELECT id, username, display_name, role, is_active, created_at FROM users ORDER BY created_at"
+    "SELECT id, username, display_name, role, is_active, created_at FROM users WHERE shop_id = $1 ORDER BY created_at",
+    [shopId]
   );
   return rows.map(toPublicUser);
 };
 
-const createUser = async ({ username, password, displayName, role }) => {
+// username stays checked GLOBALLY, not per-shop — migration 021 deliberately left
+// users.username as a single database-wide UNIQUE constraint (a shop's owner logs in with
+// no shop selection at all, so the username alone has to resolve to exactly one shop; see
+// that migration's own comment). The new user itself is still created inside shopId, same
+// as everything else here.
+const createUser = async ({ username, password, displayName, role }, shopId) => {
   if (!username || !password || !displayName) {
     throw new ApiError(400, "Username, password and display name are required");
   }
@@ -32,18 +38,21 @@ const createUser = async ({ username, password, displayName, role }) => {
 
   const passwordHash = await hashPassword(password);
   const { rows } = await pool.query(
-    `INSERT INTO users (username, password_hash, display_name, role)
-     VALUES ($1, $2, $3, $4)
+    `INSERT INTO users (username, password_hash, display_name, role, shop_id)
+     VALUES ($1, $2, $3, $4, $5)
      RETURNING id, username, display_name, role, is_active, created_at`,
-    [username, passwordHash, displayName, role]
+    [username, passwordHash, displayName, role, shopId]
   );
   return toPublicUser(rows[0]);
 };
 
 // Deliberately no hard delete — deactivating is enough (and keeps sales.sold_by /
 // sales.voided_by referencing a real row, consistent with never destroying history).
-const updateUser = async (id, { displayName, role, isActive, password }) => {
-  const existing = await pool.query("SELECT * FROM users WHERE id = $1", [id]);
+// shop_id checked alongside id throughout — an Owner can only ever look up/edit their own
+// shop's users, so a guessed/enumerated id from another shop resolves to "not found" here,
+// the same way it already does for every other per-shop resource.
+const updateUser = async (id, { displayName, role, isActive, password }, shopId) => {
+  const existing = await pool.query("SELECT * FROM users WHERE id = $1 AND shop_id = $2", [id, shopId]);
   if (!existing.rows[0]) throw new ApiError(404, "User not found");
 
   if (role !== undefined && !["owner", "cashier"].includes(role)) {
@@ -59,7 +68,7 @@ const updateUser = async (id, { displayName, role, isActive, password }) => {
   const { rows } = await pool.query(
     `UPDATE users
      SET display_name = $2, role = $3, is_active = $4, password_hash = $5
-     WHERE id = $1
+     WHERE id = $1 AND shop_id = $6
      RETURNING id, username, display_name, role, is_active, created_at`,
     [
       id,
@@ -67,6 +76,7 @@ const updateUser = async (id, { displayName, role, isActive, password }) => {
       role ?? current.role,
       isActive ?? current.is_active,
       passwordHash,
+      shopId,
     ]
   );
   return toPublicUser(rows[0]);

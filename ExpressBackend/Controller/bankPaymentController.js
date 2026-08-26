@@ -15,13 +15,13 @@ const CreateBankPaymentIntent = asyncHandler(async (req, res) => {
 });
 
 const GetBankPaymentIntent = asyncHandler(async (req, res) => {
-  const intent = await getIntent(req.params.id);
+  const intent = await getIntent(req.params.id, req.user.shopId);
   res.send(intent);
 });
 
 const ListBankPaymentIntents = asyncHandler(async (req, res) => {
   const { status, channel } = req.query;
-  const intents = await listIntents({ status, channel });
+  const intents = await listIntents({ status, channel }, req.user.shopId);
   res.send(intents);
 });
 

@@ -5,26 +5,26 @@ const { applyStockDelta } = require("./lotService");
 const { getOpenShift, touchActivity } = require("./shiftService");
 const ApiError = require("../utils/ApiError");
 
-const getRecentSales = async () => {
+const getRecentSales = async (shopId) => {
   try {
     // Step 1: Fetch the most recent sale data
     const recentSaleQuery = `
-      SELECT 
-          s.id, 
-          s.selling_price, 
-          s.quantity, 
-          s.product_id, 
+      SELECT
+          s.id,
+          s.selling_price,
+          s.quantity,
+          s.product_id,
           DATE_TRUNC('second', s.sale_time) AS sale_time,  -- Truncate to seconds
           p.productname
       FROM public.sales s
       JOIN public.products p ON s.product_id = p.id
-      WHERE s.is_voided = false
+      WHERE s.is_voided = false AND s.shop_id = $1
       ORDER BY s.sale_time DESC
       LIMIT 1;  -- Get only the most recent sale
     `;
 
     // Execute the query to get the most recent sale
-    const recentSaleResult = await pool.query(recentSaleQuery);
+    const recentSaleResult = await pool.query(recentSaleQuery, [shopId]);
 
     // Check if there is any recent sale data
     if (recentSaleResult.rows.length === 0) {
@@ -42,23 +42,25 @@ const getRecentSales = async () => {
 
     // Step 2: Fetch all sales that occurred at the same truncated time
     const sameTimeSalesQuery = `
-      SELECT 
-          s.id, 
-          s.selling_price, 
-          s.quantity, 
-          s.product_id, 
+      SELECT
+          s.id,
+          s.selling_price,
+          s.quantity,
+          s.product_id,
           s.sale_time,
           p.productname
       FROM public.sales s
       JOIN public.products p ON s.product_id = p.id
       WHERE DATE_TRUNC('second', s.sale_time) = $1  -- Match the truncated time
         AND s.is_voided = false
+        AND s.shop_id = $2
       ORDER BY s.sale_time DESC;
     `;
 
     // Execute the query to get all sales at the same second
     const sameTimeSalesResult = await pool.query(sameTimeSalesQuery, [
       recentSaleTime,
+      shopId,
     ]);
 
     // Prepare the response with the recent sales at the same time
@@ -83,16 +85,16 @@ const getRecentSales = async () => {
   }
 };
 
-const getLowStockThreshold = async () => {
-  const settings = await getSettings();
+const getLowStockThreshold = async (shopId) => {
+  const settings = await getSettings(shopId);
   const threshold = Number(settings.low_stock_threshold);
   return Number.isFinite(threshold) ? threshold : 10;
 };
 
 // null = unlimited (the default — no setting means no age restriction on refunds, Owner/
 // staff discretion). Mirrors getLowStockThreshold's read-from-settings shape.
-const getRefundWindowDays = async () => {
-  const settings = await getSettings();
+const getRefundWindowDays = async (shopId) => {
+  const settings = await getSettings(shopId);
   const days = Number(settings.refund_window_days);
   return Number.isFinite(days) && days > 0 ? days : null;
 };
@@ -102,6 +104,11 @@ const getRefundWindowDays = async () => {
 // already rely on elsewhere in this file), so there's no custom counter/locking logic that
 // could produce a duplicate. Formatting is applied at read/display time only, never stored,
 // so the prefix/padding can change later without having to reformat historical receipts.
+//
+// NOTE: sale_transactions.id is a single database-wide SERIAL, so receipt numbers are
+// unique but not contiguous per shop once there's more than one shop (Shop A might see
+// RCPT-000001, RCPT-000004, ...) — a cosmetic gap, not a correctness issue; tracked as a
+// follow-up (a per-shop sequence) rather than fixed in this pass.
 const RECEIPT_PREFIX = "RCPT-";
 const formatReceiptNo = (transactionId) =>
   transactionId ? `${RECEIPT_PREFIX}${String(transactionId).padStart(6, "0")}` : null;
@@ -136,7 +143,14 @@ const formatRefundNo = (refundId) =>
 // 'cash' for the remaining Rs.500). No customer identity involved anywhere here — see
 // migrations/011_store_credit_vouchers.sql: redemption works by the voucher's own code, not
 // by who's making the purchase.
-const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode, storeCreditRedeemed } = {}) => {
+//
+// shopId is its own explicit argument, never derived from requestingUser — this is called
+// both from a live checkout (requestingUser set, shopId = req.user.shopId) and from an
+// automated bank-payment confirmation (requestingUser: null, shopId = the pending intent's
+// OWN shop_id — see bankPaymentService.js's confirmIntent). A sale always belongs to exactly
+// one shop; unlike a shift, that's never optional just because nobody's logged in for this
+// particular call.
+const checkoutSale = async (items, paymentMethod, requestingUser, shopId, { voucherCode, storeCreditRedeemed } = {}) => {
   if (!Array.isArray(items) || items.length === 0) {
     throw new ApiError(400, "Cart is empty");
   }
@@ -173,9 +187,9 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
     // sums cash sales by this column, not by a time window, so two staff with simultaneously-
     // open shifts never get cross-attributed.
     const { rows: txnRows } = await client.query(
-      `INSERT INTO sale_transactions (sold_by, payment_method, store_credit_applied, shift_id)
-       VALUES ($1, $2, $3, $4) RETURNING id`,
-      [requestingUser?.id || null, paymentMethod || null, creditToApply, openShift?.id || null]
+      `INSERT INTO sale_transactions (sold_by, payment_method, store_credit_applied, shift_id, shop_id)
+       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+      [requestingUser?.id || null, paymentMethod || null, creditToApply, openShift?.id || null, shopId]
     );
     const transactionId = txnRows[0].id;
     // A real sale is exactly the "this shift is genuinely in use" signal the auto-close
@@ -188,10 +202,11 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
         amount: creditToApply,
         transactionId,
         requestingUser,
+        shopId,
       });
     }
 
-    const threshold = await getLowStockThreshold();
+    const threshold = await getLowStockThreshold(shopId);
 
     const soldItems = [];
     for (const item of items) {
@@ -206,7 +221,7 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
       // negative delta here (a sale spends stock down) vs. either sign for an adjustment.
       let buyingPrice;
       try {
-        ({ buyingPrice } = await applyStockDelta(client, { productId: productID, lotId, delta: -qty }));
+        ({ buyingPrice } = await applyStockDelta(client, { productId: productID, lotId, delta: -qty, shopId }));
       } catch (err) {
         // Re-worded only where checkoutSale had a more specific existing message than
         // applyStockDelta's generic ones, so anything already surfaced to a cashier reads
@@ -218,10 +233,10 @@ const checkoutSale = async (items, paymentMethod, requestingUser, { voucherCode,
       }
 
       const { rows: saleRows } = await client.query(
-        `INSERT INTO sales (selling_price, quantity, product_id, sale_time, lot_id, buying_price, sold_by, transaction_id)
-         VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7)
+        `INSERT INTO sales (selling_price, quantity, product_id, sale_time, lot_id, buying_price, sold_by, transaction_id, shop_id)
+         VALUES ($1, $2, $3, NOW(), $4, $5, $6, $7, $8)
          RETURNING id`,
-        [sellingPrice, qty, productID, lotId || null, buyingPrice, requestingUser?.id || null, transactionId]
+        [sellingPrice, qty, productID, lotId || null, buyingPrice, requestingUser?.id || null, transactionId, shopId]
       );
 
       const { rows: afterRows } = await client.query(`SELECT quantity FROM products WHERE id = $1`, [
@@ -290,8 +305,9 @@ const fetchBilledHistory = async (
   receiptNo = null, // e.g. "RCPT-000123" — the receipt-number lookup a refund flow starts
   // from; parsed back to the raw transaction_id and matched exactly, no new endpoint needed
   // since this reuses the same conditions[]/params mechanism as every other filter here.
-  paymentMethod = null // 'cash' | 'card' | 'bank_transfer' — filters by the whole
+  paymentMethod = null, // 'cash' | 'card' | 'bank_transfer' — filters by the whole
   // transaction's payment medium (sale_transactions.payment_method), not a per-item field.
+  shopId
 ) => {
   try {
     const hasDateFilter =
@@ -304,11 +320,11 @@ const fetchBilledHistory = async (
     const hasReceiptFilter = Number.isFinite(parsedTransactionId);
     const hasPaymentMethodFilter = ["cash", "card", "bank_transfer"].includes(paymentMethod);
 
-    // A transaction "matches" the category filter if any item in it belongs to that
-    // category — the product join is only needed to test that, not to restrict which
-    // items are later shown (a matched transaction is still returned in full).
-    const conditions = [];
-    const params = [];
+    // shop_id is unconditional, not behind an "if filter set" check like the rest —
+    // every caller of this function has a shop, there's no "show me everything"
+    // super-admin view of it.
+    const conditions = ["s.shop_id = $1"];
+    const params = [shopId];
     if (hasDateFilter) {
       params.push(startDate, endDate);
       conditions.push(`s.sale_time BETWEEN $${params.length - 1} AND $${params.length}`);
@@ -326,7 +342,7 @@ const fetchBilledHistory = async (
       // in UTC). sale_time is stored as a naive timestamp that's actually UTC (session
       // timezone is UTC — see Db.js's type-parser comment), so `AT TIME ZONE 'UTC'` first
       // makes that explicit before converting into the business timezone for the comparison.
-      const businessTimezone = await getBusinessTimezone();
+      const businessTimezone = await getBusinessTimezone(shopId);
       params.push(businessTimezone);
       conditions.push(
         `(s.sale_time AT TIME ZONE 'UTC') AT TIME ZONE $${params.length} >= date_trunc('day', NOW() AT TIME ZONE $${params.length})`
@@ -345,7 +361,7 @@ const fetchBilledHistory = async (
       params.push(paymentMethod);
       conditions.push(`st.payment_method = $${params.length}`);
     }
-    const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+    const whereClause = `WHERE ${conditions.join(" AND ")}`;
     const joinClause = hasCategoryFilter
       ? "JOIN public.products p ON s.product_id = p.id"
       : "";
@@ -386,6 +402,11 @@ const fetchBilledHistory = async (
       return { batches: [], totalCount, totalPages, page: safePage, pageSize };
     }
 
+    // batch_key alone (e.g. the legacy "same second" fallback) isn't shop-unique, so this
+    // final fetch still needs its own shop_id filter — otherwise a legacy batch_key that
+    // happens to collide with another shop's legacy rows (same truncated second, extremely
+    // unlikely but not impossible) could pull in a line item that doesn't belong to this
+    // transaction at all.
     const rowsResult = await pool.query(
       `SELECT s.id, s.selling_price, s.buying_price, s.quantity, s.sale_time, s.product_id,
               s.sold_by, s.is_voided, s.voided_at, s.void_reason, s.transaction_id,
@@ -397,9 +418,9 @@ const fetchBilledHistory = async (
        JOIN public.products p ON s.product_id = p.id
        LEFT JOIN public.lots l ON s.lot_id = l.id
        LEFT JOIN public.sale_transactions st ON st.id = s.transaction_id
-       WHERE ${BATCH_KEY_EXPR} = ANY($1::text[])
+       WHERE ${BATCH_KEY_EXPR} = ANY($1::text[]) AND s.shop_id = $2
        ORDER BY s.sale_time DESC, s.id ASC;`,
-      [batchKeys]
+      [batchKeys, shopId]
     );
 
     // Bucket rows by the SAME batch_key Postgres just computed above — not a JS
@@ -467,7 +488,13 @@ const voidSale = async (saleId, requestingUser, reason) => {
   try {
     await client.query("BEGIN");
 
-    const { rows } = await client.query(`SELECT * FROM sales WHERE id = $1 FOR UPDATE`, [saleId]);
+    // shop_id baked straight into the lookup (not checked afterward) — a sale id from
+    // another shop simply doesn't match, giving the same 404 an actually-nonexistent id
+    // would, rather than ever locking/touching a row this user's shop doesn't own.
+    const { rows } = await client.query(
+      `SELECT * FROM sales WHERE id = $1 AND shop_id = $2 FOR UPDATE`,
+      [saleId, requestingUser.shopId]
+    );
     const sale = rows[0];
     if (!sale) throw new ApiError(404, "Sale not found");
     if (sale.is_voided) throw new ApiError(409, "This sale has already been voided");
@@ -487,7 +514,7 @@ const voidSale = async (saleId, requestingUser, reason) => {
       // Business-timezone-aware "today" — same reasoning as fetchBilledHistory's cashier
       // filter above: Postgres's own CURRENT_DATE is the UTC calendar day, which disagrees
       // with the shop's actual day for several hours around each UTC midnight.
-      const businessTimezone = await getBusinessTimezone();
+      const businessTimezone = await getBusinessTimezone(requestingUser.shopId);
       const { rows: dateCheck } = await client.query(
         `SELECT date_trunc('day', (sale_time AT TIME ZONE 'UTC') AT TIME ZONE $2)
                 = date_trunc('day', NOW() AT TIME ZONE $2) AS is_today
@@ -577,13 +604,17 @@ const refundSale = async (
     // commits, and under Postgres's read-committed default, this transaction's next read of
     // `refunds` (below) sees that committed row. A FOR UPDATE directly on a SUM(...) query
     // isn't valid SQL — Postgres can't lock rows an aggregate doesn't return 1:1 with — so
-    // the lock has to live here, exactly like voidSale does for the same reason.
-    const { rows } = await client.query(`SELECT * FROM sales WHERE id = $1 FOR UPDATE`, [saleId]);
+    // the lock has to live here, exactly like voidSale does for the same reason. shop_id is
+    // baked into the fetch itself, same reasoning as voidSale's own lookup above.
+    const { rows } = await client.query(
+      `SELECT * FROM sales WHERE id = $1 AND shop_id = $2 FOR UPDATE`,
+      [saleId, requestingUser.shopId]
+    );
     const sale = rows[0];
     if (!sale) throw new ApiError(404, "Sale not found");
     if (sale.is_voided) throw new ApiError(409, "This sale was voided — nothing to refund");
 
-    const windowDays = await getRefundWindowDays();
+    const windowDays = await getRefundWindowDays(requestingUser.shopId);
     if (windowDays != null) {
       const { rows: ageCheck } = await client.query(
         `SELECT (NOW() - sale_time) > ($2 || ' days')::interval AS expired FROM sales WHERE id = $1`,
@@ -647,10 +678,10 @@ const refundSale = async (
     // the initial value, its own id (formatted below as REF-XXXXXX) is the redemption code.
     // No separate "issue" step needed (see storeCreditService.js / migrations/011).
     const { rows: inserted } = await client.query(
-      `INSERT INTO refunds (sale_id, transaction_id, quantity, refund_amount, refund_method, condition, reason, refunded_by, contact_id, shift_id)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+      `INSERT INTO refunds (sale_id, transaction_id, quantity, refund_amount, refund_method, condition, reason, refunded_by, contact_id, shift_id, shop_id)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
        RETURNING *`,
-      [saleId, sale.transaction_id, qty, amount, refundMethod, condition, reason, requestingUser.id, contactId || null, openShift?.id || null]
+      [saleId, sale.transaction_id, qty, amount, refundMethod, condition, reason, requestingUser.id, contactId || null, openShift?.id || null, requestingUser.shopId]
     );
     await touchActivity(client, openShift?.id);
 
@@ -670,7 +701,7 @@ const refundSale = async (
 
 const PAYMENT_METHODS = ["cash", "card", "bank_transfer"];
 
-const fetchSales = async (startDate, endDate, paymentMethod = null) => {
+const fetchSales = async (startDate, endDate, paymentMethod = null, shopId) => {
   try {
     // Validate date inputs
     if (
@@ -697,6 +728,13 @@ const fetchSales = async (startDate, endDate, paymentMethod = null) => {
     // below keeps working unchanged; a refund's negative quantity does the subtraction for
     // free. LEFT JOINs sale_transactions (migrations/015) to optionally filter by payment
     // medium — legacy sales with no transaction_id simply never match a specific medium.
+    //
+    // GROUP BY includes p.shop_id alongside the WHERE filter, not just productname/category —
+    // a deliberate safety net (not just belt-and-suspenders): two shops could each have a
+    // product with the exact same name (migration 021 made that legal), and productname/
+    // category_id/category_name alone can't tell those apart. If the WHERE filter were ever
+    // missing on some future code path, GROUP BY still keeps their totals from merging into
+    // one row — it fails safe instead of silently combining two shops' revenue.
     const response = await pool.query(
       `SELECT
          p.productname,
@@ -723,10 +761,11 @@ const fetchSales = async (startDate, endDate, paymentMethod = null) => {
        INNER JOIN Categories c ON p.category_id = c.id  -- Join with Categories table to get category name
        LEFT JOIN sale_transactions st ON st.id = s.transaction_id
        WHERE s.event_time BETWEEN $1 AND $2
+         AND s.shop_id = $4
          AND ($3::text IS NULL OR st.payment_method = $3)
-       GROUP BY p.productname, p.category_id, c.category_name  -- Group by necessary columns including category name
+       GROUP BY p.productname, p.category_id, c.category_name, p.shop_id  -- Group by necessary columns including category name
        ORDER BY profit_loss DESC`,
-      [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null]
+      [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null, shopId]
     );
 
     // Extract sales data rows
@@ -748,7 +787,7 @@ const fetchSales = async (startDate, endDate, paymentMethod = null) => {
   }
 };
 
-const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = null) => {
+const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = null, shopId) => {
   try {
     // Validate date inputs
     if (
@@ -774,6 +813,7 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = 
 
     // Sources from sales_ledger, same reasoning as fetchSales above — voided sales already
     // excluded, refunds folded in as negative-quantity rows dated on their own event_time.
+    // GROUP BY includes p.shop_id — same safety-net reasoning as fetchSales above.
     const response = await pool.query(
       `SELECT
          p.productname,
@@ -800,11 +840,12 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = 
        INNER JOIN Categories c ON p.category_id = c.id
        LEFT JOIN sale_transactions st ON st.id = s.transaction_id
        WHERE s.event_time BETWEEN $1 AND $2
+         AND s.shop_id = $4
          AND ($3::text IS NULL OR st.payment_method = $3)
-       GROUP BY p.productname, p.category_id, c.category_name  -- Group by product name and category
+       GROUP BY p.productname, p.category_id, c.category_name, p.shop_id  -- Group by product name and category
        HAVING ${profitCondition} -- Apply the profit condition for profit-only items
        ORDER BY overall_profit_loss DESC`,
-      [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null]
+      [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null, shopId]
     );
 
     // Extract sales data rows
@@ -827,7 +868,7 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = 
 };
 
 // Daily revenue/profit/units within a date range — powers the Sales Report trend chart.
-const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null) => {
+const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null, shopId) => {
   if (!startDate || !endDate || !isValidDate(startDate) || !isValidDate(endDate)) {
     throw new Error("Invalid date inputs. Please provide valid start and end dates.");
   }
@@ -837,7 +878,7 @@ const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null) =>
   // the original sale. Grouped by day in the business timezone (not Postgres's UTC session
   // timezone) so the chart's day buckets agree with what a human looking at the shop's clock
   // would call "today" — same AT TIME ZONE reasoning as fetchBilledHistory's cashier filter.
-  const businessTimezone = await getBusinessTimezone();
+  const businessTimezone = await getBusinessTimezone(shopId);
   const response = await pool.query(
     `SELECT
        date_trunc('day', (s.event_time AT TIME ZONE 'UTC') AT TIME ZONE $3) AS day,
@@ -847,10 +888,11 @@ const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null) =>
      FROM sales_ledger s
      LEFT JOIN sale_transactions st ON st.id = s.transaction_id
      WHERE s.event_time BETWEEN $1 AND $2
+       AND s.shop_id = $5
        AND ($4::text IS NULL OR st.payment_method = $4)
      GROUP BY day
      ORDER BY day`,
-    [startDate, endDate, businessTimezone, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null]
+    [startDate, endDate, businessTimezone, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null, shopId]
   );
 
   return response.rows;
@@ -860,7 +902,7 @@ const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null) =>
 // cards and the Payment Mediums page's, one function reused rather than duplicated. Revenue
 // (quantity * selling_price), not profit — a payment-medium breakdown is about how money
 // came in, which fetchSales/fetchSalesByProfitLoss's profit-per-product view doesn't answer.
-const fetchPaymentMediumTotals = async (startDate, endDate) => {
+const fetchPaymentMediumTotals = async (startDate, endDate, shopId) => {
   if (!startDate || !endDate || !isValidDate(startDate) || !isValidDate(endDate)) {
     throw new Error("Invalid date inputs. Please provide valid start and end dates.");
   }
@@ -869,9 +911,9 @@ const fetchPaymentMediumTotals = async (startDate, endDate) => {
             SUM(s.quantity * s.selling_price)::BIGINT AS total
      FROM sales_ledger s
      LEFT JOIN sale_transactions st ON st.id = s.transaction_id
-     WHERE s.event_time BETWEEN $1 AND $2
+     WHERE s.event_time BETWEEN $1 AND $2 AND s.shop_id = $3
      GROUP BY COALESCE(st.payment_method, 'unknown')`,
-    [startDate, endDate]
+    [startDate, endDate, shopId]
   );
 
   // 'unknown' covers sales from before sale_transactions existed (migrations/008) — real

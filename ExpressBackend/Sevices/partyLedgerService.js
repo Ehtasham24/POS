@@ -13,15 +13,15 @@ const VALID_KINDS = new Set(["charge", "payment", "adjustment"]);
 
 const DEFAULT_PAGE_SIZE = 20;
 
-const assertContactExists = async (contactId) => {
-  const { rows } = await pool.query(`SELECT id FROM contacts WHERE id = $1`, [contactId]);
+const assertContactExists = async (contactId, shopId) => {
+  const { rows } = await pool.query(`SELECT id FROM contacts WHERE id = $1 AND shop_id = $2`, [contactId, shopId]);
   if (!rows[0]) throw new ApiError(400, "Contact not found");
 };
 
-const getBalance = async (contactId, direction) => {
+const getBalance = async (contactId, direction, shopId) => {
   const { rows } = await pool.query(
-    `SELECT balance FROM party_balances WHERE contact_id = $1 AND direction = $2`,
-    [contactId, direction]
+    `SELECT balance FROM party_balances WHERE contact_id = $1 AND direction = $2 AND shop_id = $3`,
+    [contactId, direction, shopId]
   );
   return rows[0] ? Number(rows[0].balance) : 0;
 };
@@ -30,16 +30,17 @@ const getBalance = async (contactId, direction) => {
 // INNER JOIN (not LEFT) is deliberate — party_balances only has a row for a (contact,
 // direction) pair once it has ≥1 transaction, so this naturally excludes contacts that
 // have never been charged/paid in this direction.
-const listParties = async (direction) => {
+const listParties = async (direction, shopId) => {
   if (!VALID_DIRECTIONS.has(direction)) throw new ApiError(400, "Invalid direction");
   const { rows } = await pool.query(
     `SELECT c.id AS contact_id, c.name, c.phone,
             pb.balance, pb.total_charged, pb.total_paid,
             pb.last_activity_on, pb.transaction_count
      FROM contacts c
-     JOIN party_balances pb ON pb.contact_id = c.id AND pb.direction = $1
+     JOIN party_balances pb ON pb.contact_id = c.id AND pb.direction = $1 AND pb.shop_id = $2
+     WHERE c.shop_id = $2
      ORDER BY c.name`,
-    [direction]
+    [direction, shopId]
   );
   return rows;
 };
@@ -48,12 +49,12 @@ const listParties = async (direction) => {
 // running_balance is computed with a window function over the party's FULL history
 // (the window's own ORDER BY, independent of the outer LIMIT/OFFSET), so each row on any
 // page correctly shows "balance as of this transaction," not just a per-page running sum.
-const getPartyTransactions = async (contactId, direction, page = 1, pageSize = DEFAULT_PAGE_SIZE) => {
+const getPartyTransactions = async (contactId, direction, page = 1, pageSize = DEFAULT_PAGE_SIZE, shopId) => {
   if (!VALID_DIRECTIONS.has(direction)) throw new ApiError(400, "Invalid direction");
 
   const countResult = await pool.query(
-    `SELECT COUNT(*) AS total FROM party_transactions WHERE contact_id = $1 AND direction = $2`,
-    [contactId, direction]
+    `SELECT COUNT(*) AS total FROM party_transactions WHERE contact_id = $1 AND direction = $2 AND shop_id = $3`,
+    [contactId, direction, shopId]
   );
   const totalCount = parseInt(countResult.rows[0].total, 10) || 0;
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -65,16 +66,16 @@ const getPartyTransactions = async (contactId, direction, page = 1, pageSize = D
             SUM(CASE WHEN kind = 'payment' THEN -amount ELSE amount END)
               OVER (ORDER BY occurred_on, id ROWS UNBOUNDED PRECEDING) AS running_balance
      FROM party_transactions
-     WHERE contact_id = $1 AND direction = $2
+     WHERE contact_id = $1 AND direction = $2 AND shop_id = $3
      ORDER BY occurred_on DESC, id DESC
-     LIMIT $3 OFFSET $4`,
-    [contactId, direction, pageSize, offset]
+     LIMIT $4 OFFSET $5`,
+    [contactId, direction, shopId, pageSize, offset]
   );
 
   return { transactions: rows, totalCount, totalPages, page: safePage, pageSize };
 };
 
-const addTransaction = async ({ contactId, direction, kind, amount, occurredOn, note, saleId, lotId }) => {
+const addTransaction = async ({ contactId, direction, kind, amount, occurredOn, note, saleId, lotId }, shopId) => {
   if (!contactId) throw new ApiError(400, "A contact is required");
   if (!VALID_DIRECTIONS.has(direction)) throw new ApiError(400, "Invalid direction");
   if (!VALID_KINDS.has(kind)) throw new ApiError(400, "Invalid transaction kind");
@@ -87,10 +88,10 @@ const addTransaction = async ({ contactId, direction, kind, amount, occurredOn, 
     throw new ApiError(400, `${kind === "charge" ? "Charge" : "Payment"} amount must be greater than 0`);
   }
 
-  await assertContactExists(contactId);
+  await assertContactExists(contactId, shopId);
 
   if (kind === "payment") {
-    const currentBalance = await getBalance(contactId, direction);
+    const currentBalance = await getBalance(contactId, direction, shopId);
     if (amountNum > currentBalance) {
       throw new ApiError(
         400,
@@ -100,10 +101,10 @@ const addTransaction = async ({ contactId, direction, kind, amount, occurredOn, 
   }
 
   const { rows } = await pool.query(
-    `INSERT INTO party_transactions (contact_id, direction, kind, amount, occurred_on, note, sale_id, lot_id)
-     VALUES ($1, $2, $3, $4, COALESCE($5, NOW()), $6, $7, $8)
+    `INSERT INTO party_transactions (contact_id, direction, kind, amount, occurred_on, note, sale_id, lot_id, shop_id)
+     VALUES ($1, $2, $3, $4, COALESCE($5, NOW()), $6, $7, $8, $9)
      RETURNING *`,
-    [contactId, direction, kind, amountNum, occurredOn || null, note || null, saleId || null, lotId || null]
+    [contactId, direction, kind, amountNum, occurredOn || null, note || null, saleId || null, lotId || null, shopId]
   );
   return rows[0];
 };
@@ -113,8 +114,11 @@ const addTransaction = async ({ contactId, direction, kind, amount, occurredOn, 
 // between parties or ledgers). Deliberately pragmatic rather than fully immutable: this is
 // a single-owner shop tool, and each row is now atomic, so fixing one entry is unambiguous
 // — unlike the old design, where any correction silently rewrote a shared running total.
-const updateTransaction = async (id, { amount, occurredOn, note }) => {
-  const { rows: existingRows } = await pool.query(`SELECT * FROM party_transactions WHERE id = $1`, [id]);
+const updateTransaction = async (id, { amount, occurredOn, note }, shopId) => {
+  const { rows: existingRows } = await pool.query(
+    `SELECT * FROM party_transactions WHERE id = $1 AND shop_id = $2`,
+    [id, shopId]
+  );
   const existing = existingRows[0];
   if (!existing) throw new ApiError(404, "Transaction not found");
 
@@ -129,15 +133,18 @@ const updateTransaction = async (id, { amount, occurredOn, note }) => {
   const { rows } = await pool.query(
     `UPDATE party_transactions
      SET amount = $2, occurred_on = COALESCE($3, occurred_on), note = $4
-     WHERE id = $1
+     WHERE id = $1 AND shop_id = $5
      RETURNING *`,
-    [id, amountNum, occurredOn || null, note !== undefined ? note : existing.note]
+    [id, amountNum, occurredOn || null, note !== undefined ? note : existing.note, shopId]
   );
   return rows[0];
 };
 
-const deleteTransaction = async (id) => {
-  const { rows } = await pool.query(`DELETE FROM party_transactions WHERE id = $1 RETURNING *`, [id]);
+const deleteTransaction = async (id, shopId) => {
+  const { rows } = await pool.query(
+    `DELETE FROM party_transactions WHERE id = $1 AND shop_id = $2 RETURNING *`,
+    [id, shopId]
+  );
   if (!rows[0]) throw new ApiError(404, "Transaction not found");
   return rows[0];
 };
@@ -150,18 +157,18 @@ const deleteTransaction = async (id) => {
 // writes must both succeed or neither does — the only real DB transaction in this codebase,
 // deliberately: a half-applied net-off (one side adjusted, the other not) would silently
 // corrupt both balances, which is worse than anything the old credit/debit design did.
-const netOffParty = async (contactId, amount, occurredOn, note) => {
+const netOffParty = async (contactId, amount, occurredOn, note, shopId) => {
   if (!contactId) throw new ApiError(400, "A contact is required");
   const amountNum = Number(amount);
   if (!Number.isFinite(amountNum) || amountNum <= 0) {
     throw new ApiError(400, "Amount must be greater than 0");
   }
 
-  await assertContactExists(contactId);
+  await assertContactExists(contactId, shopId);
 
   const [payableBalance, receivableBalance] = await Promise.all([
-    getBalance(contactId, "payable"),
-    getBalance(contactId, "receivable"),
+    getBalance(contactId, "payable", shopId),
+    getBalance(contactId, "receivable", shopId),
   ]);
   const maxNet = Math.min(payableBalance, receivableBalance);
   if (amountNum > maxNet) {
@@ -175,16 +182,16 @@ const netOffParty = async (contactId, amount, occurredOn, note) => {
   try {
     await client.query("BEGIN");
     const payableResult = await client.query(
-      `INSERT INTO party_transactions (contact_id, direction, kind, amount, occurred_on, note)
-       VALUES ($1, 'payable', 'adjustment', $2, COALESCE($3, NOW()), $4)
+      `INSERT INTO party_transactions (contact_id, direction, kind, amount, occurred_on, note, shop_id)
+       VALUES ($1, 'payable', 'adjustment', $2, COALESCE($3, NOW()), $4, $5)
        RETURNING *`,
-      [contactId, -amountNum, occurredOn || null, note || "Net off against receivable balance"]
+      [contactId, -amountNum, occurredOn || null, note || "Net off against receivable balance", shopId]
     );
     const receivableResult = await client.query(
-      `INSERT INTO party_transactions (contact_id, direction, kind, amount, occurred_on, note)
-       VALUES ($1, 'receivable', 'adjustment', $2, COALESCE($3, NOW()), $4)
+      `INSERT INTO party_transactions (contact_id, direction, kind, amount, occurred_on, note, shop_id)
+       VALUES ($1, 'receivable', 'adjustment', $2, COALESCE($3, NOW()), $4, $5)
        RETURNING *`,
-      [contactId, -amountNum, occurredOn || null, note || "Net off against payable balance"]
+      [contactId, -amountNum, occurredOn || null, note || "Net off against payable balance", shopId]
     );
     await client.query("COMMIT");
     return { payable: payableResult.rows[0], receivable: receivableResult.rows[0] };

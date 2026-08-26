@@ -10,18 +10,21 @@ const { withCache } = require("../utils/cache");
 // so rather than chase invalidation through all of them, this just caches for 30s — well
 // under the 60s poll interval, so it still absorbs the bulk of the polling traffic
 // without ever being more than 30s stale.
-const INVENTORY_CACHE_KEY = "inventory:summary";
+// Keyed per-shop — otherwise the 30s cache would serve one shop's stock summary to
+// another for up to 30 seconds after the first request from either.
+const inventoryCacheKey = (shopId) => `inventory:summary:${shopId}`;
 const INVENTORY_CACHE_TTL_SECONDS = 30;
 
-const getInventory = async () => {
-  return withCache(INVENTORY_CACHE_KEY, INVENTORY_CACHE_TTL_SECONDS, async () => {
-    const settings = await getSettings();
+const getInventory = async (shopId) => {
+  return withCache(inventoryCacheKey(shopId), INVENTORY_CACHE_TTL_SECONDS, async () => {
+    const settings = await getSettings(shopId);
     const threshold = Number(settings.low_stock_threshold) || 10;
 
     // For batch-tracked products, stock value is the sum of each lot's own buying price times
     // its remaining quantity (lots can carry different costs); simple products just use
     // quantity * buyingprice as before.
-    const result = await pool.query(`
+    const result = await pool.query(
+      `
       SELECT
         p.id,
         p.productname,
@@ -37,10 +40,13 @@ const getInventory = async () => {
         END AS stock_value
       FROM products p
       LEFT JOIN categories c ON c.id = p.category_id
-      LEFT JOIN lots l ON l.product_id = p.id
+      LEFT JOIN lots l ON l.product_id = p.id AND l.shop_id = p.shop_id
+      WHERE p.shop_id = $1
       GROUP BY p.id, c.category_name
       ORDER BY p.productname
-    `);
+    `,
+      [shopId]
+    );
 
     const items = result.rows.map((row) => {
       let status = "in_stock";

@@ -6,7 +6,7 @@ const Search = asyncHandler(async (req, res) => {
   if (!q || !q.trim()) {
     return res.send([]);
   }
-  const results = await searchProducts(q.trim());
+  const results = await searchProducts(q.trim(), req.user.shopId);
   res.send(results);
 });
 

@@ -14,7 +14,7 @@ const asyncHandler = require("../utils/asyncHandler");
 
 const GetLotByCode = asyncHandler(async (req, res) => {
   const { code } = req.params;
-  const lot = await getLotByCode(code.toUpperCase());
+  const lot = await getLotByCode(code.toUpperCase(), req.user.shopId);
   if (!lot) {
     return res.status(404).send({ message: `No lot found with code: ${code}` });
   }
@@ -23,39 +23,39 @@ const GetLotByCode = asyncHandler(async (req, res) => {
 
 const GetProductLots = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const lots = await getLotsForProduct(id);
+  const lots = await getLotsForProduct(id, req.user.shopId);
   res.send(lots);
 });
 
 const PostProductLot = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { vendor_id, buying_price, quantity } = req.body;
-  const lot = await createLot(id, { vendor_id, buying_price, quantity }, req.user.id);
+  const lot = await createLot(id, { vendor_id, buying_price, quantity }, req.user.id, req.user.shopId);
   res.status(201).send(lot);
 });
 
 const PatchLotAddStock = asyncHandler(async (req, res) => {
   const { id } = req.params;
   const { quantity } = req.body;
-  const lot = await addStockToLot(id, quantity);
+  const lot = await addStockToLot(id, quantity, req.user.shopId);
   res.send(lot);
 });
 
 const GetItems = asyncHandler(async (req, res) => {
-  const result = await getItems();
+  const result = await getItems(req.user.shopId);
   res.send(result);
 });
 
 const GetItemsById = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const result = await getItemById(id);
+  const result = await getItemById(id, req.user.shopId);
   res.send(result);
 });
 
 const GetItemsByName = asyncHandler(async (req, res) => {
   const { name } = req.body;
   const nameLower = name.toLowerCase();
-  const result = await getItemByName(nameLower);
+  const result = await getItemByName(nameLower, req.user.shopId);
   res.send(result);
 });
 
@@ -68,7 +68,8 @@ const PostItems = asyncHandler(async (req, res) => {
     buying_price,
     quantity,
     category_id,
-    { batch_tracked, vendor_id }
+    { batch_tracked, vendor_id, receivedByUserId: req.user.id },
+    req.user.shopId
   );
   res.send({ product: result.rows[0], lot: result.lot });
 });
@@ -82,7 +83,7 @@ const UpdateItems = asyncHandler(async (req, res) => {
   const { name, price, Category_id } = req.body;
   const nameLower = name.toLowerCase();
 
-  const result = await updateItems(nameLower, price, Category_id, id);
+  const result = await updateItems(nameLower, price, Category_id, id, req.user.shopId);
   res.send({
     message: `Item with id: ${id} updated with name: ${nameLower} & price: ${price}`,
   });
@@ -90,7 +91,7 @@ const UpdateItems = asyncHandler(async (req, res) => {
 
 const DeleteItems = asyncHandler(async (req, res) => {
   const id = req.params.id;
-  const { name, deleteResult } = await deleteItemById(id);
+  const { name, deleteResult } = await deleteItemById(id, req.user.shopId);
   if (deleteResult.rowCount === 0) {
     res.send({ message: `No item with id: ${id} found` });
   } else {
@@ -104,7 +105,7 @@ const DeleteItemsByName = asyncHandler(async (req, res) => {
   const { name } = req.body;
   const nameLower = name.toLowerCase();
 
-  const result = await deleteItemsByName(nameLower);
+  const result = await deleteItemsByName(nameLower, req.user.shopId);
   res.send({
     message: `Item with name: ${name} deleted successfully ${result.rows}`,
   });
@@ -118,7 +119,8 @@ const UpdateItemsByName = asyncHandler(async (req, res) => {
     nameLower,
     buying_price,
     quantity,
-    category_id
+    category_id,
+    req.user.shopId
   );
 
   if (result.length === 0) {

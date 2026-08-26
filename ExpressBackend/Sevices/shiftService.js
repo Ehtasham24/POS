@@ -23,6 +23,10 @@ const assertCanAct = (shift, requestingUser) => {
 // Shifts page to render "shift open" state. userId may be null/undefined (e.g. the
 // notification-forwarder's auto-confirm path runs with requestingUser: null) — a sale/
 // refund made with nobody logged in simply isn't attributed to any shift.
+//
+// No shopId parameter needed here: a user belongs to exactly one shop (users.shop_id is
+// fixed), so "the open shift for user #N" can never resolve to a row outside that user's
+// own shop — the user id itself is already as narrow a boundary as shop_id would add.
 const getOpenShift = async (userId) => {
   if (!userId) return null;
   const { rows } = await pool.query(
@@ -39,8 +43,8 @@ const openShift = async (requestingUser, openingFloat) => {
   }
   try {
     const { rows } = await pool.query(
-      `INSERT INTO shifts (opened_by, opening_float) VALUES ($1, $2) RETURNING *`,
-      [requestingUser.id, float]
+      `INSERT INTO shifts (opened_by, opening_float, shop_id) VALUES ($1, $2, $3) RETURNING *`,
+      [requestingUser.id, float, requestingUser.shopId]
     );
     return rows[0];
   } catch (err) {
@@ -57,6 +61,10 @@ const openShift = async (requestingUser, openingFloat) => {
 // a refund's cash impact belongs to the shift that was open when the REFUND happened, not
 // the shift the original sale was on — sales_ledger nets those together by the original
 // sale's date, which would double-count against refunds.shift_id here.
+//
+// No shopId needed in these three — shiftId is only ever passed in here after the caller
+// has already verified (via a shop_id-scoped fetch) that this specific shift belongs to
+// the requesting shop, so a further filter here would be redundant, not additional safety.
 const sumCashSales = async (client, shiftId) => {
   const { rows } = await client.query(
     `SELECT COALESCE(SUM(s.selling_price * s.quantity), 0) AS total
@@ -108,8 +116,13 @@ const closeShift = async (shiftId, requestingUser, countedCash, notes) => {
 
     // Locking this row is what makes a double-close race (two clicks, or a cashier and an
     // owner closing at once) serialize correctly — same reasoning as confirmIntent's own
-    // FOR UPDATE lock (Sevices/bankPaymentService.js).
-    const { rows } = await client.query(`SELECT * FROM shifts WHERE id = $1 FOR UPDATE`, [shiftId]);
+    // FOR UPDATE lock (Sevices/bankPaymentService.js). shop_id is baked into the fetch
+    // itself — an id from another shop simply doesn't match, same 404 a nonexistent id
+    // would give, rather than ever locking a row this user's shop doesn't own.
+    const { rows } = await client.query(
+      `SELECT * FROM shifts WHERE id = $1 AND shop_id = $2 FOR UPDATE`,
+      [shiftId, requestingUser.shopId]
+    );
     const shift = rows[0];
     if (!shift) throw new ApiError(404, "Shift not found");
     if (shift.status === "closed") throw new ApiError(409, "This shift is already closed");
@@ -149,16 +162,19 @@ const recordCashMovement = async (shiftId, requestingUser, amount, reason, conta
     throw new ApiError(400, "A reason is required");
   }
 
-  const { rows } = await pool.query(`SELECT * FROM shifts WHERE id = $1`, [shiftId]);
+  const { rows } = await pool.query(
+    `SELECT * FROM shifts WHERE id = $1 AND shop_id = $2`,
+    [shiftId, requestingUser.shopId]
+  );
   const shift = rows[0];
   if (!shift) throw new ApiError(404, "Shift not found");
   if (shift.status !== "open") throw new ApiError(409, "This shift is already closed");
   assertCanAct(shift, requestingUser);
 
   const { rows: inserted } = await pool.query(
-    `INSERT INTO shift_cash_movements (shift_id, amount, reason, contact_id, recorded_by)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [shiftId, value, reason, contactId || null, requestingUser.id]
+    `INSERT INTO shift_cash_movements (shift_id, amount, reason, contact_id, recorded_by, shop_id)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [shiftId, value, reason, contactId || null, requestingUser.id, requestingUser.shopId]
   );
   await touchActivity(pool, shiftId);
   return inserted[0];
@@ -169,12 +185,16 @@ const recordCashMovement = async (shiftId, requestingUser, amount, reason, conta
 // userId/onlyVariance/minVariance/maxVariance are owner-only filters (a cashier is already
 // pinned to their own shifts by the block above, so userId is simply ignored for them rather
 // than erroring — there's nothing more specific it could narrow down to).
+//
+// shop_id is unconditional here — previously an Owner with no other filter applied saw
+// EVERY shift in the whole table, not just their own shop's (there was no shop concept to
+// scope by at all before this). That's the one real cross-tenant leak this function had.
 const listShifts = async (
   requestingUser,
   { status, startDate, endDate, userId, onlyVariance, minVariance, maxVariance } = {}
 ) => {
-  const params = [];
-  const conditions = [];
+  const params = [requestingUser.shopId];
+  const conditions = ["s.shop_id = $1"];
   if (requestingUser?.role !== "owner") {
     params.push(requestingUser.id);
     conditions.push(`opened_by = $${params.length}`);
@@ -200,7 +220,7 @@ const listShifts = async (
     params.push(Number(maxVariance));
     conditions.push(`variance <= $${params.length}`);
   }
-  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+  const where = `WHERE ${conditions.join(" AND ")}`;
   const { rows } = await pool.query(
     `SELECT s.*, u1.display_name AS opened_by_name, u2.display_name AS closed_by_name
      FROM shifts s
@@ -217,14 +237,21 @@ const listShifts = async (
 // refunds/movements that make up expected_cash (live-computed if still open, the snapshotted
 // values if closed — see migrations/017's comment on why closed shifts never recompute), plus
 // the raw movement list for a human to review.
+//
+// shop_id baked into the initial fetch, not checked afterward — previously this looked up
+// ANY shift by id with no shop check at all (only role/ownership via assertCanAct), so a
+// cashier or owner from one shop guessing/enumerating another shop's shift id could view
+// (and, worse, an owner-role account from either shop could even reconcile/close) a shift
+// that belongs to a completely different business. This was the second real cross-tenant
+// leak in this file.
 const getShiftDetail = async (shiftId, requestingUser) => {
   const { rows } = await pool.query(
     `SELECT s.*, u1.display_name AS opened_by_name, u2.display_name AS closed_by_name
      FROM shifts s
      LEFT JOIN users u1 ON u1.id = s.opened_by
      LEFT JOIN users u2 ON u2.id = s.closed_by
-     WHERE s.id = $1`,
-    [shiftId]
+     WHERE s.id = $1 AND s.shop_id = $2`,
+    [shiftId, requestingUser.shopId]
   );
   const shift = rows[0];
   if (!shift) throw new ApiError(404, "Shift not found");
@@ -284,6 +311,10 @@ const getShiftDetail = async (shiftId, requestingUser) => {
 // the drawer, so pretending otherwise would silently hide a real shortage if one happened
 // during the idle window. auto_closed=true is what routes it to "needs review" on the Shifts
 // page and gates reconcileShift below. closed_by stays NULL — nobody closed it, the system did.
+//
+// No shop_id filter needed here — this is only ever called with an id autoCloseIdleShifts
+// just found itself (unrestricted by shop, on purpose — see that function's own comment),
+// never with an id supplied by an HTTP caller.
 const autoCloseOneShift = async (shiftId) => {
   const client = await pool.connect();
   try {
@@ -327,7 +358,10 @@ const autoCloseOneShift = async (shiftId) => {
 };
 
 // Called periodically by Sevices/shiftSweep.js. Returns how many shifts it closed, purely
-// for the sweep's own logging.
+// for the sweep's own logging. Deliberately NOT shop-scoped — this is a background job, not
+// an HTTP request on behalf of one shop, so it sweeps every shop's idle shifts in one pass
+// (each shift is still only ever compared against its own numbers; nothing here mixes data
+// across shops, it just doesn't need to be told which shop to look at).
 const autoCloseIdleShifts = async () => {
   const { rows: idle } = await pool.query(
     `SELECT id FROM shifts WHERE status = 'open' AND last_activity_at < NOW() - ($1 || ' minutes')::interval`,
@@ -352,7 +386,10 @@ const reconcileShift = async (shiftId, requestingUser, countedCash, notes) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    const { rows } = await client.query(`SELECT * FROM shifts WHERE id = $1 FOR UPDATE`, [shiftId]);
+    const { rows } = await client.query(
+      `SELECT * FROM shifts WHERE id = $1 AND shop_id = $2 FOR UPDATE`,
+      [shiftId, requestingUser.shopId]
+    );
     const shift = rows[0];
     if (!shift) throw new ApiError(404, "Shift not found");
     if (!shift.auto_closed) throw new ApiError(409, "Only an auto-closed shift needs reconciling");

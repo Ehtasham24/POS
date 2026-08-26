@@ -9,6 +9,15 @@ const HEARTBEAT_KEY = "bank_notification_forwarder_last_heartbeat";
 // network hiccup) doesn't immediately look like an outage.
 const STALE_AFTER_MINUTES = 20;
 
+// KNOWN LIMITATION (multi-tenancy): NOTIFICATION_FORWARDER_SECRET (requireForwarderSecret.js)
+// is one single, global secret for the whole server — there's no per-shop forwarder
+// identity yet, so a webhook call from the phone app has no req.shop to read. Hardcoded to
+// shop 1 (today's only real shop) rather than left undefined, which would otherwise throw
+// on settings' NOT NULL shop_id. Supporting a second shop's own phone forwarder needs its
+// own secret-per-shop design (e.g. a shops.forwarder_secret column) before this can be
+// anything other than shop 1 — tracked as a follow-up, not fixed in this pass.
+const FORWARDER_SHOP_ID = 1;
+
 const ReceiveNotification = asyncHandler(async (req, res) => {
   const { packageName, title, text, postedAt } = req.body;
   if (!packageName || !text) {
@@ -19,7 +28,7 @@ const ReceiveNotification = asyncHandler(async (req, res) => {
 });
 
 const ReceiveHeartbeat = asyncHandler(async (req, res) => {
-  await updateSetting(HEARTBEAT_KEY, new Date().toISOString());
+  await updateSetting(HEARTBEAT_KEY, new Date().toISOString(), FORWARDER_SHOP_ID);
   res.status(204).send();
 });
 
@@ -27,7 +36,7 @@ const ReceiveHeartbeat = asyncHandler(async (req, res) => {
 // Payments page's "is the forwarder alive" banner, same operational-visibility trust
 // level as the page itself.
 const GetForwarderStatus = asyncHandler(async (req, res) => {
-  const settings = await getSettings();
+  const settings = await getSettings(FORWARDER_SHOP_ID);
   const lastHeartbeatAt = settings[HEARTBEAT_KEY] || null;
   const isStale =
     !lastHeartbeatAt || Date.now() - new Date(lastHeartbeatAt).getTime() > STALE_AFTER_MINUTES * 60 * 1000;
