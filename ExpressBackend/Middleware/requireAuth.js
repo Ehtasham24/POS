@@ -11,7 +11,8 @@ const { findUserById } = require("../Sevices/authService");
 // out (otherwise an unauthenticated visitor couldn't load the app far enough to even see
 // the login page). authRoutes.js and healthRoutes.js simply never attach this.
 //
-// Sets req.user = { id, username, displayName, role } on success.
+// Sets req.user = { id, username, displayName, role, ... } and req.shop = { id, tier }
+// on success.
 async function requireAuth(req, res, next) {
   const token = req.cookies?.[COOKIE_NAME];
   if (!token) return next(new ApiError(401, "Not authenticated"));
@@ -49,7 +50,21 @@ async function requireAuth(req, res, next) {
   if (!user || !user.isActive) {
     return next(new ApiError(401, "Account no longer active"));
   }
+  // A shop being deactivated (e.g. a cancelled subscription) locks out every one of its
+  // users the same request-by-request way a deactivated individual user already does
+  // above — same reasoning: re-checked fresh here rather than trusted off anything
+  // cached, so it takes effect on the very next request, not whenever a stale value
+  // would otherwise expire.
+  if (!user.shopIsActive) {
+    return next(new ApiError(401, "Shop is no longer active"));
+  }
+
   req.user = user;
+  // Tier is read fresh here every request, never off the JWT payload — the token is
+  // long-lived (utils/auth.js's 180-day TTL), so a shop that upgrades/downgrades today
+  // would otherwise keep granting/denying features based on whatever tier it was on
+  // when each user's token happened to be issued.
+  req.shop = { id: user.shopId, tier: user.shopTier };
   next();
 }
 

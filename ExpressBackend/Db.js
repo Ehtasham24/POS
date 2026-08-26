@@ -19,9 +19,22 @@ require("dotenv").config({
 types.setTypeParser(1114, (value) => (value === null ? null : new Date(value + "Z")));
 types.setTypeParser(1082, (value) => (value === null ? null : new Date(value + "T00:00:00Z")));
 
+// max was unset before (pg's own default is 10) — fine for one shop's traffic, not for
+// several shops' checkouts landing at once, which would exhaust it and queue requests
+// behind it instead of failing fast. connectionTimeoutMillis turns "the pool is full"
+// into a clear error instead of a request hanging indefinitely.
+// DATABASE_URL already points at Supabase's transaction-mode pooler (port 6543, not the
+// 5432 direct connection, which has a much lower connection cap) — that's what makes
+// raising max here meaningful rather than just moving where the limit gets hit. Nothing
+// in this app relies on session state surviving across queries on the same connection
+// (setTypeParser above is client-side, not a session SET), which is the one thing
+// transaction-mode pooling doesn't preserve — safe as long as that stays true.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false },
+  max: Number(process.env.PG_POOL_MAX) || 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
 });
 
 // pg emits 'error' on idle clients (e.g. the pooler dropping a connection)
