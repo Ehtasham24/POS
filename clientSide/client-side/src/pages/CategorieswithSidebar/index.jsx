@@ -16,6 +16,7 @@ import { addCart } from "cartRedux/cartSlice";
 import useDebounce from "hooks/useDebounce";
 import { useLanguage } from "i18n/LanguageContext";
 import { useAuth } from "auth/AuthContext";
+import { useFeature } from "auth/useFeature";
 
 import AppShell from "components/AppShell";
 import { Modal } from "components";
@@ -38,6 +39,7 @@ export default function CategorieswithSidebarPage() {
   const toast = useToast();
   const { user } = useAuth();
   const isOwner = user?.role === "owner";
+  const hasShifts = useFeature("shifts");
   const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -49,9 +51,18 @@ export default function CategorieswithSidebarPage() {
   // createIntent both reject with 409 otherwise) — surfaced here proactively, before a cashier
   // builds a whole cart just to hit that wall at checkout. null = still loading; false = no
   // shift open; an object = the open shift.
+  //
+  // Shifts is itself Advanced-tier only (config/features.js) — checkoutSale's own 409 guard
+  // is already conditional on that (see its comment), so a Basic/Smart shop never actually
+  // needs one open. Skipping the fetch entirely when hasShifts is false isn't just an
+  // optimization: /api/shifts/current now 403s for those shops, and the previous unconditional
+  // .catch(() => setCurrentShift(false)) treated that 403 identically to "no shift open,"
+  // showing a banner (with an Open Shift button leading to a page they're locked out of) for
+  // a feature that isn't even part of their plan.
   const [currentShift, setCurrentShift] = useState(null);
   const [isOpenShiftModalOpen, setIsOpenShiftModalOpen] = useState(false);
   const fetchCurrentShift = () => {
+    if (!hasShifts) return;
     apiGet("/api/shifts/current")
       .then((shift) => setCurrentShift(shift || false))
       .catch(() => setCurrentShift(false));
@@ -399,7 +410,7 @@ export default function CategorieswithSidebarPage() {
         }
       >
         <div className="cartDock:pr-96 pb-16 cartDock:pb-0">
-          {currentShift === false && (
+          {hasShifts && currentShift === false && (
             <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
               <div className="flex items-center gap-3">
                 <HiOutlineClock className="text-xl text-amber-600 dark:text-amber-400" />

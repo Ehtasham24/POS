@@ -3,6 +3,7 @@ const ApiError = require("../utils/ApiError");
 const { checkoutSale } = require("./salesService");
 const { getSettings } = require("./settingsService");
 const { getOpenShift } = require("./shiftService");
+const { hasFeature } = require("../config/features");
 const { buildQrPayload, generateQrDataUrl } = require("../utils/bankQr");
 
 // Same idea as salesService.js's formatReceiptNo/formatRefundNo — a display reference
@@ -53,8 +54,10 @@ const createIntent = async (
   // Checked here too, not just in checkoutSale's own guard — a QR/JazzCash/Easypaisa intent
   // means the customer may pay within seconds of this call returning. Catching a missing
   // shift only at confirmIntent (after the money's already moved) would be far worse than
-  // catching it now, before the customer scans anything.
-  if (!(await getOpenShift(requestingUser.id))) {
+  // catching it now, before the customer scans anything. Tier-conditional, same reasoning
+  // as checkoutSale's own guard (salesService.js) — shifts is Advanced-only, so a Basic/
+  // Smart shop has no shift to open in the first place.
+  if (hasFeature(requestingUser.shopTier, "shifts") && !(await getOpenShift(requestingUser.id))) {
     throw new ApiError(409, "Open a shift before making a sale — see the Shifts page");
   }
 

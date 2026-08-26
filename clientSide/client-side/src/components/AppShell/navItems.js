@@ -28,13 +28,14 @@ export const navItems = [
   },
   // Owner-only, same as Inventory — the full restock/damage/expiry/theft/count-correction
   // history (Sevices/stockAdjustmentService.js), each traceable back to the lot it came
-  // from where one exists.
+  // from where one exists. Smart-tier+ (`stockAdjustments` — see config/features.js).
   {
     to: "/stock-adjustments",
     label: "Stock Adjustments",
     labelKey: "nav.stockAdjustments",
     icon: HiOutlineArchiveBoxXMark,
     roles: ["owner"],
+    feature: "stockAdjustments",
   },
   {
     to: "/sales-history",
@@ -42,45 +43,56 @@ export const navItems = [
     labelKey: "nav.salesHistory",
     icon: HiOutlineClipboardDocumentList,
   },
+  // Smart-tier+ (`partyLedger`).
   {
     to: "/credit-debit",
     label: "Credit / Debit",
     labelKey: "nav.creditDebit",
     icon: HiOutlineBanknotes,
     roles: ["owner"],
+    feature: "partyLedger",
   },
+  // Smart-tier+ (`contacts`).
   {
     to: "/contacts",
     label: "Contacts",
     labelKey: "nav.contacts",
     icon: HiOutlineUserGroup,
     roles: ["owner"],
+    feature: "contacts",
   },
+  // Smart-tier+ (`storeCredit`).
   {
     to: "/store-credit",
     label: "Store Credit",
     labelKey: "nav.storeCredit",
     icon: HiOutlineReceiptRefund,
     roles: ["owner"],
+    feature: "storeCredit",
   },
   // No `roles` restriction — any staff can confirm/cancel a bank-transfer payment (same
   // trust level as refunds), so they can see this list too. See Routes/API/bankPaymentRoutes.js.
   // Broadened from "Bank Payments" to cover all 3 mediums (cash/card/bank transfer), not
   // just the bank-transfer queue this page still manages — see pages/BankPayments/index.jsx.
+  // Smart-tier+ (`bankTransfer`) — a Basic shop only ever has Cash/Card, so this whole page
+  // (still primarily about the bank-transfer QR queue) has nothing for it to show.
   {
     to: "/payment-mediums",
     label: "Payment Mediums",
     labelKey: "nav.paymentMediums",
     icon: HiOutlineQrCode,
+    feature: "bankTransfer",
   },
   // No `roles` restriction — shift open/close is self-service for any staff (like voiding
   // one's own same-day sale); an Owner sees every shift here too. See
   // Routes/API/shiftRoutes.js and Sevices/shiftService.js's self-vs-owner scoping.
+  // Advanced-tier only (`shifts`).
   {
     to: "/shifts",
     label: "Shifts",
     labelKey: "nav.shifts",
     icon: HiOutlineClock,
+    feature: "shifts",
   },
   {
     to: "/report",

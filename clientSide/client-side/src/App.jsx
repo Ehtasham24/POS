@@ -86,7 +86,7 @@ function App() {
                 <Route
                   path="/credit-debit"
                   element={
-                    <ProtectedRoute roles={OWNER_ONLY}>
+                    <ProtectedRoute roles={OWNER_ONLY} feature="partyLedger">
                       <CreditDebit />
                     </ProtectedRoute>
                   }
@@ -118,7 +118,7 @@ function App() {
                 <Route
                   path="/stock-adjustments"
                   element={
-                    <ProtectedRoute roles={OWNER_ONLY}>
+                    <ProtectedRoute roles={OWNER_ONLY} feature="stockAdjustments">
                       <StockAdjustments />
                     </ProtectedRoute>
                   }
@@ -126,7 +126,7 @@ function App() {
                 <Route
                   path="/contacts"
                   element={
-                    <ProtectedRoute roles={OWNER_ONLY}>
+                    <ProtectedRoute roles={OWNER_ONLY} feature="contacts">
                       <Contacts />
                     </ProtectedRoute>
                   }
@@ -134,7 +134,7 @@ function App() {
                 <Route
                   path="/store-credit"
                   element={
-                    <ProtectedRoute roles={OWNER_ONLY}>
+                    <ProtectedRoute roles={OWNER_ONLY} feature="storeCredit">
                       <StoreCredit />
                     </ProtectedRoute>
                   }
@@ -142,21 +142,24 @@ function App() {
                 {/* No roles restriction — confirming/cancelling a bank-transfer payment is
                     any-staff, same trust level as refunds (see Routes/API/bankPaymentRoutes.js).
                     Route renamed from /bank-payments to reflect the page now covering all 3
-                    payment mediums, not just the bank-transfer queue it still manages. */}
+                    payment mediums, not just the bank-transfer queue it still manages.
+                    Smart-tier+ (`bankTransfer`) — a Basic shop has no bank-transfer QR queue
+                    to manage. */}
                 <Route
                   path="/payment-mediums"
                   element={
-                    <ProtectedRoute>
+                    <ProtectedRoute feature="bankTransfer">
                       <BankPayments />
                     </ProtectedRoute>
                   }
                 />
                 {/* No roles restriction — shift open/close is self-service for any staff;
-                    shiftService.js scopes what each role can see/act on. */}
+                    shiftService.js scopes what each role can see/act on. Advanced-tier only
+                    (`shifts`). */}
                 <Route
                   path="/shifts"
                   element={
-                    <ProtectedRoute>
+                    <ProtectedRoute feature="shifts">
                       <Shifts />
                     </ProtectedRoute>
                   }

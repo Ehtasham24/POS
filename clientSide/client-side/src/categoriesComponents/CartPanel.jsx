@@ -21,6 +21,7 @@ import { apiGet, apiPost } from "utils/api";
 import { enqueueOfflineSale } from "offline/syncManager";
 import { decrementLocalStock } from "offline/cache";
 import useOfflineStatus from "hooks/useOfflineStatus";
+import { useFeature } from "auth/useFeature";
 import ReceiptPreviewModal from "./ReceiptPreviewModal";
 import BankTransferQrModal from "./BankTransferQrModal";
 
@@ -78,6 +79,8 @@ export default function CartPanel({ onCheckedOut }) {
   const toast = useToast();
   const { t } = useLanguage();
   const { online } = useOfflineStatus();
+  const hasBankTransfer = useFeature("bankTransfer");
+  const hasStoreCredit = useFeature("storeCredit");
 
   const [showPayment, setShowPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
@@ -421,15 +424,19 @@ export default function CartPanel({ onCheckedOut }) {
           </div>
         </div>
 
-        <button
-          type="button"
-          onClick={() => setShowStoreCredit((v) => !v)}
-          className="mb-4 text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400"
-        >
-          {showStoreCredit ? t("payment.hideStoreCredit") : t("payment.haveVoucherCode")}
-        </button>
+        {/* Smart-tier+ (`storeCredit`) — a Basic shop has never issued a voucher, so there's
+            nothing a code here could ever redeem. */}
+        {hasStoreCredit && (
+          <button
+            type="button"
+            onClick={() => setShowStoreCredit((v) => !v)}
+            className="mb-4 text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400"
+          >
+            {showStoreCredit ? t("payment.hideStoreCredit") : t("payment.haveVoucherCode")}
+          </button>
+        )}
 
-        {showStoreCredit && (
+        {hasStoreCredit && showStoreCredit && (
           <div className="mb-4 rounded-lg border border-dashed border-surface-border p-3 dark:border-gray-700">
             <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
               {t("payment.voucherCode")}
@@ -497,8 +504,10 @@ export default function CartPanel({ onCheckedOut }) {
             {t("payment.card")}
           </button>
           {/* Hidden while offline — a QR needs a live server round-trip to generate and be
-              checkable, unlike cash/card which queue through the offline outbox. */}
-          {online && (
+              checkable, unlike cash/card which queue through the offline outbox. Also
+              hidden below Smart tier (`bankTransfer`) — a Basic shop has no way to receive
+              a bank transfer set up, so offering the option would just lead to a 403. */}
+          {online && hasBankTransfer && (
             <button
               type="button"
               onClick={() => setPaymentMethod("bank_transfer")}

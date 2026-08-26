@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { HiOutlineQrCode } from "react-icons/hi2";
 import { apiGet } from "utils/api";
 import { useLanguage } from "i18n/LanguageContext";
+import { useFeature } from "auth/useFeature";
 
 const POLL_MS = 60000;
 
@@ -11,9 +12,15 @@ const POLL_MS = 60000;
 // Visible to any logged-in staff, not Owner-only — matches confirm/cancel's own access
 // level (Routes/API/bankPaymentRoutes.js), since whoever's on shift is trusted to resolve
 // these, same as refunds already work.
+//
+// bankTransfer is Smart-tier+ — without this check, a Basic shop would poll a 403 every
+// 60s forever (silently caught below, but still pointless), and the bell would still
+// navigate to /payment-mediums on click, a page it's about to be bounced straight back out
+// of by ProtectedRoute.
 export default function PendingBankPaymentsBell() {
   const navigate = useNavigate();
   const { t } = useLanguage();
+  const hasBankTransfer = useFeature("bankTransfer");
   const [count, setCount] = useState(0);
 
   const fetchCount = async () => {
@@ -26,10 +33,14 @@ export default function PendingBankPaymentsBell() {
   };
 
   useEffect(() => {
+    if (!hasBankTransfer) return;
     fetchCount();
     const interval = setInterval(fetchCount, POLL_MS);
     return () => clearInterval(interval);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasBankTransfer]);
+
+  if (!hasBankTransfer) return null;
 
   if (count === 0) {
     return (

@@ -81,9 +81,12 @@ async function main() {
     const shop2Token = signToken({ id: created.userId, role: "owner", displayName: "Isolation Test Owner" });
 
     // Confirm shop1's real shopId (should be 1, but read it for real rather than assume).
-    const meShop1 = await api(shop1Token, "GET", "/api/auth/me");
-    const shop1Id = meShop1.body.shopId;
-    console.log(`  Shop 1's real shopId (via /me): ${shop1Id}`);
+    // Read straight off the users table, not /api/auth/me — that response is deliberately
+    // reshaped to shop.{tier,features} for the frontend (authController.js) and no longer
+    // exposes a raw numeric shop id at all.
+    const { rows: shop1UserRows } = await pool.query("SELECT shop_id FROM users WHERE id = 1");
+    const shop1Id = shop1UserRows[0].shop_id;
+    console.log(`  Shop 1's real shopId (via DB): ${shop1Id}`);
 
     console.log("\n=== Seeding shop 2 with NAME-COLLIDING data ===");
     const { rows: catRows } = await pool.query(

@@ -3,6 +3,7 @@ const { getSettings, getBusinessTimezone } = require("./settingsService");
 const storeCreditService = require("./storeCreditService");
 const { applyStockDelta } = require("./lotService");
 const { getOpenShift, touchActivity } = require("./shiftService");
+const { hasFeature } = require("../config/features");
 const ApiError = require("../utils/ApiError");
 
 const getRecentSales = async (shopId) => {
@@ -176,8 +177,15 @@ const checkoutSale = async (items, paymentMethod, requestingUser, shopId, { vouc
     // pending payment (also passes a real requestingUser) — either way, requestingUser being
     // set is exactly the signal that this is a live, human-initiated sale, not an automated
     // confirmation with nobody around to have clocked in.
+    // The shifts feature (and its "you must have one open" rule) is Advanced-tier only —
+    // a Basic/Smart shop simply has no Shifts page to open one on, so this guard has to be
+    // conditional on the requesting shop's tier, not just on requestingUser being present.
+    // requestingUser.shopTier (not a fresh lookup) is what's actually current here: this
+    // whole branch only runs when requestingUser is set (a live checkout, never the
+    // automated/webhook path), and requestingUser is always freshly re-fetched per-request
+    // by requireAuth, so its shopTier can't be stale the way a cached value could be.
     const openShift = await getOpenShift(requestingUser?.id);
-    if (requestingUser && !openShift) {
+    if (requestingUser && hasFeature(requestingUser.shopTier, "shifts") && !openShift) {
       throw new ApiError(409, "Open a shift before making a sale — see the Shifts page");
     }
 

@@ -15,7 +15,14 @@ export default function SidebarContent({ onNavigate = () => {} }) {
   // must be listed — this is what keeps a Cashier from ever seeing a link to a page
   // they'd just get redirected away from (App.jsx's ProtectedRoute enforces the same
   // restriction server-adjacent; this is purely "don't show it in the first place").
-  const visibleItems = navItems.filter((item) => !item.roles || item.roles.includes(user?.role));
+  // `feature` is the same idea for a tier-gated page — locked features are simply absent
+  // from user.shop.features (/api/auth/me), so a Basic/Smart shop never sees a link to a
+  // page it would just get redirected away from either.
+  const visibleItems = navItems.filter(
+    (item) =>
+      (!item.roles || item.roles.includes(user?.role)) &&
+      (!item.feature || user?.shop?.features?.includes(item.feature))
+  );
 
   return (
     <div className="flex h-full flex-col bg-gray-900 text-gray-300">
