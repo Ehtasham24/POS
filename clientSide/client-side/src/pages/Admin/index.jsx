@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet";
 import { useNavigate } from "react-router-dom";
-import { HiOutlinePlus, HiOutlineArrowRightOnRectangle } from "react-icons/hi2";
+import { HiOutlinePlus, HiOutlineArrowRightOnRectangle, HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import Logo from "components/Logo";
 import { Modal, EmptyState, SkeletonRows } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useAuth } from "auth/AuthContext";
+import useTheme from "hooks/useTheme";
 import { apiGet, apiPost, apiPatch } from "utils/api";
 
 // Deliberately plain English, not routed through i18n/translations.js like the rest of the
@@ -30,6 +31,10 @@ export default function AdminDashboard() {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
+  // This page has no AppShell/SidebarContent (the only other place useTheme() is currently
+  // called) — without calling it here too, landing on /admin straight from login (no other
+  // page mounted first) would never sync <html>'s "dark" class from localStorage at all.
+  const [theme, toggleTheme] = useTheme();
 
   const [shops, setShops] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -125,14 +130,24 @@ export default function AdminDashboard() {
             <p className="text-xs text-gray-500 dark:text-gray-400">Signed in as {user?.displayName}</p>
           </div>
         </div>
-        <button
-          type="button"
-          onClick={handleLogout}
-          className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-danger-600 transition-colors hover:bg-danger-50 dark:text-danger-400 dark:hover:bg-danger-500/10"
-        >
-          <HiOutlineArrowRightOnRectangle />
-          Log out
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+          >
+            {theme === "dark" ? <HiOutlineSun className="text-lg" /> : <HiOutlineMoon className="text-lg" />}
+          </button>
+          <button
+            type="button"
+            onClick={handleLogout}
+            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-danger-600 transition-colors hover:bg-danger-50 dark:text-danger-400 dark:hover:bg-danger-500/10"
+          >
+            <HiOutlineArrowRightOnRectangle />
+            Log out
+          </button>
+        </div>
       </header>
 
       <main className="mx-auto max-w-5xl px-6 py-8">
