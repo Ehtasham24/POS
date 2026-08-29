@@ -9,6 +9,7 @@ import AppShell from "components/AppShell";
 import { PaymentMediumSummary } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
+import { useFeature } from "auth/useFeature";
 import { apiPost } from "utils/api";
 
 // Local (not UTC) "YYYY-MM-DDTHH:mm" — the format <input type="datetime-local"> expects.
@@ -34,6 +35,13 @@ const endOfToday = () => {
 const SalesDataComponent = () => {
   const toast = useToast();
   const { t } = useLanguage();
+  // Charts (trend graph) are Smart+, shrinkage cost analysis is Advanced-only — this page
+  // predates the tier system and used to call/render both unconditionally, which 403'd on
+  // a downgraded shop (the trend fetch surfaced as a visible toast; ShrinkageSummary failed
+  // silently but stayed stuck on its loading skeleton forever). Total Profit/Loss and the
+  // payment-medium breakdown stay on every tier — only these two are gated.
+  const hasSalesCharts = useFeature("salesCharts");
+  const hasShrinkageReport = useFeature("shrinkageReport");
   const [salesData, setSalesData] = useState([]);
   const [timeSeriesData, setTimeSeriesData] = useState([]);
   const [totalProfitLoss, setTotalProfitLoss] = useState(0);
@@ -79,7 +87,7 @@ const SalesDataComponent = () => {
     } finally {
       setLoading(false);
     }
-    fetchTimeSeries();
+    if (hasSalesCharts) fetchTimeSeries();
   };
 
   useEffect(() => {
@@ -173,9 +181,11 @@ const SalesDataComponent = () => {
             </p>
             <PaymentMediumSummary startDate={startDate} endDate={endDate} />
 
-            <ShrinkageSummary startDate={startDate} endDate={endDate} />
+            {hasShrinkageReport && <ShrinkageSummary startDate={startDate} endDate={endDate} />}
 
-            <SalesCharts ref={chartsRef} salesData={salesData} timeSeriesData={timeSeriesData} />
+            {hasSalesCharts && (
+              <SalesCharts ref={chartsRef} salesData={salesData} timeSeriesData={timeSeriesData} />
+            )}
 
             <GroupedSalesData groupedData={groupedData} />
           </div>

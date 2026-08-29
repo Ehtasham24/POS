@@ -17,6 +17,7 @@ import { printTestReceipt } from "utils/printReceipt";
 import useThermalPrinterStatus from "hooks/useThermalPrinterStatus";
 import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
 import UsersCard from "./UsersCard";
+import { useFeature } from "auth/useFeature";
 
 const updateSetting = (key, value) => apiPut("/api/settings", { key, value: String(value) });
 
@@ -129,6 +130,11 @@ export default function SettingsPage() {
   const toast = useToast();
   const { language, setLanguage, t } = useLanguage();
   const { refresh: refreshTimezone } = useTimezone();
+  // multiUser is Smart+ — a Basic shop has only the one owner account it signed up with.
+  // UsersCard used to render (and fetch /api/users) unconditionally, which predates the
+  // tier system: on a downgraded shop that request now 403s, surfacing as a generic
+  // "This feature isn't available on your plan" toast with no obvious cause on this page.
+  const hasMultiUser = useFeature("multiUser");
   const [settings, setSettings] = useState(null);
   const [threshold, setThreshold] = useState("10");
   const [savingThreshold, setSavingThreshold] = useState(false);
@@ -377,7 +383,7 @@ export default function SettingsPage() {
 
         <PrinterCard />
 
-        <UsersCard />
+        {hasMultiUser && <UsersCard />}
 
         <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
           <div className="flex items-start gap-4">
