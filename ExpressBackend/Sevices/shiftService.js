@@ -312,10 +312,16 @@ const getShiftDetail = async (shiftId, requestingUser) => {
 // during the idle window. auto_closed=true is what routes it to "needs review" on the Shifts
 // page and gates reconcileShift below. closed_by stays NULL — nobody closed it, the system did.
 //
-// No shop_id filter needed here — this is only ever called with an id autoCloseIdleShifts
-// just found itself (unrestricted by shop, on purpose — see that function's own comment),
-// never with an id supplied by an HTTP caller.
-const autoCloseOneShift = async (shiftId) => {
+// `note` defaults to the idle-timeout wording (the sweep's own use); closeOpenShiftsForDowngrade
+// below passes a different one so the eventual reconciler sees the real reason, not a
+// fabricated "was idle" story for a shift that may have been busy right up until the downgrade.
+//
+// No shop_id filter needed here — this is only ever called with an id autoCloseIdleShifts (or
+// closeOpenShiftsForDowngrade) just found itself, never with an id supplied by an HTTP caller.
+const autoCloseOneShift = async (
+  shiftId,
+  note = `Auto-closed after ${IDLE_MINUTES} minutes of inactivity — drawer wasn't counted, needs manual review.`
+) => {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -340,11 +346,7 @@ const autoCloseOneShift = async (shiftId) => {
        SET status = 'closed', closed_at = NOW(), expected_cash = $2, auto_closed = true,
            notes = $3
        WHERE id = $1`,
-      [
-        shiftId,
-        expectedCash,
-        `Auto-closed after ${IDLE_MINUTES} minutes of inactivity — drawer wasn't counted, needs manual review.`,
-      ]
+      [shiftId, expectedCash, note]
     );
     await client.query("COMMIT");
   } catch (err) {
@@ -371,6 +373,27 @@ const autoCloseIdleShifts = async () => {
     await autoCloseOneShift(id);
   }
   return idle.length;
+};
+
+// Tier-downgrade automation (Phase 6): a shop losing the "shifts" feature (Advanced ->
+// Smart/Basic) could otherwise be left with a shift open forever — it has no Shifts page left
+// to close it through, and idx_shifts_one_open_per_user (migrations/017) would then block that
+// same user from ever opening a new shift again if the shop later upgrades back. Reuses
+// autoCloseOneShift's exact closed-state shape rather than inventing a new one; only the note
+// differs, so a later reconciler knows why. Not wired to any tier-change trigger yet — this is
+// the standalone automation itself, callable directly once a tier-change entry point exists.
+const closeOpenShiftsForDowngrade = async (shopId) => {
+  const { rows: open } = await pool.query(
+    `SELECT id FROM shifts WHERE shop_id = $1 AND status = 'open'`,
+    [shopId]
+  );
+  for (const { id } of open) {
+    await autoCloseOneShift(
+      id,
+      "Auto-closed — this shop's plan no longer includes shift tracking. Drawer wasn't counted, needs manual review."
+    );
+  }
+  return open.length;
 };
 
 // Fills in the real counted_cash/variance for a shift the sweep above already auto-closed —
@@ -422,5 +445,6 @@ module.exports = {
   getShiftDetail,
   touchActivity,
   autoCloseIdleShifts,
+  closeOpenShiftsForDowngrade,
   reconcileShift,
 };

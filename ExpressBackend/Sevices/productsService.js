@@ -260,6 +260,62 @@ const deleteItemsByName = async (name, shopId) => {
   }
 };
 
+// Tier-downgrade automation (Phase 6): a shop losing the "lotTracking" feature (Smart/Advanced
+// -> Basic) needs every batch-tracked product collapsed onto the plain `quantity` column Basic
+// edits directly (updateItems above) — otherwise it'd have batch-tracked products with no lot
+// UI left to manage them through. Lots rows are never deleted: sales.lot_id and
+// stock_adjustments.lot_id both reference them, and losing that would break traceability for
+// past sales/adjustments (a FK would refuse the delete anyway). Re-upgrading later does NOT
+// automatically re-batch a product — that's an owner's call, not something to guess at.
+// Not wired to any tier-change trigger yet — this is the standalone automation itself,
+// callable directly once a tier-change entry point exists.
+const flattenBatchProducts = async (shopId) => {
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+
+    // Logged (not blocked on) before the flatten — if a product's stored quantity already
+    // disagreed with its lots' total (some earlier bug, or a manual edit before Stock
+    // Adjustments existed), the flatten below would silently "correct" it with no trace. This
+    // is the trace, per the plan's own warning: check before it's overwritten.
+    const { rows: mismatches } = await client.query(
+      `SELECT p.id, p.productname, p.quantity AS old_quantity,
+              COALESCE(SUM(l.qty_remaining), 0) AS lots_total
+       FROM products p
+       LEFT JOIN lots l ON l.product_id = p.id AND l.shop_id = p.shop_id
+       WHERE p.shop_id = $1 AND p.batch_tracked = true
+       GROUP BY p.id, p.productname, p.quantity
+       HAVING p.quantity <> COALESCE(SUM(l.qty_remaining), 0)`,
+      [shopId]
+    );
+    if (mismatches.length > 0) {
+      console.warn(
+        `flattenBatchProducts: shop ${shopId} has ${mismatches.length} product(s) whose stored quantity didn't match their lots' total before flattening`,
+        mismatches
+      );
+    }
+
+    const { rowCount } = await client.query(
+      `UPDATE products p
+       SET quantity = COALESCE(
+             (SELECT SUM(l.qty_remaining) FROM lots l
+              WHERE l.product_id = p.id AND l.shop_id = p.shop_id), 0),
+           batch_tracked = false
+       WHERE p.shop_id = $1 AND p.batch_tracked = true`,
+      [shopId]
+    );
+
+    await client.query("COMMIT");
+    return { flattened: rowCount, mismatches };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error(err);
+    throw new Error("Service error");
+  } finally {
+    client.release();
+  }
+};
+
 module.exports = {
   getItems,
   getItemById,
@@ -269,4 +325,5 @@ module.exports = {
   updateItemByName,
   deleteItemsByName,
   deleteItemById,
+  flattenBatchProducts,
 };
