@@ -21,7 +21,9 @@ const withShopInfo = (user) => ({
   displayName: user.displayName,
   role: user.role,
   isActive: user.isActive,
-  shop: user.shopId ? { tier: user.shopTier, features: getFeaturesForTier(user.shopTier) } : null,
+  shop: user.shopId
+    ? { tier: user.shopTier, features: getFeaturesForTier(user.shopTier), maxUsers: user.shopMaxUsers }
+    : null,
 });
 
 const Login = asyncHandler(async (req, res) => {

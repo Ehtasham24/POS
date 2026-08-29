@@ -17,7 +17,7 @@ const { hashPassword, comparePassword, signToken } = require("../utils/auth");
 // that row, which toPublicUser and requireAuth both already handle explicitly.
 const USER_SHOP_QUERY = `
   SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.is_active, u.shop_id,
-         s.tier AS shop_tier, s.is_active AS shop_is_active
+         s.tier AS shop_tier, s.is_active AS shop_is_active, s.max_users AS shop_max_users
   FROM users u
   LEFT JOIN shops s ON s.id = u.shop_id
 `;
@@ -31,6 +31,7 @@ const toPublicUser = (row) => ({
   shopId: row.shop_id,
   shopTier: row.shop_tier,
   shopIsActive: row.shop_is_active,
+  shopMaxUsers: row.shop_max_users,
 });
 
 const login = async (username, password) => {

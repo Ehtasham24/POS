@@ -25,6 +25,14 @@ export default function UsersCard() {
   const [editForm, setEditForm] = useState({ displayName: "", role: "cashier", password: "" });
   const [editSaving, setEditSaving] = useState(false);
 
+  // Deactivated accounts don't count against the seat limit (see usersService.js's
+  // createUser — same "deactivating, not deleting, is how an account goes away" reasoning
+  // as everywhere else in this file), so this mirrors that exactly rather than just
+  // users?.length, which would count them and disable the button too early.
+  const activeCount = users?.filter((u) => u.isActive).length ?? 0;
+  const maxUsers = currentUser?.shop?.maxUsers;
+  const atUserLimit = maxUsers != null && activeCount >= maxUsers;
+
   const fetchUsers = async () => {
     try {
       setUsers(await apiGet("/api/users"));
@@ -100,11 +108,18 @@ export default function UsersCard() {
                 {t("auth.usersTitle")}
               </h2>
               <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("auth.usersDesc")}</p>
+              {maxUsers != null && (
+                <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                  {t("auth.usersOfLimit", { count: activeCount, max: maxUsers })}
+                </p>
+              )}
             </div>
             <button
               type="button"
               onClick={() => setShowAdd(true)}
-              className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700"
+              disabled={atUserLimit}
+              title={atUserLimit ? t("auth.userLimitReached", { max: maxUsers }) : ""}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3.5 py-2 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-primary-600"
             >
               <HiOutlinePlusCircle className="text-base" />
               {t("auth.addUser")}

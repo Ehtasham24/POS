@@ -19,24 +19,38 @@ const slugify = (name) =>
 
 const listShops = async () => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at,
-            (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id) AS user_count
+    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users,
+            (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id AND u.is_active = true) AS user_count
      FROM shops s
      ORDER BY s.created_at DESC`
   );
   return rows;
 };
 
+// Shared by createShop and updateShopDetails below — a bare integer >= 1, everything else
+// (missing, zero, negative, non-numeric, a float) is a validation error rather than a
+// silently-coerced guess.
+const parseMaxUsers = (value) => {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 1) {
+    throw new ApiError(400, "Max users must be a positive whole number");
+  }
+  return parsed;
+};
+
 // Creates a shop and its first Owner user together, in one transaction — a shop with no
 // owner (or an owner row left behind by a failed shop insert) is a state nothing else in
 // this app expects and would be awkward to recover from by hand.
-const createShop = async ({ name, tier, ownerUsername, ownerPassword, ownerDisplayName }) => {
+const createShop = async ({ name, tier, ownerUsername, ownerPassword, ownerDisplayName, maxUsers }) => {
   if (!name || !name.trim()) throw new ApiError(400, "Shop name is required");
   if (!VALID_TIERS.includes(tier)) throw new ApiError(400, `Unknown tier "${tier}"`);
   if (!ownerUsername || !ownerUsername.trim()) throw new ApiError(400, "Owner username is required");
   if (!ownerPassword || ownerPassword.length < 8) {
     throw new ApiError(400, "Owner password must be at least 8 characters");
   }
+  // Matches the column default (migration 023) when the caller doesn't send one at all —
+  // the admin form always does, but a direct API call reasonably shouldn't have to.
+  const resolvedMaxUsers = maxUsers === undefined ? 5 : parseMaxUsers(maxUsers);
 
   const client = await pool.connect();
   try {
@@ -58,10 +72,10 @@ const createShop = async ({ name, tier, ownerUsername, ownerPassword, ownerDispl
     }
 
     const { rows: shopRows } = await client.query(
-      `INSERT INTO shops (name, slug, tier, is_active)
-       VALUES ($1, $2, $3, true)
-       RETURNING id, name, slug, tier, is_active, created_at`,
-      [name.trim(), slug, tier]
+      `INSERT INTO shops (name, slug, tier, is_active, max_users)
+       VALUES ($1, $2, $3, true, $4)
+       RETURNING id, name, slug, tier, is_active, created_at, max_users`,
+      [name.trim(), slug, tier, resolvedMaxUsers]
     );
     const shop = shopRows[0];
 
@@ -87,6 +101,51 @@ const createShop = async ({ name, tier, ownerUsername, ownerPassword, ownerDispl
   } finally {
     client.release();
   }
+};
+
+// Edits a shop's own details (name, seat limit) — deliberately separate from updateShopTier
+// below: tier changes trigger downgrade automations and are a much bigger deal, whereas a
+// name typo or bumping the seat count is a plain field edit with no side effects.
+const updateShopDetails = async (shopId, { name, maxUsers }) => {
+  if (name === undefined && maxUsers === undefined) {
+    throw new ApiError(400, "Nothing to update");
+  }
+  if (name !== undefined && !name.trim()) {
+    throw new ApiError(400, "Shop name is required");
+  }
+
+  const updates = [];
+  const params = [shopId];
+  if (name !== undefined) {
+    params.push(name.trim());
+    updates.push(`name = $${params.length}`);
+  }
+  if (maxUsers !== undefined) {
+    const parsed = parseMaxUsers(maxUsers);
+    // Lowering the limit below the shop's current active headcount would leave it in a
+    // state nothing else expects (already over its own limit) — reject it here rather than
+    // let it happen and rely on createUser's own check to merely stop it from getting worse.
+    const { rows: countRows } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM users WHERE shop_id = $1 AND is_active = true`,
+      [shopId]
+    );
+    if (parsed < countRows[0].n) {
+      throw new ApiError(
+        400,
+        `Can't set the limit below the ${countRows[0].n} active user(s) this shop already has`
+      );
+    }
+    params.push(parsed);
+    updates.push(`max_users = $${params.length}`);
+  }
+
+  const { rows } = await pool.query(
+    `UPDATE shops SET ${updates.join(", ")} WHERE id = $1
+     RETURNING id, name, slug, tier, is_active, max_users`,
+    params
+  );
+  if (!rows[0]) throw new ApiError(404, "Shop not found");
+  return rows[0];
 };
 
 // The one place a shop's tier actually changes — and so the one place the Phase 6
@@ -120,7 +179,7 @@ const updateShopTier = async (shopId, newTier) => {
 
   const { rows: updated } = await pool.query(
     `UPDATE shops SET tier = $2 WHERE id = $1
-     RETURNING id, name, slug, tier, is_active`,
+     RETURNING id, name, slug, tier, is_active, max_users`,
     [shopId, newTier]
   );
 
@@ -130,11 +189,18 @@ const updateShopTier = async (shopId, newTier) => {
 const setShopActive = async (shopId, isActive) => {
   const { rows } = await pool.query(
     `UPDATE shops SET is_active = $2 WHERE id = $1
-     RETURNING id, name, slug, tier, is_active`,
+     RETURNING id, name, slug, tier, is_active, max_users`,
     [shopId, !!isActive]
   );
   if (!rows[0]) throw new ApiError(404, "Shop not found");
   return rows[0];
 };
 
-module.exports = { VALID_TIERS, listShops, createShop, updateShopTier, setShopActive };
+module.exports = {
+  VALID_TIERS,
+  listShops,
+  createShop,
+  updateShopDetails,
+  updateShopTier,
+  setShopActive,
+};

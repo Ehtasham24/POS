@@ -1,14 +1,26 @@
 const asyncHandler = require("../utils/asyncHandler");
-const { listShops, createShop, updateShopTier, setShopActive } = require("../Sevices/adminService");
+const {
+  listShops,
+  createShop,
+  updateShopDetails,
+  updateShopTier,
+  setShopActive,
+} = require("../Sevices/adminService");
 
 const ListShops = asyncHandler(async (req, res) => {
   res.send(await listShops());
 });
 
 const CreateShop = asyncHandler(async (req, res) => {
-  const { name, tier, ownerUsername, ownerPassword, ownerDisplayName } = req.body;
-  const result = await createShop({ name, tier, ownerUsername, ownerPassword, ownerDisplayName });
+  const { name, tier, ownerUsername, ownerPassword, ownerDisplayName, maxUsers } = req.body;
+  const result = await createShop({ name, tier, ownerUsername, ownerPassword, ownerDisplayName, maxUsers });
   res.status(201).send(result);
+});
+
+const UpdateShopDetails = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { name, maxUsers } = req.body;
+  res.send(await updateShopDetails(id, { name, maxUsers }));
 });
 
 const UpdateShopTier = asyncHandler(async (req, res) => {
@@ -23,4 +35,4 @@ const SetShopActive = asyncHandler(async (req, res) => {
   res.send(await setShopActive(id, isActive));
 });
 
-module.exports = { ListShops, CreateShop, UpdateShopTier, SetShopActive };
+module.exports = { ListShops, CreateShop, UpdateShopDetails, UpdateShopTier, SetShopActive };

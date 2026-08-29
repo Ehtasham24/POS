@@ -1,7 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet";
 import { useNavigate } from "react-router-dom";
-import { HiOutlinePlus, HiOutlineArrowRightOnRectangle, HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
+import {
+  HiOutlinePlus,
+  HiOutlinePencil,
+  HiOutlineArrowRightOnRectangle,
+  HiOutlineSun,
+  HiOutlineMoon,
+} from "react-icons/hi2";
 import Logo from "components/Logo";
 import { Modal, EmptyState, SkeletonRows } from "components";
 import { useToast } from "components/Toast/ToastContext";
@@ -25,7 +31,14 @@ const TIER_CHIP_CLASS = {
   advanced: "bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400",
 };
 
-const emptyForm = { name: "", tier: "basic", ownerDisplayName: "", ownerUsername: "", ownerPassword: "" };
+const emptyForm = {
+  name: "",
+  tier: "basic",
+  maxUsers: 5,
+  ownerDisplayName: "",
+  ownerUsername: "",
+  ownerPassword: "",
+};
 
 export default function AdminDashboard() {
   const { user, logout } = useAuth();
@@ -44,6 +57,11 @@ export default function AdminDashboard() {
   // Per-row in-flight state so a tier/active change on one shop doesn't visually block
   // every other row's controls while its own request is out.
   const [busyShopId, setBusyShopId] = useState(null);
+  // Editing an existing shop's name/seat limit — separate from `form` (New Shop) since
+  // this one has no owner-account fields at all.
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState({ name: "", maxUsers: 5 });
+  const [editSaving, setEditSaving] = useState(false);
 
   const loadShops = async () => {
     setLoading(true);
@@ -111,6 +129,26 @@ export default function AdminDashboard() {
       toast.error(err.message);
     } finally {
       setBusyShopId(null);
+    }
+  };
+
+  const openEdit = (shop) => {
+    setEditTarget(shop);
+    setEditForm({ name: shop.name, maxUsers: shop.max_users });
+  };
+
+  const handleEditSave = async (e) => {
+    e.preventDefault();
+    setEditSaving(true);
+    try {
+      await apiPatch(`/api/admin/shops/${editTarget.id}`, editForm);
+      toast.success(`${editTarget.name} updated.`);
+      setEditTarget(null);
+      loadShops();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setEditSaving(false);
     }
   };
 
@@ -182,6 +220,7 @@ export default function AdminDashboard() {
                   <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Status</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Users</th>
                   <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Created</th>
+                  <th className="px-4 py-3" />
                 </tr>
               </thead>
               <tbody className="divide-y divide-surface-border dark:divide-gray-700">
@@ -219,9 +258,21 @@ export default function AdminDashboard() {
                         {shop.is_active ? "Active" : "Inactive"}
                       </button>
                     </td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{shop.user_count}</td>
+                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                      {shop.user_count} / {shop.max_users}
+                    </td>
                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
                       {new Date(shop.created_at).toLocaleDateString()}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(shop)}
+                        aria-label={`Edit ${shop.name}`}
+                        className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+                      >
+                        <HiOutlinePencil className="text-base" />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -257,6 +308,22 @@ export default function AdminDashboard() {
                 </option>
               ))}
             </select>
+          </div>
+          <div>
+            <label className={labelClass}>Max users</label>
+            <input
+              type="number"
+              required
+              min={1}
+              step={1}
+              value={form.maxUsers}
+              onChange={(e) => setForm((prev) => ({ ...prev, maxUsers: e.target.value }))}
+              className={inputClass}
+            />
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              How many staff accounts this shop can have at once (only matters once its tier
+              includes multi-user — Smart and up).
+            </p>
           </div>
           <div className="border-t border-surface-border pt-4 dark:border-gray-700">
             <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
@@ -311,6 +378,54 @@ export default function AdminDashboard() {
           >
             {creating ? "Creating…" : "Create Shop"}
           </button>
+        </form>
+      </Modal>
+
+      <Modal isOpen={!!editTarget} onClose={() => setEditTarget(null)} title="Edit Shop">
+        <form className="space-y-4" onSubmit={handleEditSave}>
+          <div>
+            <label className={labelClass}>Shop name</label>
+            <input
+              type="text"
+              required
+              value={editForm.name}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, name: e.target.value }))}
+              className={inputClass}
+            />
+          </div>
+          <div>
+            <label className={labelClass}>Max users</label>
+            <input
+              type="number"
+              required
+              min={1}
+              step={1}
+              value={editForm.maxUsers}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, maxUsers: e.target.value }))}
+              className={inputClass}
+            />
+            {editTarget && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Currently {editTarget.user_count} active user(s). Can't go below that.
+              </p>
+            )}
+          </div>
+          <div className="flex justify-end gap-3 pt-2">
+            <button
+              type="button"
+              onClick={() => setEditTarget(null)}
+              className="rounded-lg bg-surface-muted px-4 py-2 text-sm text-gray-800 transition-colors hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={editSaving}
+              className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {editSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
         </form>
       </Modal>
     </div>

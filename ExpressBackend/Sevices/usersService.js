@@ -33,6 +33,28 @@ const createUser = async ({ username, password, displayName, role }, shopId) => 
   }
   if (password.length < 6) throw new ApiError(400, "Password must be at least 6 characters");
 
+  // max_users is configured per-shop by the platform admin (migration 023) — separate from
+  // the multiUser feature gate (config/features.js), which only answers "can this shop add
+  // extra users at all." A deactivated user doesn't count against the limit (same reasoning
+  // as everywhere else in this file: deactivating, not deleting, is how an account is
+  // "removed"), so re-activating an old account instead of inviting a new one always stays
+  // available even right at the limit. Not lock-guarded against a concurrent double-add —
+  // this is an infrequent, owner-driven action, not a high-contention path like checkout.
+  const { rows: shopRows } = await pool.query("SELECT max_users FROM shops WHERE id = $1", [shopId]);
+  const maxUsers = shopRows[0]?.max_users;
+  if (maxUsers != null) {
+    const { rows: countRows } = await pool.query(
+      "SELECT COUNT(*)::int AS n FROM users WHERE shop_id = $1 AND is_active = true",
+      [shopId]
+    );
+    if (countRows[0].n >= maxUsers) {
+      throw new ApiError(
+        403,
+        `User limit reached (${maxUsers}) — ask your provider to raise it to add more users.`
+      );
+    }
+  }
+
   const existing = await pool.query("SELECT 1 FROM users WHERE username = $1", [username]);
   if (existing.rows.length) throw new ApiError(409, "That username is already taken");
 

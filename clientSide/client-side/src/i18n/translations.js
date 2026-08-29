@@ -125,6 +125,8 @@ const translations = {
       newPasswordOptional: "New Password (optional)",
       newPasswordPlaceholder: "Leave blank to keep current password",
       newPasswordHint: "Only fill this in if you want to change the password.",
+      userLimitReached: "User limit reached ({max}) — ask your provider to raise it to add more users.",
+      usersOfLimit: "{count} of {max} users",
     },
     settings: {
       title: "Settings",
@@ -613,6 +615,8 @@ const translations = {
       newPasswordOptional: "نیا پاس ورڈ (اختیاری)",
       newPasswordPlaceholder: "موجودہ پاس ورڈ رکھنے کے لیے خالی چھوڑیں",
       newPasswordHint: "صرف اسی صورت میں بھریں اگر پاس ورڈ تبدیل کرنا ہے۔",
+      userLimitReached: "یوزر کی حد پوری ہو گئی ({max}) — مزید یوزرز شامل کرنے کے لیے اپنے پرووائیڈر سے حد بڑھوائیں۔",
+      usersOfLimit: "{max} میں سے {count} یوزرز",
     },
     settings: {
       title: "ترتیبات",
