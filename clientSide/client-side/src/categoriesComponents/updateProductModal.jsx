@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
+import { useFeature } from "auth/useFeature";
 import useDebounce from "hooks/useDebounce";
 import { HiOutlineMagnifyingGlass, HiOutlineCube, HiOutlinePlusCircle } from "react-icons/hi2";
 import PriceEntryField from "./PriceEntryField";
@@ -18,6 +19,10 @@ const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gra
 const UpdateProductModal = ({ isOpen, onClose, initialProduct, onChanged }) => {
   const toast = useToast();
   const { t } = useLanguage();
+  // Basic tier only, and never for a batch-tracked product (its quantity comes from lots
+  // regardless of tier) — see config/features.js's manualQuantityEdit rule. Smart/Advanced
+  // correct quantity exclusively through Stock Adjustment, so this stays read-only there.
+  const canEditManualQuantity = useFeature("manualQuantityEdit");
 
   // --- Searchable product picker ---
   const [query, setQuery] = useState("");
@@ -135,14 +140,16 @@ const UpdateProductModal = ({ isOpen, onClose, initialProduct, onChanged }) => {
 
   const handleSaveSimple = async (e) => {
     e.preventDefault();
-    // Quantity is never sent here anymore — Sevices/productsService.js's updateItems
-    // doesn't accept it either way. Every change goes through "Adjust Stock" (Inventory
-    // page) instead, so it's always reason-coded and attributed, not a silent overwrite.
+    // Quantity is only sent (and only ever honored server-side) on a Basic-tier shop
+    // editing a non-batch product — everyone else keeps correcting quantity through
+    // "Adjust Stock" (Inventory page) instead, so it stays reason-coded and attributed.
+    const canEditQuantity = canEditManualQuantity && !selectedProduct.batch_tracked;
     try {
       await apiPut(`/products/${selectedProduct.product_id}`, {
         name: formData.name,
         price: formData.buying_price,
         Category_id: formData.category_id,
+        ...(canEditQuantity ? { Quantity: formData.quantity } : {}),
       });
       toast.success("Product updated successfully!");
       onChanged?.();
@@ -288,16 +295,35 @@ const UpdateProductModal = ({ isOpen, onClose, initialProduct, onChanged }) => {
                     required
                   />
                 </div>
-                {/* Read-only — every quantity change (up or down) goes through "Adjust
-                    Stock" on the Inventory page instead, so it's always reason-coded and
-                    attributed rather than a silent overwrite. */}
-                <div>
-                  <label className={labelClass}>{t("inventory.qty")}</label>
-                  <div className="mt-2 rounded-lg border border-dashed border-surface-border bg-surface-subtle px-3 py-2.5 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-                    {formData.quantity}
+                {canEditManualQuantity ? (
+                  <div>
+                    <label htmlFor="up_quantity" className={labelClass}>
+                      {t("inventory.qty")}
+                    </label>
+                    <input
+                      type="number"
+                      name="quantity"
+                      id="up_quantity"
+                      value={formData.quantity}
+                      onChange={handleChange}
+                      className={inputClass}
+                      min="0"
+                      step="1"
+                      required
+                    />
                   </div>
-                  <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("inventory.quantityLockedHint")}</p>
-                </div>
+                ) : (
+                  // Read-only — every quantity change (up or down) goes through "Adjust
+                  // Stock" on the Inventory page instead, so it's always reason-coded and
+                  // attributed rather than a silent overwrite.
+                  <div>
+                    <label className={labelClass}>{t("inventory.qty")}</label>
+                    <div className="mt-2 rounded-lg border border-dashed border-surface-border bg-surface-subtle px-3 py-2.5 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+                      {formData.quantity}
+                    </div>
+                    <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("inventory.quantityLockedHint")}</p>
+                  </div>
+                )}
               </>
             )}
 

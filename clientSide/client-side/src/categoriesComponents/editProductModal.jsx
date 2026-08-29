@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
+import { useFeature } from "auth/useFeature";
 import { apiGet, apiPut } from "utils/api";
 
 const inputClass =
@@ -11,9 +12,14 @@ const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gra
 const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
   const toast = useToast();
   const { t } = useLanguage();
+  // Basic tier only, and never for a batch-tracked product (its quantity comes from lots
+  // regardless of tier) — see config/features.js's manualQuantityEdit rule. Smart/Advanced
+  // correct quantity exclusively through Stock Adjustment, so this stays read-only there.
+  const canEditQuantity = useFeature("manualQuantityEdit") && !product?.batch_tracked;
   const [formData, setFormData] = useState({
     name: "",
     buying_price: "",
+    quantity: "",
     category_id: "",
   });
   const [categories, setCategories] = useState([]);
@@ -34,6 +40,7 @@ const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
       setFormData({
         name: product.productname || "",
         buying_price: product.buyingprice ?? "",
+        quantity: product.quantity ?? "",
         category_id: product.category_id ?? "",
       });
     }
@@ -53,12 +60,13 @@ const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
       await apiPut(`/products/${product.id}`, {
         name: formData.name,
         // Batch-tracked products keep their real price in `lots` — editing it here would
-        // desync them, so only name/category are sent for those. Quantity is never sent at
-        // all anymore, for either kind of product — Sevices/productsService.js's updateItems
-        // doesn't accept it either way; every quantity change goes through Adjust Stock
-        // (Inventory page) or a lot, so it's always reason-coded and attributed.
+        // desync them, so only name/category are sent for those.
         price: product.batch_tracked ? product.buyingprice : formData.buying_price,
         Category_id: formData.category_id,
+        // Only sent (and only ever honored server-side) on a Basic-tier shop editing a
+        // non-batch product — everyone else keeps correcting quantity through Adjust Stock
+        // (Inventory page) or a lot instead, so it stays reason-coded and attributed.
+        ...(canEditQuantity ? { Quantity: formData.quantity } : {}),
       });
       toast.success("Product updated successfully!");
       onUpdated();
@@ -111,16 +119,35 @@ const EditProductModal = ({ isOpen, onClose, product, onUpdated }) => {
           </div>
         )}
 
-        {/* Quantity is read-only everywhere now — every change (up or down) goes through
-            "Adjust Stock" on the Inventory page instead, so it's always reason-coded and
-            attributed rather than a silent overwrite. */}
-        <div>
-          <label className={labelClass}>{t("inventory.qty")}</label>
-          <div className="mt-2 rounded-lg border border-dashed border-surface-border bg-surface-subtle px-3 py-2.5 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
-            {product?.quantity ?? "—"}
+        {canEditQuantity ? (
+          <div>
+            <label htmlFor="edit_quantity" className={labelClass}>
+              {t("inventory.qty")}
+            </label>
+            <input
+              type="number"
+              name="quantity"
+              id="edit_quantity"
+              value={formData.quantity}
+              onChange={handleChange}
+              className={inputClass}
+              min="0"
+              step="1"
+              required
+            />
           </div>
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("inventory.quantityLockedHint")}</p>
-        </div>
+        ) : (
+          // Read-only for every other tier/product — every change (up or down) goes through
+          // "Adjust Stock" on the Inventory page instead, so it's always reason-coded and
+          // attributed rather than a silent overwrite.
+          <div>
+            <label className={labelClass}>{t("inventory.qty")}</label>
+            <div className="mt-2 rounded-lg border border-dashed border-surface-border bg-surface-subtle px-3 py-2.5 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-300">
+              {product?.quantity ?? "—"}
+            </div>
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("inventory.quantityLockedHint")}</p>
+          </div>
+        )}
         <div>
           <label htmlFor="edit_category_id" className={labelClass}>
             Category

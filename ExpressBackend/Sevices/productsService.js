@@ -1,6 +1,7 @@
 const { pool } = require("../Db");
 const { createLot } = require("./lotService");
 const ApiError = require("../utils/ApiError");
+const { hasFeature } = require("../config/features");
 
 const getItems = async (shopId) => {
   try {
@@ -86,30 +87,58 @@ const postItems = async (name, buying_price, quantity, category_id, batchOptions
   }
 };
 
-// quantity is intentionally NOT a parameter here (and not in the SET clause below) — every
-// quantity change, up or down, now goes exclusively through Stock Adjustment
-// (Sevices/stockAdjustmentService.js) or, for a batch-tracked product, through creating/
-// adding to a lot — both leave a reason/attribution trail, unlike a plain edit silently
-// overwriting the number. This edit path only ever touches name/price/category, and does so
-// regardless of what a caller sends for quantity, so it can't be reintroduced by calling this
-// endpoint directly even if a future frontend change forgot to drop the field.
-const updateItems = async (name, price, category_id, id, shopId) => {
+// Quantity is only ever honored here for a Basic-tier shop editing a non-batch product —
+// manualQuantityEdit is locked back OUT the moment a shop has Stock Adjustments (Smart+),
+// which gives it a reason-coded, attributed way to change quantity instead; a batch-tracked
+// product never accepts it here either, at any tier, since its quantity comes from lots.
+// Both conditions are checked against the DB row / the caller's own fresh shopTier, never
+// trusted from the request body — the row is locked first specifically so a concurrent
+// Stock Adjustment on the same product can't race this into an inconsistent quantity.
+// Anything a caller sends that doesn't qualify is silently ignored, not rejected, matching
+// this endpoint's existing behavior of degrading to "no quantity change" rather than an
+// error (an old cached frontend build, or a direct API call, hits the same fallback).
+const updateItems = async (name, price, category_id, id, shopId, { quantity, shopTier } = {}) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
-      `UPDATE "products"
-       SET productname=$1, buyingprice=$2, "category_id"=$3
-       WHERE id=$4 AND shop_id=$5
-       RETURNING *`,
-      [name, price, category_id, id, shopId]
+    await client.query("BEGIN");
+    const productResult = await client.query(
+      `SELECT batch_tracked FROM products WHERE id=$1 AND shop_id=$2 FOR UPDATE`,
+      [id, shopId]
     );
-    if (result.rowCount === 0) {
+    if (productResult.rowCount === 0) {
       throw new ApiError(404, `No item with id: ${id} found`);
     }
+    const canEditQuantity =
+      quantity !== undefined &&
+      quantity !== null &&
+      !productResult.rows[0].batch_tracked &&
+      hasFeature(shopTier, "manualQuantityEdit");
+
+    const result = canEditQuantity
+      ? await client.query(
+          `UPDATE "products"
+           SET productname=$1, buyingprice=$2, "category_id"=$3, "quantity"=$4
+           WHERE id=$5 AND shop_id=$6
+           RETURNING *`,
+          [name, price, category_id, quantity, id, shopId]
+        )
+      : await client.query(
+          `UPDATE "products"
+           SET productname=$1, buyingprice=$2, "category_id"=$3
+           WHERE id=$4 AND shop_id=$5
+           RETURNING *`,
+          [name, price, category_id, id, shopId]
+        );
+
+    await client.query("COMMIT");
     return result.rows; // Return rows
   } catch (err) {
+    await client.query("ROLLBACK");
     if (err instanceof ApiError) throw err;
     console.error(err);
     throw new Error("Service error");
+  } finally {
+    client.release();
   }
 };
 
@@ -117,22 +146,50 @@ const updateItems = async (name, price, category_id, id, shopId) => {
 // even within a single shop (e.g. "test" matching both "test product" and "test category
 // product"). productname is unique per shop (migration 021), so an exact match resolves to
 // at most one row, same guarantee updateItems above already has by going through id.
-const updateItemByName = async (name, buying_price, quantity, category_id, shopId) => {
+// Same manualQuantityEdit + non-batch gate as updateItems above — this was the "old bypass"
+// still open after that endpoint was locked down; gated here rather than removed, since a
+// Basic-tier shop still needs some way to reach this quantity path.
+const updateItemByName = async (name, buying_price, quantity, category_id, shopId, shopTier) => {
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
-      `UPDATE "products"
-       SET buyingprice = $2, "quantity" = $3, "category_id" = $4
-       WHERE productname = $1 AND shop_id = $5
-       RETURNING id, productname, buyingprice, "quantity", "category_id"
-       `,
-      [name, buying_price, quantity, category_id, shopId]
+    await client.query("BEGIN");
+    const productResult = await client.query(
+      `SELECT batch_tracked FROM products WHERE productname = $1 AND shop_id = $2 FOR UPDATE`,
+      [name, shopId]
     );
+    if (productResult.rowCount === 0) {
+      throw new ApiError(404, `No item with name: ${name} found`);
+    }
+    const canEditQuantity =
+      quantity !== undefined &&
+      quantity !== null &&
+      !productResult.rows[0].batch_tracked &&
+      hasFeature(shopTier, "manualQuantityEdit");
 
-    if (result.rowCount === 0) {
-      throw new Error(`No item with name: ${name} found`);
-    } else return result.rows; // Return rows
+    const result = canEditQuantity
+      ? await client.query(
+          `UPDATE "products"
+           SET buyingprice = $2, "quantity" = $3, "category_id" = $4
+           WHERE productname = $1 AND shop_id = $5
+           RETURNING id, productname, buyingprice, "quantity", "category_id"`,
+          [name, buying_price, quantity, category_id, shopId]
+        )
+      : await client.query(
+          `UPDATE "products"
+           SET buyingprice = $2, "category_id" = $3
+           WHERE productname = $1 AND shop_id = $4
+           RETURNING id, productname, buyingprice, "quantity", "category_id"`,
+          [name, buying_price, category_id, shopId]
+        );
+
+    await client.query("COMMIT");
+    return result.rows; // Return rows
   } catch (err) {
+    await client.query("ROLLBACK");
+    if (err instanceof ApiError) throw err;
     throw new Error(err.message);
+  } finally {
+    client.release();
   }
 };
 

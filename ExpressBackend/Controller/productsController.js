@@ -76,14 +76,18 @@ const PostItems = asyncHandler(async (req, res) => {
 
 const UpdateItems = asyncHandler(async (req, res) => {
   const id = req.params.id;
-  // Quantity is deliberately not accepted here at all anymore — see productsService.js's
-  // updateItems comment. Any Quantity a caller still sends (an old cached frontend build,
-  // a direct API call) is simply ignored, not just rejected, so there's no error message to
-  // keep in sync either.
-  const { name, price, Category_id } = req.body;
+  // Quantity is only honored when the caller sends one AND the shop's tier still allows
+  // manual edits (manualQuantityEdit, Basic-only) AND the product isn't batch-tracked —
+  // all enforced server-side in productsService.js, never trusted from here. Smart/Advanced
+  // shops (and any batch-tracked product, on every tier) always go through Stock Adjustment
+  // instead; anything sent that doesn't qualify is silently ignored, not rejected.
+  const { name, price, Category_id, Quantity } = req.body;
   const nameLower = name.toLowerCase();
 
-  const result = await updateItems(nameLower, price, Category_id, id, req.user.shopId);
+  const result = await updateItems(nameLower, price, Category_id, id, req.user.shopId, {
+    quantity: Quantity,
+    shopTier: req.user.shopTier,
+  });
   res.send({
     message: `Item with id: ${id} updated with name: ${nameLower} & price: ${price}`,
   });
@@ -115,17 +119,16 @@ const UpdateItemsByName = asyncHandler(async (req, res) => {
   const { name, buying_price, quantity, category_id } = req.body;
   const nameLower = name.toLowerCase();
 
+  // Same manualQuantityEdit + non-batch gate as UpdateItems above — see
+  // productsService.js's updateItemByName comment.
   const result = await updateItemByName(
     nameLower,
     buying_price,
     quantity,
     category_id,
-    req.user.shopId
+    req.user.shopId,
+    req.user.shopTier
   );
-
-  if (result.length === 0) {
-    return res.status(404).send({ message: "No items found to update" });
-  }
 
   res.send({ message: "updated successfully", updatedItem: result[0] });
 });
