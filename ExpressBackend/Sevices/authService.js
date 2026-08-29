@@ -9,11 +9,17 @@ const { hashPassword, comparePassword, signToken } = require("../utils/auth");
 // (users.shop_id), so their tier/shop-active status costs nothing extra to fetch
 // alongside them in the same round trip. password_hash is only ever read here — never
 // forwarded to a caller, since toPublicUser() below doesn't expose it.
+//
+// LEFT JOIN, not JOIN — migration 022 (superadmin) is the one row shape with a NULL
+// shop_id; an inner join would silently exclude a superadmin row from ever being found by
+// findUserById, which would make every one of their requests 401 as "account no longer
+// active" instead of the real reason. shop_tier/shop_is_active simply come back NULL for
+// that row, which toPublicUser and requireAuth both already handle explicitly.
 const USER_SHOP_QUERY = `
   SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.is_active, u.shop_id,
          s.tier AS shop_tier, s.is_active AS shop_is_active
   FROM users u
-  JOIN shops s ON s.id = u.shop_id
+  LEFT JOIN shops s ON s.id = u.shop_id
 `;
 
 const toPublicUser = (row) => ({

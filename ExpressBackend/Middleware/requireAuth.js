@@ -11,8 +11,8 @@ const { findUserById } = require("../Sevices/authService");
 // out (otherwise an unauthenticated visitor couldn't load the app far enough to even see
 // the login page). authRoutes.js and healthRoutes.js simply never attach this.
 //
-// Sets req.user = { id, username, displayName, role, ... } and req.shop = { id, tier }
-// on success.
+// Sets req.user = { id, username, displayName, role, ... } and req.shop = { id, tier } on
+// success — req.shop is null for a superadmin (migration 022), who belongs to no shop.
 async function requireAuth(req, res, next) {
   const token = req.cookies?.[COOKIE_NAME];
   if (!token) return next(new ApiError(401, "Not authenticated"));
@@ -54,8 +54,10 @@ async function requireAuth(req, res, next) {
   // users the same request-by-request way a deactivated individual user already does
   // above — same reasoning: re-checked fresh here rather than trusted off anything
   // cached, so it takes effect on the very next request, not whenever a stale value
-  // would otherwise expire.
-  if (!user.shopIsActive) {
+  // would otherwise expire. Skipped entirely for a superadmin (migration 022) — they
+  // belong to no shop at all, so shopIsActive is NULL, not false; `!null` would otherwise
+  // incorrectly read as "shop deactivated" and lock every superadmin out permanently.
+  if (user.role !== "superadmin" && !user.shopIsActive) {
     return next(new ApiError(401, "Shop is no longer active"));
   }
 
@@ -63,8 +65,10 @@ async function requireAuth(req, res, next) {
   // Tier is read fresh here every request, never off the JWT payload — the token is
   // long-lived (utils/auth.js's 180-day TTL), so a shop that upgrades/downgrades today
   // would otherwise keep granting/denying features based on whatever tier it was on
-  // when each user's token happened to be issued.
-  req.shop = { id: user.shopId, tier: user.shopTier };
+  // when each user's token happened to be issued. null for a superadmin (no shop to
+  // report) — requireFeature/tier-gated routes are never mounted on any admin route, so
+  // nothing downstream ever needs req.shop to be non-null for that role.
+  req.shop = user.shopId ? { id: user.shopId, tier: user.shopTier } : null;
   next();
 }
 

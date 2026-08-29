@@ -22,10 +22,16 @@ export default function LoginPage() {
     setError("");
     setSubmitting(true);
     try {
-      await login(username, password);
-      // Bounces back to wherever ProtectedRoute originally redirected from (e.g. a
-      // bookmarked /inventory link), falling back to the selling screen.
-      navigate(location.state?.from || "/", { replace: true });
+      const loggedInUser = await login(username, password);
+      // A superadmin (migration 022) has no shop, so "home" is always the admin console —
+      // never location.state?.from, which could be a shop-scoped URL left over from a
+      // completely different account's session on this browser (ProtectedRoute would just
+      // bounce them straight back out of it anyway, but there's no reason to round-trip
+      // through that). Everyone else keeps the normal "back to wherever you were headed"
+      // behavior, falling back to the selling screen.
+      const home =
+        loggedInUser.role === "superadmin" ? "/admin" : location.state?.from || "/";
+      navigate(home, { replace: true });
     } catch (err) {
       setError(err.message || t("auth.loginError"));
     } finally {

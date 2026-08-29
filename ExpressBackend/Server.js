@@ -23,6 +23,7 @@ const routesPayment = require("./Routes/API/ThirdParty/PayFast/payFastRoutes");
 const routesAuth = require("./Routes/API/authRoutes");
 const routesUsers = require("./Routes/API/usersRoutes");
 const routesHealth = require("./Routes/API/healthRoutes");
+const routesAdmin = require("./Routes/API/adminRoutes");
 const errorHandler = require("./Middleware/errorHandler");
 const { startShiftAutoCloseSweep } = require("./Sevices/shiftSweep");
 const cors = require("cors");
@@ -75,6 +76,7 @@ const Server = async () => {
   server.use(routesBankPayment);
   server.use(routesShifts);
   server.use(routesStockAdjustments);
+  server.use(routesAdmin); // platform-level (requireSuperAdmin) — no shop context, see adminRoutes.js
 
   // Serve static files from the React app
   server.use(

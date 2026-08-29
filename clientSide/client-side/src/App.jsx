@@ -12,6 +12,7 @@ import Contacts from "pages/Contacts";
 import StoreCredit from "pages/StoreCredit";
 import BankPayments from "pages/BankPayments";
 import Shifts from "pages/Shifts";
+import AdminDashboard from "pages/Admin";
 import LoginPage from "pages/Login";
 import NotFound from "pages/NotFound";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
@@ -43,6 +44,18 @@ function App() {
             <Router>
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                {/* Platform admin console (migration 022) — a superadmin's only route.
+                    ProtectedRoute's adminOnly boundary keeps a shop's own Owner/Cashier out
+                    of this exactly as strictly as it keeps a superadmin out of every route
+                    below it. */}
+                <Route
+                  path="/admin"
+                  element={
+                    <ProtectedRoute adminOnly>
+                      <AdminDashboard />
+                    </ProtectedRoute>
+                  }
+                />
                 <Route
                   path="/"
                   element={

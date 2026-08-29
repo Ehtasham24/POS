@@ -10,16 +10,18 @@ const { getFeaturesForTier } = require("../config/features");
 // the feature registry that could quietly drift apart). Shared by Login and Me so the user
 // object set right after logging in and the one a page refresh re-fetches from Me are
 // always identical in shape.
+//
+// shop is null for a superadmin (migration 022) — they belong to no shop at all, so there's
+// no tier to compute features for. The frontend's useFeature()/ProtectedRoute already treat
+// a missing shop as "no features," which is exactly correct for this role: an admin console
+// user was never meant to see any shop-gated feature.
 const withShopInfo = (user) => ({
   id: user.id,
   username: user.username,
   displayName: user.displayName,
   role: user.role,
   isActive: user.isActive,
-  shop: {
-    tier: user.shopTier,
-    features: getFeaturesForTier(user.shopTier),
-  },
+  shop: user.shopId ? { tier: user.shopTier, features: getFeaturesForTier(user.shopTier) } : null,
 });
 
 const Login = asyncHandler(async (req, res) => {
