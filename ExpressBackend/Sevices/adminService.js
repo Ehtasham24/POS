@@ -7,6 +7,7 @@ const { closeOpenShiftsForDowngrade } = require("./shiftService");
 const { flattenBatchProducts } = require("./productsService");
 const { getEgressByShop } = require("./egressService");
 const { getTotalDbCapacityBytes } = require("./platformSettingsService");
+const { getActualDatabaseSizeBytes } = require("./dbStatsService");
 
 const VALID_TIERS = ["basic", "smart", "advanced"];
 
@@ -279,7 +280,10 @@ const setShopActive = async (shopId, isActive) => {
 // ever changes (a plan upgrade rescales every shop's effective quota with it, with nothing
 // to update per-shop). See migration 025 / platformSettingsService.js.
 const getUsageByShop = async () => {
-  const totalDbCapacityBytes = await getTotalDbCapacityBytes();
+  const [totalDbCapacityBytes, actualDatabaseSizeBytes] = await Promise.all([
+    getTotalDbCapacityBytes(),
+    getActualDatabaseSizeBytes(),
+  ]);
   const { rows: shops } = await pool.query(
     `SELECT id, name, slug, tier, storage_quota_percent FROM shops ORDER BY id`
   );
@@ -329,8 +333,11 @@ const getUsageByShop = async () => {
 
   // totalDbCapacityBytes travels alongside the per-shop list (not a separate request the
   // frontend has to make) — every percentage shown on the Usage page, per-shop or "share of
-  // total," is only meaningful next to this number.
-  return { shops: [...usageByShopId.values()], totalDbCapacityBytes };
+  // total," is only meaningful next to this number. actualDatabaseSizeBytes is the REAL
+  // measurement (pg_database_size — see dbStatsService.js) for "how close are we to actually
+  // hitting the plan's limit," distinct from the per-shop pg_column_size sums above, which
+  // are honest lower bounds only really meaningful for comparing shops to each other.
+  return { shops: [...usageByShopId.values()], totalDbCapacityBytes, actualDatabaseSizeBytes };
 };
 
 module.exports = {

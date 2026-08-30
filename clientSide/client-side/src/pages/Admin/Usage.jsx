@@ -58,6 +58,7 @@ export default function UsagePage() {
   const toast = useToast();
   const [usage, setUsage] = useState([]);
   const [totalDbCapacityBytes, setTotalDbCapacityBytes] = useState(null);
+  const [actualDatabaseSizeBytes, setActualDatabaseSizeBytes] = useState(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
@@ -69,6 +70,7 @@ export default function UsagePage() {
         const data = await apiGet("/api/admin/usage");
         setUsage(data.shops);
         setTotalDbCapacityBytes(data.totalDbCapacityBytes);
+        setActualDatabaseSizeBytes(data.actualDatabaseSizeBytes);
       } catch (err) {
         toast.error(err.message);
       } finally {
@@ -135,12 +137,25 @@ export default function UsagePage() {
           </p>
           {totalDbCapacityBytes != null && (
             <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-              Total DB capacity: <strong>{formatBytes(totalDbCapacityBytes)}</strong> — every
-              shop's "Quota Used" below is relative to this. Change it from the Shops tab's
-              Platform Settings button.
+              Every shop's "Quota Used" below is a share of the total DB capacity — change it
+              from the Shops tab's Platform Settings button.
             </p>
           )}
         </div>
+
+        {actualDatabaseSizeBytes != null && totalDbCapacityBytes != null && (
+          <div className="mb-6">
+            <ShareBar
+              label="Actual database size (real, measured — pg_database_size)"
+              note={`${formatBytes(actualDatabaseSizeBytes)} of ${formatBytes(totalDbCapacityBytes)} plan capacity (${(
+                (actualDatabaseSizeBytes / totalDbCapacityBytes) *
+                100
+              ).toFixed(2)}%) — includes indexes and storage overhead the per-shop numbers below don't`}
+              percent={(actualDatabaseSizeBytes / totalDbCapacityBytes) * 100}
+              colorClass={quotaBarColorClass((actualDatabaseSizeBytes / totalDbCapacityBytes) * 100)}
+            />
+          </div>
+        )}
 
         {!selected ? (
           <>
