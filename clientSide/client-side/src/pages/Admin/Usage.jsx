@@ -94,8 +94,11 @@ export default function UsagePage() {
   const grandTotalRows = useMemo(() => usage.reduce((sum, u) => sum + u.totalRows, 0), [usage]);
   const selected = usage.find((u) => u.id === selectedId) || null;
   const sharePercent = selected && grandTotalBytes > 0 ? (selected.approxBytes / grandTotalBytes) * 100 : 0;
+  // Quota Used is checked against estimatedRealBytes (this shop's share of the actual,
+  // index-inclusive database size), not the raw approxBytes row-content sum — see
+  // adminService.js's getUsageByShop for why the two numbers differ.
   const quotaPercent =
-    selected?.storage_quota_bytes ? (selected.approxBytes / selected.storage_quota_bytes) * 100 : null;
+    selected?.storage_quota_bytes ? (selected.estimatedRealBytes / selected.storage_quota_bytes) * 100 : null;
 
   const chartData = useMemo(() => {
     if (!selected) return [];
@@ -221,7 +224,7 @@ export default function UsagePage() {
                     <tbody className="divide-y divide-surface-border dark:divide-gray-700">
                       {pagedUsage.map((u) => {
                         const share = grandTotalBytes > 0 ? (u.approxBytes / grandTotalBytes) * 100 : 0;
-                        const quotaPct = u.storage_quota_bytes ? (u.approxBytes / u.storage_quota_bytes) * 100 : null;
+                        const quotaPct = u.storage_quota_bytes ? (u.estimatedRealBytes / u.storage_quota_bytes) * 100 : null;
                         return (
                           <tr
                             key={u.id}
@@ -293,9 +296,10 @@ export default function UsagePage() {
               </span>
             </div>
 
-            <div className="grid grid-cols-3 gap-4 sm:grid-cols-1">
+            <div className="grid grid-cols-4 gap-4 sm:grid-cols-1">
               <StatTile label="Total rows" value={selected.totalRows.toLocaleString()} />
-              <StatTile label="Approx size" value={formatBytes(selected.approxBytes)} />
+              <StatTile label="Approx size (row content)" value={formatBytes(selected.approxBytes)} />
+              <StatTile label="Estimated real size" value={formatBytes(selected.estimatedRealBytes)} />
               <StatTile label="Egress (last 30 days)" value={formatBytes(selected.egressBytes)} />
             </div>
 
@@ -314,7 +318,7 @@ export default function UsagePage() {
             ) : (
               <ShareBar
                 label={`${selected.name}'s own allotted quota`}
-                note={`${formatBytes(selected.approxBytes)} of ${formatBytes(selected.storage_quota_bytes)} allotted (${quotaPercent.toFixed(1)}%)${
+                note={`${formatBytes(selected.estimatedRealBytes)} (estimated real usage) of ${formatBytes(selected.storage_quota_bytes)} allotted (${quotaPercent.toFixed(1)}%)${
                   quotaPercent >= QUOTA_WARNING_PERCENT ? " — the shop is currently seeing the warning icon" : ""
                 }`}
                 percent={quotaPercent}

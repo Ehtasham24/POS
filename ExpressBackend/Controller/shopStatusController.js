@@ -7,7 +7,14 @@ const { getShopStorageStatus } = require("../Sevices/storageQuotaService");
 // rather than erroring if it's ever called that way.
 const GetStorageStatus = asyncHandler(async (req, res) => {
   if (!req.shop) {
-    return res.send({ usedBytes: 0, quotaBytes: null, quotaPercent: null, percentUsed: null, isNearLimit: false });
+    return res.send({
+      usedBytes: 0,
+      estimatedRealBytes: 0,
+      quotaBytes: null,
+      quotaPercent: null,
+      percentUsed: null,
+      isNearLimit: false,
+    });
   }
   res.send(await getShopStorageStatus(req.shop.id));
 });

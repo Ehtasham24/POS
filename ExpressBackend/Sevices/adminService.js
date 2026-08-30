@@ -331,6 +331,19 @@ const getUsageByShop = async () => {
     entry.egressRequests = row.requestCount;
   }
 
+  // estimatedRealBytes closes the gap between approxBytes (row content only, a lower bound)
+  // and actualDatabaseSizeBytes (the real, measured total, indexes/overhead included):
+  // Postgres can't attribute a shared table's index to one tenant directly, so this takes
+  // each shop's share of all shops' row content and applies that same share to the real
+  // total instead. It's an estimate, not exact — but it's what "Quota Used" below is
+  // actually computed against, since a shop's quota is meant to track its real footprint,
+  // not just the part of it usageTables.js's whitelist can see directly.
+  const totalApproxBytes = [...usageByShopId.values()].reduce((sum, e) => sum + e.approxBytes, 0);
+  for (const entry of usageByShopId.values()) {
+    const shareOfContent = totalApproxBytes > 0 ? entry.approxBytes / totalApproxBytes : 0;
+    entry.estimatedRealBytes = Math.round(shareOfContent * actualDatabaseSizeBytes);
+  }
+
   // totalDbCapacityBytes travels alongside the per-shop list (not a separate request the
   // frontend has to make) — every percentage shown on the Usage page, per-shop or "share of
   // total," is only meaningful next to this number. actualDatabaseSizeBytes is the REAL

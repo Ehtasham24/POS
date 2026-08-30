@@ -70,7 +70,7 @@ export default function StorageWarningBadge() {
               of your shop's allotted database storage.
             </p>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              {formatBytes(status.usedBytes)} of {formatBytes(status.quotaBytes)} used. Contact
+              {formatBytes(status.estimatedRealBytes)} of {formatBytes(status.quotaBytes)} used. Contact
               your provider if you need more space.
             </p>
           </div>
