@@ -57,6 +57,7 @@ function ShareBar({ label, note, percent, colorClass }) {
 export default function UsagePage() {
   const toast = useToast();
   const [usage, setUsage] = useState([]);
+  const [totalDbCapacityBytes, setTotalDbCapacityBytes] = useState(null);
   const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
@@ -65,7 +66,9 @@ export default function UsagePage() {
   useEffect(() => {
     (async () => {
       try {
-        setUsage(await apiGet("/api/admin/usage"));
+        const data = await apiGet("/api/admin/usage");
+        setUsage(data.shops);
+        setTotalDbCapacityBytes(data.totalDbCapacityBytes);
       } catch (err) {
         toast.error(err.message);
       } finally {
@@ -130,6 +133,13 @@ export default function UsagePage() {
             directly from each shop's own row counts, actual row sizes, and real response
             bytes sent, never inferred.
           </p>
+          {totalDbCapacityBytes != null && (
+            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+              Total DB capacity: <strong>{formatBytes(totalDbCapacityBytes)}</strong> — every
+              shop's "Quota Used" below is relative to this. Change it from the Shops tab's
+              Platform Settings button.
+            </p>
+          )}
         </div>
 
         {!selected ? (

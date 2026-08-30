@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet";
-import { HiOutlinePlus, HiOutlinePencil } from "react-icons/hi2";
+import { HiOutlinePlus, HiOutlinePencil, HiOutlineCircleStack } from "react-icons/hi2";
 import { Modal, EmptyState, SkeletonRows } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { apiGet, apiPost, apiPatch } from "utils/api";
 import AdminHeader from "./AdminHeader";
-import { inputClass, labelClass, TIERS, TIER_CHIP_CLASS } from "./shared";
+import { inputClass, labelClass, TIERS, TIER_CHIP_CLASS, formatBytes } from "./shared";
 
 // Deliberately plain English, not routed through i18n/translations.js like the rest of the
 // app — this console's only ever audience is the platform operator (the POS provider
@@ -35,8 +35,16 @@ export default function AdminDashboard() {
   // Editing an existing shop's name/seat limit — separate from `form` (New Shop) since
   // this one has no owner-account fields at all.
   const [editTarget, setEditTarget] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", maxUsers: 5 });
+  const [editForm, setEditForm] = useState({ name: "", maxUsers: 5, storageQuotaPercent: "" });
   const [editSaving, setEditSaving] = useState(false);
+
+  // Platform Settings: the one number every shop's quota percentage is actually relative
+  // to — see migration 025. Supabase has no queryable "what plan are we on" from inside
+  // this app, so this is admin-entered based on their real plan.
+  const [platformSettings, setPlatformSettings] = useState(null);
+  const [showPlatformSettings, setShowPlatformSettings] = useState(false);
+  const [capacityForm, setCapacityForm] = useState({ mode: "preset", presetBytes: "", customGB: "" });
+  const [savingCapacity, setSavingCapacity] = useState(false);
 
   const loadShops = async () => {
     setLoading(true);
@@ -49,8 +57,17 @@ export default function AdminDashboard() {
     }
   };
 
+  const loadPlatformSettings = async () => {
+    try {
+      setPlatformSettings(await apiGet("/api/admin/platform-settings"));
+    } catch (err) {
+      toast.error(err.message);
+    }
+  };
+
   useEffect(() => {
     loadShops();
+    loadPlatformSettings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -107,10 +124,9 @@ export default function AdminDashboard() {
     setEditForm({
       name: shop.name,
       maxUsers: shop.max_users,
-      // GB in the UI (human-friendly), bytes on the wire — converted back on submit below.
-      // Blank means "no quota configured," not 0, so this can't be confused with "give this
-      // shop zero bytes."
-      storageQuotaGB: shop.storage_quota_bytes ? shop.storage_quota_bytes / 1024 ** 3 : "",
+      // A percentage of the platform's total DB capacity (see Platform Settings below), not
+      // an absolute number — blank means "no quota configured," not 0.
+      storageQuotaPercent: shop.storage_quota_percent ?? "",
     });
   };
 
@@ -118,12 +134,12 @@ export default function AdminDashboard() {
     e.preventDefault();
     setEditSaving(true);
     try {
-      const storageQuotaBytes =
-        editForm.storageQuotaGB === "" ? null : Math.round(Number(editForm.storageQuotaGB) * 1024 ** 3);
+      const storageQuotaPercent =
+        editForm.storageQuotaPercent === "" ? null : Number(editForm.storageQuotaPercent);
       await apiPatch(`/api/admin/shops/${editTarget.id}`, {
         name: editForm.name,
         maxUsers: editForm.maxUsers,
-        storageQuotaBytes,
+        storageQuotaPercent,
       });
       toast.success(`${editTarget.name} updated.`);
       setEditTarget(null);
@@ -132,6 +148,37 @@ export default function AdminDashboard() {
       toast.error(err.message);
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  const openPlatformSettings = () => {
+    const current = platformSettings?.totalDbCapacityBytes;
+    const matchesPreset = platformSettings?.presets?.find((p) => p.bytes === current);
+    setCapacityForm(
+      matchesPreset
+        ? { mode: "preset", presetBytes: String(matchesPreset.bytes), customGB: "" }
+        : { mode: "custom", presetBytes: "", customGB: current ? current / 1024 ** 3 : "" }
+    );
+    setShowPlatformSettings(true);
+  };
+
+  const handleSaveCapacity = async (e) => {
+    e.preventDefault();
+    setSavingCapacity(true);
+    try {
+      const totalDbCapacityBytes =
+        capacityForm.mode === "preset"
+          ? Number(capacityForm.presetBytes)
+          : Math.round(Number(capacityForm.customGB) * 1024 ** 3);
+      await apiPatch("/api/admin/platform-settings", { totalDbCapacityBytes });
+      toast.success("Total DB capacity updated — every shop's quota % now reflects it.");
+      setShowPlatformSettings(false);
+      loadPlatformSettings();
+      loadShops();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setSavingCapacity(false);
     }
   };
 
@@ -144,21 +191,31 @@ export default function AdminDashboard() {
       <AdminHeader />
 
       <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="mb-5 flex items-center justify-between">
+        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">Shops</h1>
             <p className="text-sm text-gray-500 dark:text-gray-400">
               Every tenant on this database — create one, change its plan, or deactivate it.
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => setShowCreate(true)}
-            className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white-A700 transition-colors hover:bg-primary-700"
-          >
-            <HiOutlinePlus />
-            New Shop
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={openPlatformSettings}
+              className="flex items-center gap-1.5 rounded-lg border border-surface-border px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-surface-muted dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
+            >
+              <HiOutlineCircleStack />
+              {platformSettings ? `${formatBytes(platformSettings.totalDbCapacityBytes)} total` : "Platform Settings"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowCreate(true)}
+              className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white-A700 transition-colors hover:bg-primary-700"
+            >
+              <HiOutlinePlus />
+              New Shop
+            </button>
+          </div>
         </div>
 
         <div className="overflow-hidden rounded-xl2 border border-surface-border bg-white-A700 shadow-card dark:border-gray-700 dark:bg-gray-800">
@@ -366,19 +423,24 @@ export default function AdminDashboard() {
             )}
           </div>
           <div>
-            <label className={labelClass}>Storage quota (GB)</label>
+            <label className={labelClass}>Storage quota (% of total DB)</label>
             <input
               type="number"
-              min={0.001}
+              min={0.01}
+              max={100}
               step="any"
-              value={editForm.storageQuotaGB}
-              onChange={(e) => setEditForm((prev) => ({ ...prev, storageQuotaGB: e.target.value }))}
+              value={editForm.storageQuotaPercent}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, storageQuotaPercent: e.target.value }))}
               className={inputClass}
               placeholder="Leave blank for no quota / unlimited"
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              At 75% of this, the shop's own dashboard starts showing a glowing warning icon.
-              See the Usage tab for exactly how close each shop is.
+              A share of the platform's total DB capacity (currently{" "}
+              {platformSettings ? formatBytes(platformSettings.totalDbCapacityBytes) : "…"} — see the
+              Platform Settings button above), not a fixed number — upgrading the total capacity
+              later rescales this automatically. At 75% of its own allotment, the shop's dashboard
+              starts showing a glowing warning icon. See the Usage tab for exactly how close each
+              shop is.
             </p>
           </div>
           <div className="flex justify-end gap-3 pt-2">
@@ -397,6 +459,76 @@ export default function AdminDashboard() {
               {editSaving ? "Saving…" : "Save"}
             </button>
           </div>
+        </form>
+      </Modal>
+
+      <Modal isOpen={showPlatformSettings} onClose={() => setShowPlatformSettings(false)} title="Platform Settings">
+        <form className="space-y-4" onSubmit={handleSaveCapacity}>
+          <div>
+            <p className={labelClass}>Total DB capacity</p>
+            <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
+              How big your Supabase database is actually allowed to get, per your real plan.
+              Supabase doesn't expose this to a query run from inside the app — this is you
+              telling the system what your plan actually is. Every shop's quota is a
+              <strong> percentage</strong> of this number, so changing it here instantly
+              rescales every shop's effective quota, with nothing to update per-shop.
+            </p>
+            <div className="space-y-2">
+              {platformSettings?.presets?.map((preset) => (
+                <label
+                  key={preset.bytes}
+                  className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                    capacityForm.mode === "preset" && Number(capacityForm.presetBytes) === preset.bytes
+                      ? "border-primary-500 bg-primary-50 dark:bg-primary-500/10"
+                      : "border-surface-border hover:bg-surface-subtle dark:border-gray-700 dark:hover:bg-gray-700"
+                  }`}
+                >
+                  <input
+                    type="radio"
+                    name="capacityPreset"
+                    checked={capacityForm.mode === "preset" && Number(capacityForm.presetBytes) === preset.bytes}
+                    onChange={() => setCapacityForm({ mode: "preset", presetBytes: String(preset.bytes), customGB: "" })}
+                  />
+                  <span className="text-gray-800 dark:text-gray-100">{preset.label}</span>
+                </label>
+              ))}
+              <label
+                className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                  capacityForm.mode === "custom"
+                    ? "border-primary-500 bg-primary-50 dark:bg-primary-500/10"
+                    : "border-surface-border hover:bg-surface-subtle dark:border-gray-700 dark:hover:bg-gray-700"
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="capacityPreset"
+                  checked={capacityForm.mode === "custom"}
+                  onChange={() => setCapacityForm((prev) => ({ ...prev, mode: "custom" }))}
+                />
+                <span className="flex-1 text-gray-800 dark:text-gray-100">Custom (GB)</span>
+                {capacityForm.mode === "custom" && (
+                  <input
+                    type="number"
+                    min={0.001}
+                    step="any"
+                    required
+                    autoFocus
+                    value={capacityForm.customGB}
+                    onChange={(e) => setCapacityForm((prev) => ({ ...prev, customGB: e.target.value }))}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-28 rounded-lg border border-surface-border bg-white-A700 p-1.5 text-sm text-gray-900 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                  />
+                )}
+              </label>
+            </div>
+          </div>
+          <button
+            type="submit"
+            disabled={savingCapacity}
+            className="w-full rounded-lg bg-primary-600 py-2.5 text-sm font-medium text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {savingCapacity ? "Saving…" : "Save"}
+          </button>
         </form>
       </Modal>
     </div>

@@ -1,6 +1,7 @@
 const { pool } = require("../Db");
 const { withCache } = require("../utils/cache");
 const { USAGE_TABLES } = require("../config/usageTables");
+const { getTotalDbCapacityBytes } = require("./platformSettingsService");
 
 // How close to its quota a shop needs to be before the shop-facing warning icon (a real,
 // glowing badge in AppShell — see StorageWarningBadge.jsx) lights up. One constant, shared
@@ -39,20 +40,28 @@ const getShopStorageBytes = async (shopId) => {
 // showing 0%"), and whether that crosses the warning line. Returns nulls for
 // percentUsed/isNearLimit when there's no quota to measure against, rather than a
 // meaningless 0% that would look like reassuring good news.
+//
+// The shop's quota is stored as a PERCENTAGE of the platform's total DB capacity (migration
+// 025), not an absolute byte count — so quotaBytes here is derived fresh from both numbers
+// every call, and automatically reflects a plan upgrade (a changed total_db_capacity_bytes)
+// without anything per-shop needing to change.
 const getShopStorageStatus = async (shopId) => {
-  const { rows } = await pool.query(`SELECT storage_quota_bytes FROM shops WHERE id = $1`, [shopId]);
-  // node-postgres returns BIGINT as a string — convert explicitly so percentUsed's division
-  // below and the frontend's own comparisons are against a real number, not "2000".
-  const quotaBytes = rows[0]?.storage_quota_bytes != null ? Number(rows[0].storage_quota_bytes) : null;
+  const { rows } = await pool.query(`SELECT storage_quota_percent FROM shops WHERE id = $1`, [shopId]);
+  // node-postgres returns NUMERIC as a string — convert explicitly so the math below and the
+  // frontend's own comparisons are against a real number, not "10".
+  const quotaPercent = rows[0]?.storage_quota_percent != null ? Number(rows[0].storage_quota_percent) : null;
 
-  const usedBytes = await withCache(usageCacheKey(shopId), USAGE_CACHE_TTL_SECONDS, () =>
-    getShopStorageBytes(shopId)
-  );
+  const [usedBytes, totalDbCapacityBytes] = await Promise.all([
+    withCache(usageCacheKey(shopId), USAGE_CACHE_TTL_SECONDS, () => getShopStorageBytes(shopId)),
+    getTotalDbCapacityBytes(),
+  ]);
 
+  const quotaBytes = quotaPercent != null ? Math.round((quotaPercent / 100) * totalDbCapacityBytes) : null;
   const percentUsed = quotaBytes ? (usedBytes / quotaBytes) * 100 : null;
   return {
     usedBytes,
     quotaBytes,
+    quotaPercent,
     percentUsed,
     isNearLimit: percentUsed !== null && percentUsed >= WARNING_THRESHOLD_PERCENT,
   };

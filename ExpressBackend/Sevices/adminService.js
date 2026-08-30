@@ -6,16 +6,20 @@ const { USAGE_TABLES } = require("../config/usageTables");
 const { closeOpenShiftsForDowngrade } = require("./shiftService");
 const { flattenBatchProducts } = require("./productsService");
 const { getEgressByShop } = require("./egressService");
+const { getTotalDbCapacityBytes } = require("./platformSettingsService");
 
 const VALID_TIERS = ["basic", "smart", "advanced"];
 
-// node-postgres returns BIGINT columns as strings (it can't assume a value fits JS's safe
-// integer range) — storage_quota_bytes is one, so every shop row coming straight back from
-// a query needs this before it reaches a caller, or the frontend gets "2000" instead of
-// 2000 and any strict numeric check on it silently misbehaves. Byte counts here are
-// nowhere near large enough to lose precision going through Number().
+// node-postgres returns NUMERIC columns as strings too (same reasoning as BIGINT — it can't
+// assume a value fits a JS number without precision loss), so storage_quota_percent needs
+// the same treatment storage_quota_bytes did before migration 025 replaced it: every shop
+// row coming straight back from a query goes through this before it reaches a caller, or
+// the frontend gets "10" instead of 10 and any strict numeric check on it silently misbehaves.
 const normalizeShopRow = (row) =>
-  row && { ...row, storage_quota_bytes: row.storage_quota_bytes == null ? null : Number(row.storage_quota_bytes) };
+  row && {
+    ...row,
+    storage_quota_percent: row.storage_quota_percent == null ? null : Number(row.storage_quota_percent),
+  };
 
 // A superadmin's own password change — there's no "forgot password" flow at this level
 // (deliberately: recovering a locked-out platform admin account is a DB-access-required
@@ -61,7 +65,7 @@ const slugify = (name) =>
 
 const listShops = async () => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users, s.storage_quota_bytes,
+    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users, s.storage_quota_percent,
             (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id AND u.is_active = true) AS user_count
      FROM shops s
      ORDER BY s.created_at DESC`
@@ -147,21 +151,23 @@ const createShop = async ({ name, tier, ownerUsername, ownerPassword, ownerDispl
 
 // null explicitly clears the quota (unlimited); undefined means "leave it alone" — the
 // same three-way distinction updateShopDetails already makes for name/maxUsers, just with
-// an actual valid "clear it" value this time instead of only "don't touch."
-const parseStorageQuotaBytes = (value) => {
+// an actual valid "clear it" value this time instead of only "don't touch." A percentage
+// of the platform's total DB capacity (platform_settings), not an absolute byte count — see
+// migration 025's own comment for why an admin-typed absolute number was the actual bug.
+const parseStorageQuotaPercent = (value) => {
   if (value === null) return null;
   const parsed = Number(value);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    throw new ApiError(400, "Storage quota must be a positive number of bytes");
+  if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 100) {
+    throw new ApiError(400, "Storage quota must be a percentage between 0 and 100");
   }
-  return Math.round(parsed);
+  return parsed;
 };
 
 // Edits a shop's own details (name, seat limit, storage quota) — deliberately separate from
 // updateShopTier below: tier changes trigger downgrade automations and are a much bigger
 // deal, whereas these are plain field edits with no side effects.
-const updateShopDetails = async (shopId, { name, maxUsers, storageQuotaBytes }) => {
-  if (name === undefined && maxUsers === undefined && storageQuotaBytes === undefined) {
+const updateShopDetails = async (shopId, { name, maxUsers, storageQuotaPercent }) => {
+  if (name === undefined && maxUsers === undefined && storageQuotaPercent === undefined) {
     throw new ApiError(400, "Nothing to update");
   }
   if (name !== undefined && !name.trim()) {
@@ -192,14 +198,14 @@ const updateShopDetails = async (shopId, { name, maxUsers, storageQuotaBytes }) 
     params.push(parsed);
     updates.push(`max_users = $${params.length}`);
   }
-  if (storageQuotaBytes !== undefined) {
-    params.push(parseStorageQuotaBytes(storageQuotaBytes));
-    updates.push(`storage_quota_bytes = $${params.length}`);
+  if (storageQuotaPercent !== undefined) {
+    params.push(parseStorageQuotaPercent(storageQuotaPercent));
+    updates.push(`storage_quota_percent = $${params.length}`);
   }
 
   const { rows } = await pool.query(
     `UPDATE shops SET ${updates.join(", ")} WHERE id = $1
-     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_bytes`,
+     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_percent`,
     params
   );
   if (!rows[0]) throw new ApiError(404, "Shop not found");
@@ -237,7 +243,7 @@ const updateShopTier = async (shopId, newTier) => {
 
   const { rows: updated } = await pool.query(
     `UPDATE shops SET tier = $2 WHERE id = $1
-     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_bytes`,
+     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_percent`,
     [shopId, newTier]
   );
 
@@ -247,7 +253,7 @@ const updateShopTier = async (shopId, newTier) => {
 const setShopActive = async (shopId, isActive) => {
   const { rows } = await pool.query(
     `UPDATE shops SET is_active = $2 WHERE id = $1
-     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_bytes`,
+     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_percent`,
     [shopId, !!isActive]
   );
   if (!rows[0]) throw new ApiError(404, "Shop not found");
@@ -266,15 +272,36 @@ const setShopActive = async (shopId, isActive) => {
 // egressBytes/egressRequests (last 30 days) come from shop_egress_daily — a real measured
 // count of response bytes actually sent, not inferred from row sizes the way storage is;
 // see egressService.js and Server.js's tracking middleware for where those numbers come from.
+//
+// storage_quota_bytes here is DERIVED (storage_quota_percent × the platform's total DB
+// capacity, fetched once for the whole report, not per shop) — the percentage itself is
+// what's actually stored, precisely so it stays meaningful if the platform's total capacity
+// ever changes (a plan upgrade rescales every shop's effective quota with it, with nothing
+// to update per-shop). See migration 025 / platformSettingsService.js.
 const getUsageByShop = async () => {
+  const totalDbCapacityBytes = await getTotalDbCapacityBytes();
   const { rows: shops } = await pool.query(
-    `SELECT id, name, slug, tier, storage_quota_bytes FROM shops ORDER BY id`
+    `SELECT id, name, slug, tier, storage_quota_percent FROM shops ORDER BY id`
   );
   const usageByShopId = new Map(
-    shops.map((s) => [
-      s.id,
-      { ...normalizeShopRow(s), tables: {}, totalRows: 0, approxBytes: 0, egressBytes: 0, egressRequests: 0 },
-    ])
+    shops.map((s) => {
+      const normalized = normalizeShopRow(s);
+      return [
+        s.id,
+        {
+          ...normalized,
+          storage_quota_bytes:
+            normalized.storage_quota_percent != null
+              ? Math.round((normalized.storage_quota_percent / 100) * totalDbCapacityBytes)
+              : null,
+          tables: {},
+          totalRows: 0,
+          approxBytes: 0,
+          egressBytes: 0,
+          egressRequests: 0,
+        },
+      ];
+    })
   );
 
   for (const table of USAGE_TABLES) {
@@ -300,7 +327,10 @@ const getUsageByShop = async () => {
     entry.egressRequests = row.requestCount;
   }
 
-  return [...usageByShopId.values()];
+  // totalDbCapacityBytes travels alongside the per-shop list (not a separate request the
+  // frontend has to make) — every percentage shown on the Usage page, per-shop or "share of
+  // total," is only meaningful next to this number.
+  return { shops: [...usageByShopId.values()], totalDbCapacityBytes };
 };
 
 module.exports = {
