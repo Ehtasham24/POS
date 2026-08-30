@@ -23,6 +23,7 @@ const { hashPassword } = require("../Sevices/authService");
 const { signToken } = require("../utils/auth");
 
 const BASE = "https://localhost:4000";
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 let pass = 0;
 let fail = 0;
@@ -287,6 +288,15 @@ async function main() {
       await pool.query(`DELETE FROM sales WHERE shop_id = $1`, [created.shopId]);
       await pool.query(`DELETE FROM shifts WHERE shop_id = $1`, [created.shopId]);
       await pool.query(`DELETE FROM settings WHERE shop_id = $1`, [created.shopId]);
+      // migration 024 (storage quotas + egress): every authenticated request this script
+      // makes for shop 2 goes through Server.js's egress-tracking middleware, so by the
+      // time cleanup runs there's always at least one row here for it — must go before
+      // the shops delete below or that FK rejects it, same reasoning as every other
+      // shop_id-scoped table cleaned up here. That middleware's own write is fire-and-
+      // forget (Server.js never awaits it), so the very last test request's egress row
+      // may not have landed yet — a short wait here lets it settle first.
+      await sleep(300);
+      await pool.query(`DELETE FROM shop_egress_daily WHERE shop_id = $1`, [created.shopId]);
       await pool.query(`DELETE FROM settings WHERE key = 'isolation_test_key'`);
       for (const id of created.productIds) await pool.query(`DELETE FROM products WHERE id = $1`, [id]);
       for (const id of created.categoryIds) await pool.query(`DELETE FROM categories WHERE id = $1`, [id]);

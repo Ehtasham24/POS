@@ -104,14 +104,27 @@ export default function AdminDashboard() {
 
   const openEdit = (shop) => {
     setEditTarget(shop);
-    setEditForm({ name: shop.name, maxUsers: shop.max_users });
+    setEditForm({
+      name: shop.name,
+      maxUsers: shop.max_users,
+      // GB in the UI (human-friendly), bytes on the wire — converted back on submit below.
+      // Blank means "no quota configured," not 0, so this can't be confused with "give this
+      // shop zero bytes."
+      storageQuotaGB: shop.storage_quota_bytes ? shop.storage_quota_bytes / 1024 ** 3 : "",
+    });
   };
 
   const handleEditSave = async (e) => {
     e.preventDefault();
     setEditSaving(true);
     try {
-      await apiPatch(`/api/admin/shops/${editTarget.id}`, editForm);
+      const storageQuotaBytes =
+        editForm.storageQuotaGB === "" ? null : Math.round(Number(editForm.storageQuotaGB) * 1024 ** 3);
+      await apiPatch(`/api/admin/shops/${editTarget.id}`, {
+        name: editForm.name,
+        maxUsers: editForm.maxUsers,
+        storageQuotaBytes,
+      });
       toast.success(`${editTarget.name} updated.`);
       setEditTarget(null);
       loadShops();
@@ -351,6 +364,22 @@ export default function AdminDashboard() {
                 Currently {editTarget.user_count} active user(s). Can't go below that.
               </p>
             )}
+          </div>
+          <div>
+            <label className={labelClass}>Storage quota (GB)</label>
+            <input
+              type="number"
+              min={0.001}
+              step="any"
+              value={editForm.storageQuotaGB}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, storageQuotaGB: e.target.value }))}
+              className={inputClass}
+              placeholder="Leave blank for no quota / unlimited"
+            />
+            <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+              At 75% of this, the shop's own dashboard starts showing a glowing warning icon.
+              See the Usage tab for exactly how close each shop is.
+            </p>
           </div>
           <div className="flex justify-end gap-3 pt-2">
             <button

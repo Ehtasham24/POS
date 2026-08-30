@@ -24,8 +24,10 @@ const routesAuth = require("./Routes/API/authRoutes");
 const routesUsers = require("./Routes/API/usersRoutes");
 const routesHealth = require("./Routes/API/healthRoutes");
 const routesAdmin = require("./Routes/API/adminRoutes");
+const routesShopStatus = require("./Routes/API/shopStatusRoutes");
 const errorHandler = require("./Middleware/errorHandler");
 const { startShiftAutoCloseSweep } = require("./Sevices/shiftSweep");
+const { recordEgress } = require("./Sevices/egressService");
 const cors = require("cors");
 
 const server = express();
@@ -50,6 +52,23 @@ const Server = async () => {
   // Raised from the default 100kb so a base64-encoded company logo (stored as a
   // settings value) fits comfortably through the generic /api/settings endpoint.
   server.use(express.json({ limit: "2mb" }));
+
+  // Egress tracking (migration 024) — mounted before every route so it wraps the whole
+  // request, but it reads req.shop only inside the 'finish' listener, which fires after
+  // the full downstream chain (including whichever route's own requireAuth) has already
+  // run and set it. Deliberately fire-and-forget: recordEgress's own promise is never
+  // awaited or returned, so a slow/failed egress write can never delay or fail the actual
+  // response it's measuring, and .catch here is just so that failure doesn't become an
+  // unhandled rejection.
+  server.use((req, res, next) => {
+    res.on("finish", () => {
+      const shopId = req.shop?.id;
+      if (!shopId) return;
+      const bytes = Number(res.getHeader("content-length")) || 0;
+      recordEgress(shopId, bytes).catch((err) => console.error("Egress tracking failed:", err));
+    });
+    next();
+  });
 
   // Use routes. Each protected route applies requireAuth (and, where relevant,
   // requireOwner) as its own per-route middleware argument — not a router-level
@@ -77,6 +96,7 @@ const Server = async () => {
   server.use(routesShifts);
   server.use(routesStockAdjustments);
   server.use(routesAdmin); // platform-level (requireSuperAdmin) — no shop context, see adminRoutes.js
+  server.use(routesShopStatus);
 
   // Serve static files from the React app
   server.use(

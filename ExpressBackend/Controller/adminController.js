@@ -21,8 +21,12 @@ const CreateShop = asyncHandler(async (req, res) => {
 
 const UpdateShopDetails = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { name, maxUsers } = req.body;
-  res.send(await updateShopDetails(id, { name, maxUsers }));
+  // storageQuotaBytes: undefined (key omitted) means "leave it alone"; null means "clear
+  // the quota back to unlimited" — both are meaningfully different from a caller's request
+  // body, and destructuring preserves that distinction (JSON.parse keeps an explicit null
+  // as null, not undefined).
+  const { name, maxUsers, storageQuotaBytes } = req.body;
+  res.send(await updateShopDetails(id, { name, maxUsers, storageQuotaBytes }));
 });
 
 const UpdateShopTier = asyncHandler(async (req, res) => {

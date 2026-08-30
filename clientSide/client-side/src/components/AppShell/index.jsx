@@ -7,6 +7,7 @@ import SidebarContent from "./SidebarContent";
 import GlobalSearch from "components/GlobalSearch";
 import LowStockBell from "./LowStockBell";
 import PendingBankPaymentsBell from "./PendingBankPaymentsBell";
+import StorageWarningBadge from "./StorageWarningBadge";
 import OfflineStatusBadge from "./OfflineStatusBadge";
 import UserMenu from "./UserMenu";
 import CartCheckout from "categoriesComponents/cartCheckout";
@@ -68,6 +69,7 @@ export default function AppShell({ title, actions, hideSearch, children }) {
           </div>
           <div className="flex items-center gap-2">
             <OfflineStatusBadge />
+            <StorageWarningBadge />
             <PendingBankPaymentsBell />
             <LowStockBell />
             <UserMenu />
@@ -90,6 +92,7 @@ export default function AppShell({ title, actions, hideSearch, children }) {
                   just be deleted. */}
               <div className="flex items-center gap-2 md:hidden">
                 <OfflineStatusBadge />
+                <StorageWarningBadge />
                 <PendingBankPaymentsBell />
                 <LowStockBell />
                 <UserMenu />

@@ -32,9 +32,26 @@ export const USAGE_TABLE_LABEL = {
   users: "Users",
 };
 
-export const formatBytes = (bytes) => {
-  if (!bytes) return "0 B";
-  const units = ["B", "KB", "MB", "GB"];
-  const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
-  return `${(bytes / 1024 ** i).toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+// Re-exported (not redefined) so this and the shop-facing storage-warning badge
+// (components/AppShell/StorageWarningBadge.jsx) can never quietly format bytes differently.
+export { formatBytes } from "utils/formatBytes";
+
+// Matches Sevices/storageQuotaService.js's WARNING_THRESHOLD_PERCENT exactly — the point
+// past which a shop's own AppShell lights up its glowing storage-warning badge. Kept as one
+// named constant here (not just a bare 75 wherever a threshold check happens) so the admin
+// Usage page's own coloring/labels can't quietly drift from what actually triggers the
+// shop-facing warning.
+export const QUOTA_WARNING_PERCENT = 75;
+
+// green under half, amber approaching the limit, red at/past the same threshold that lights
+// up the shop's own warning badge — one scale, used everywhere a quota percentage is shown.
+export const quotaBarColorClass = (percent) => {
+  if (percent >= QUOTA_WARNING_PERCENT) return "bg-danger-600";
+  if (percent >= 50) return "bg-amber-500";
+  return "bg-success-600";
+};
+export const quotaTextColorClass = (percent) => {
+  if (percent >= QUOTA_WARNING_PERCENT) return "text-danger-600 dark:text-danger-400";
+  if (percent >= 50) return "text-amber-600 dark:text-amber-400";
+  return "text-success-600 dark:text-success-500";
 };

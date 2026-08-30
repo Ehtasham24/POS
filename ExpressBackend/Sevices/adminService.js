@@ -2,10 +2,20 @@ const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { hashPassword, comparePassword } = require("../utils/auth");
 const { hasFeature } = require("../config/features");
+const { USAGE_TABLES } = require("../config/usageTables");
 const { closeOpenShiftsForDowngrade } = require("./shiftService");
 const { flattenBatchProducts } = require("./productsService");
+const { getEgressByShop } = require("./egressService");
 
 const VALID_TIERS = ["basic", "smart", "advanced"];
+
+// node-postgres returns BIGINT columns as strings (it can't assume a value fits JS's safe
+// integer range) — storage_quota_bytes is one, so every shop row coming straight back from
+// a query needs this before it reaches a caller, or the frontend gets "2000" instead of
+// 2000 and any strict numeric check on it silently misbehaves. Byte counts here are
+// nowhere near large enough to lose precision going through Number().
+const normalizeShopRow = (row) =>
+  row && { ...row, storage_quota_bytes: row.storage_quota_bytes == null ? null : Number(row.storage_quota_bytes) };
 
 // A superadmin's own password change — there's no "forgot password" flow at this level
 // (deliberately: recovering a locked-out platform admin account is a DB-access-required
@@ -51,12 +61,12 @@ const slugify = (name) =>
 
 const listShops = async () => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users,
+    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users, s.storage_quota_bytes,
             (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id AND u.is_active = true) AS user_count
      FROM shops s
      ORDER BY s.created_at DESC`
   );
-  return rows;
+  return rows.map(normalizeShopRow);
 };
 
 // Shared by createShop and updateShopDetails below — a bare integer >= 1, everything else
@@ -109,7 +119,7 @@ const createShop = async ({ name, tier, ownerUsername, ownerPassword, ownerDispl
        RETURNING id, name, slug, tier, is_active, created_at, max_users`,
       [name.trim(), slug, tier, resolvedMaxUsers]
     );
-    const shop = shopRows[0];
+    const shop = normalizeShopRow(shopRows[0]);
 
     const passwordHash = await hashPassword(ownerPassword);
     const { rows: userRows } = await client.query(
@@ -135,11 +145,23 @@ const createShop = async ({ name, tier, ownerUsername, ownerPassword, ownerDispl
   }
 };
 
-// Edits a shop's own details (name, seat limit) — deliberately separate from updateShopTier
-// below: tier changes trigger downgrade automations and are a much bigger deal, whereas a
-// name typo or bumping the seat count is a plain field edit with no side effects.
-const updateShopDetails = async (shopId, { name, maxUsers }) => {
-  if (name === undefined && maxUsers === undefined) {
+// null explicitly clears the quota (unlimited); undefined means "leave it alone" — the
+// same three-way distinction updateShopDetails already makes for name/maxUsers, just with
+// an actual valid "clear it" value this time instead of only "don't touch."
+const parseStorageQuotaBytes = (value) => {
+  if (value === null) return null;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    throw new ApiError(400, "Storage quota must be a positive number of bytes");
+  }
+  return Math.round(parsed);
+};
+
+// Edits a shop's own details (name, seat limit, storage quota) — deliberately separate from
+// updateShopTier below: tier changes trigger downgrade automations and are a much bigger
+// deal, whereas these are plain field edits with no side effects.
+const updateShopDetails = async (shopId, { name, maxUsers, storageQuotaBytes }) => {
+  if (name === undefined && maxUsers === undefined && storageQuotaBytes === undefined) {
     throw new ApiError(400, "Nothing to update");
   }
   if (name !== undefined && !name.trim()) {
@@ -170,14 +192,18 @@ const updateShopDetails = async (shopId, { name, maxUsers }) => {
     params.push(parsed);
     updates.push(`max_users = $${params.length}`);
   }
+  if (storageQuotaBytes !== undefined) {
+    params.push(parseStorageQuotaBytes(storageQuotaBytes));
+    updates.push(`storage_quota_bytes = $${params.length}`);
+  }
 
   const { rows } = await pool.query(
     `UPDATE shops SET ${updates.join(", ")} WHERE id = $1
-     RETURNING id, name, slug, tier, is_active, max_users`,
+     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_bytes`,
     params
   );
   if (!rows[0]) throw new ApiError(404, "Shop not found");
-  return rows[0];
+  return normalizeShopRow(rows[0]);
 };
 
 // The one place a shop's tier actually changes — and so the one place the Phase 6
@@ -211,43 +237,22 @@ const updateShopTier = async (shopId, newTier) => {
 
   const { rows: updated } = await pool.query(
     `UPDATE shops SET tier = $2 WHERE id = $1
-     RETURNING id, name, slug, tier, is_active, max_users`,
+     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_bytes`,
     [shopId, newTier]
   );
 
-  return { shop: updated[0], automations };
+  return { shop: normalizeShopRow(updated[0]), automations };
 };
 
 const setShopActive = async (shopId, isActive) => {
   const { rows } = await pool.query(
     `UPDATE shops SET is_active = $2 WHERE id = $1
-     RETURNING id, name, slug, tier, is_active, max_users`,
+     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_bytes`,
     [shopId, !!isActive]
   );
   if (!rows[0]) throw new ApiError(404, "Shop not found");
-  return rows[0];
+  return normalizeShopRow(rows[0]);
 };
-
-// Every table migration 021 gave a shop_id column, except settings (tiny key-value, not a
-// meaningful resource signal) and lot_sequences (an internal counter, not real tenant data).
-// A fixed, code-defined whitelist — never built from user input — so interpolating each name
-// straight into its own query is safe; Postgres has no parameter placeholder for identifiers.
-const USAGE_TABLES = [
-  "products",
-  "categories",
-  "sales",
-  "sale_transactions",
-  "refunds",
-  "lots",
-  "contacts",
-  "party_transactions",
-  "store_credit_redemptions",
-  "bank_payment_intents",
-  "shifts",
-  "shift_cash_movements",
-  "stock_adjustments",
-  "users",
-];
 
 // Resource usage per shop — this is one shared database, not per-tenant infrastructure, so
 // "how much is shop X using" can only ever mean "how much of THIS database is shop X's
@@ -257,10 +262,19 @@ const USAGE_TABLES = [
 // One query per table (each already has a shop_id-leading index from migration 021) rather
 // than a single UNION ALL — far simpler to read, and this is an admin-only, infrequently-
 // loaded page, not a hot path worth optimizing into one round trip.
+//
+// egressBytes/egressRequests (last 30 days) come from shop_egress_daily — a real measured
+// count of response bytes actually sent, not inferred from row sizes the way storage is;
+// see egressService.js and Server.js's tracking middleware for where those numbers come from.
 const getUsageByShop = async () => {
-  const { rows: shops } = await pool.query(`SELECT id, name, slug, tier FROM shops ORDER BY id`);
+  const { rows: shops } = await pool.query(
+    `SELECT id, name, slug, tier, storage_quota_bytes FROM shops ORDER BY id`
+  );
   const usageByShopId = new Map(
-    shops.map((s) => [s.id, { ...s, tables: {}, totalRows: 0, approxBytes: 0 }])
+    shops.map((s) => [
+      s.id,
+      { ...normalizeShopRow(s), tables: {}, totalRows: 0, approxBytes: 0, egressBytes: 0, egressRequests: 0 },
+    ])
   );
 
   for (const table of USAGE_TABLES) {
@@ -276,6 +290,14 @@ const getUsageByShop = async () => {
       entry.totalRows += row.row_count;
       entry.approxBytes += Number(row.approx_bytes);
     }
+  }
+
+  const egressByShop = await getEgressByShop(30);
+  for (const row of egressByShop) {
+    const entry = usageByShopId.get(row.shopId);
+    if (!entry) continue;
+    entry.egressBytes = row.bytes;
+    entry.egressRequests = row.requestCount;
   }
 
   return [...usageByShopId.values()];
