@@ -1,11 +1,43 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
-const { hashPassword } = require("../utils/auth");
+const { hashPassword, comparePassword } = require("../utils/auth");
 const { hasFeature } = require("../config/features");
 const { closeOpenShiftsForDowngrade } = require("./shiftService");
 const { flattenBatchProducts } = require("./productsService");
 
 const VALID_TIERS = ["basic", "smart", "advanced"];
+
+// A superadmin's own password change — there's no "forgot password" flow at this level
+// (deliberately: recovering a locked-out platform admin account is a DB-access-required
+// operation, same as bootstrapping the first one via scripts/create-superadmin.js), so this
+// is the only self-service path. role='superadmin' is checked here too, not just relied on
+// via requireSuperAdmin — this function should never silently change a shop-scoped owner/
+// cashier's password even if it were ever called with the wrong id.
+const changeSuperAdminPassword = async (userId, { currentPassword, newPassword }) => {
+  if (!currentPassword || !newPassword) {
+    throw new ApiError(400, "Current and new password are required");
+  }
+  if (newPassword.length < 8) {
+    throw new ApiError(400, "New password must be at least 8 characters");
+  }
+
+  const { rows } = await pool.query(
+    `SELECT password_hash FROM users WHERE id = $1 AND role = 'superadmin'`,
+    [userId]
+  );
+  if (!rows[0]) throw new ApiError(404, "Account not found");
+
+  // 400, not 401 — utils/api.js's request() treats ANY 401 as "your session itself is
+  // invalid" and dispatches the global auth:unauthorized event, which AuthContext reacts to
+  // by clearing the logged-in user and bouncing to /login. This is a validation failure on a
+  // field in the form (wrong current password), not an expired/invalid session — using 401
+  // here would silently log the admin out for nothing more than a typo.
+  const matches = await comparePassword(currentPassword, rows[0].password_hash);
+  if (!matches) throw new ApiError(400, "Current password is incorrect");
+
+  const newHash = await hashPassword(newPassword);
+  await pool.query(`UPDATE users SET password_hash = $2 WHERE id = $1`, [userId, newHash]);
+};
 
 // Deliberately simple — a human-typed shop name turned into a URL/reference-safe slug,
 // not a general Unicode slugifier. Uniqueness (the actual constraint, shops.slug UNIQUE)
@@ -196,6 +228,59 @@ const setShopActive = async (shopId, isActive) => {
   return rows[0];
 };
 
+// Every table migration 021 gave a shop_id column, except settings (tiny key-value, not a
+// meaningful resource signal) and lot_sequences (an internal counter, not real tenant data).
+// A fixed, code-defined whitelist — never built from user input — so interpolating each name
+// straight into its own query is safe; Postgres has no parameter placeholder for identifiers.
+const USAGE_TABLES = [
+  "products",
+  "categories",
+  "sales",
+  "sale_transactions",
+  "refunds",
+  "lots",
+  "contacts",
+  "party_transactions",
+  "store_credit_redemptions",
+  "bank_payment_intents",
+  "shifts",
+  "shift_cash_movements",
+  "stock_adjustments",
+  "users",
+];
+
+// Resource usage per shop — this is one shared database, not per-tenant infrastructure, so
+// "how much is shop X using" can only ever mean "how much of THIS database is shop X's
+// data." row_count is the honest, simple number; approx_bytes (pg_column_size summed per
+// row) is a real measurement of each row's own on-disk footprint, not a guess — it just
+// doesn't include index/TOAST overhead, so treat it as a lower bound, not an exact figure.
+// One query per table (each already has a shop_id-leading index from migration 021) rather
+// than a single UNION ALL — far simpler to read, and this is an admin-only, infrequently-
+// loaded page, not a hot path worth optimizing into one round trip.
+const getUsageByShop = async () => {
+  const { rows: shops } = await pool.query(`SELECT id, name, slug, tier FROM shops ORDER BY id`);
+  const usageByShopId = new Map(
+    shops.map((s) => [s.id, { ...s, tables: {}, totalRows: 0, approxBytes: 0 }])
+  );
+
+  for (const table of USAGE_TABLES) {
+    const { rows } = await pool.query(
+      `SELECT shop_id, COUNT(*)::int AS row_count, COALESCE(SUM(pg_column_size(t.*)), 0)::bigint AS approx_bytes
+       FROM ${table} t
+       GROUP BY shop_id`
+    );
+    for (const row of rows) {
+      const entry = usageByShopId.get(row.shop_id);
+      if (!entry) continue; // shouldn't happen (shop_id is a FK), but don't let one bad row sink the whole report
+      entry.tables[table] = { rowCount: row.row_count, approxBytes: Number(row.approx_bytes) };
+      entry.totalRows += row.row_count;
+      entry.approxBytes += Number(row.approx_bytes);
+    }
+  }
+
+  return [...usageByShopId.values()];
+};
+
 module.exports = {
   VALID_TIERS,
   listShops,
@@ -203,4 +288,6 @@ module.exports = {
   updateShopDetails,
   updateShopTier,
   setShopActive,
+  changeSuperAdminPassword,
+  getUsageByShop,
 };

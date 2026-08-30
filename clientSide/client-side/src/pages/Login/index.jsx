@@ -1,16 +1,24 @@
 import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
+import { HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import Logo from "components/Logo";
 import { useAuth } from "auth/AuthContext";
 import { useLanguage } from "i18n/LanguageContext";
+import useTheme from "hooks/useTheme";
 
 // Deliberately not wrapped in AppShell — no sidebar/nav makes sense before there's a
-// logged-in user to show them for.
+// logged-in user to show them for. Same login screen for both a shop's own staff and a
+// platform superadmin (App.jsx routes both here) — Login itself doesn't know or care which
+// one is signing in, it just redirects based on the role login() returns.
 export default function LoginPage() {
   const { login } = useAuth();
   const { t } = useLanguage();
   const navigate = useNavigate();
   const location = useLocation();
+  // Called here too (not just from AppShell/the Admin dashboard) — this is the very first
+  // page anyone sees, logged in or not, so it needs its own sync of <html>'s "dark" class
+  // from localStorage rather than relying on some other, later-mounted page to have done it.
+  const [theme, toggleTheme] = useTheme();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -40,7 +48,15 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-subtle px-4 dark:bg-gray-900">
+    <div className="relative flex min-h-screen items-center justify-center bg-surface-subtle px-4 dark:bg-gray-900">
+      <button
+        type="button"
+        onClick={toggleTheme}
+        aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+        className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+      >
+        {theme === "dark" ? <HiOutlineSun className="text-lg" /> : <HiOutlineMoon className="text-lg" />}
+      </button>
       <div className="w-full max-w-sm rounded-2xl border border-surface-border bg-white-A700 p-8 shadow-card dark:border-gray-700 dark:bg-gray-800">
         <div className="mb-6 flex flex-col items-center gap-2">
           <Logo className="h-12 w-12" />

@@ -6,6 +6,8 @@ const {
   UpdateShopDetails,
   UpdateShopTier,
   SetShopActive,
+  ChangePassword,
+  GetUsage,
 } = require("../../Controller/adminController");
 const requireAuth = require("../../Middleware/requireAuth");
 const requireSuperAdmin = require("../../Middleware/requireSuperAdmin");
@@ -21,5 +23,10 @@ routes.post("/api/admin/shops", requireAuth, requireSuperAdmin, CreateShop);
 routes.patch("/api/admin/shops/:id", requireAuth, requireSuperAdmin, UpdateShopDetails);
 routes.patch("/api/admin/shops/:id/tier", requireAuth, requireSuperAdmin, UpdateShopTier);
 routes.patch("/api/admin/shops/:id/active", requireAuth, requireSuperAdmin, SetShopActive);
+// req.user.id, not a param — a superadmin can only ever change their OWN password here,
+// never another admin's (there's no multi-admin management yet — see the recommendations
+// this shipped alongside).
+routes.patch("/api/admin/me/password", requireAuth, requireSuperAdmin, ChangePassword);
+routes.get("/api/admin/usage", requireAuth, requireSuperAdmin, GetUsage);
 
 module.exports = routes;

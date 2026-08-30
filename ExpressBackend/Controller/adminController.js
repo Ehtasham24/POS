@@ -5,6 +5,8 @@ const {
   updateShopDetails,
   updateShopTier,
   setShopActive,
+  changeSuperAdminPassword,
+  getUsageByShop,
 } = require("../Sevices/adminService");
 
 const ListShops = asyncHandler(async (req, res) => {
@@ -35,4 +37,22 @@ const SetShopActive = asyncHandler(async (req, res) => {
   res.send(await setShopActive(id, isActive));
 });
 
-module.exports = { ListShops, CreateShop, UpdateShopDetails, UpdateShopTier, SetShopActive };
+const ChangePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body;
+  await changeSuperAdminPassword(req.user.id, { currentPassword, newPassword });
+  res.status(204).send();
+});
+
+const GetUsage = asyncHandler(async (req, res) => {
+  res.send(await getUsageByShop());
+});
+
+module.exports = {
+  ListShops,
+  CreateShop,
+  UpdateShopDetails,
+  UpdateShopTier,
+  SetShopActive,
+  ChangePassword,
+  GetUsage,
+};

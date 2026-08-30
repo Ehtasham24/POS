@@ -13,6 +13,7 @@ import StoreCredit from "pages/StoreCredit";
 import BankPayments from "pages/BankPayments";
 import Shifts from "pages/Shifts";
 import AdminDashboard from "pages/Admin";
+import AdminUsage from "pages/Admin/Usage";
 import LoginPage from "pages/Login";
 import NotFound from "pages/NotFound";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
@@ -53,6 +54,14 @@ function App() {
                   element={
                     <ProtectedRoute adminOnly>
                       <AdminDashboard />
+                    </ProtectedRoute>
+                  }
+                />
+                <Route
+                  path="/admin/usage"
+                  element={
+                    <ProtectedRoute adminOnly>
+                      <AdminUsage />
                     </ProtectedRoute>
                   }
                 />

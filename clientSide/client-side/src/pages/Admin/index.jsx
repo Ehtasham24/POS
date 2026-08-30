@@ -1,35 +1,16 @@
 import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet";
-import { useNavigate } from "react-router-dom";
-import {
-  HiOutlinePlus,
-  HiOutlinePencil,
-  HiOutlineArrowRightOnRectangle,
-  HiOutlineSun,
-  HiOutlineMoon,
-} from "react-icons/hi2";
-import Logo from "components/Logo";
+import { HiOutlinePlus, HiOutlinePencil } from "react-icons/hi2";
 import { Modal, EmptyState, SkeletonRows } from "components";
 import { useToast } from "components/Toast/ToastContext";
-import { useAuth } from "auth/AuthContext";
-import useTheme from "hooks/useTheme";
 import { apiGet, apiPost, apiPatch } from "utils/api";
+import AdminHeader from "./AdminHeader";
+import { inputClass, labelClass, TIERS, TIER_CHIP_CLASS } from "./shared";
 
 // Deliberately plain English, not routed through i18n/translations.js like the rest of the
 // app — this console's only ever audience is the platform operator (the POS provider
 // running this), never shop staff, so the bilingual support that matters everywhere else in
 // this codebase has no one to serve here.
-
-const inputClass =
-  "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-1.5 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
-const labelClass = "block mb-1 text-sm font-semibold text-gray-800 dark:text-gray-100";
-
-const TIERS = ["basic", "smart", "advanced"];
-const TIER_CHIP_CLASS = {
-  basic: "bg-gray-100 text-gray-700 dark:bg-gray-700 dark:text-gray-200",
-  smart: "bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400",
-  advanced: "bg-purple-50 text-purple-700 dark:bg-purple-500/10 dark:text-purple-400",
-};
 
 const emptyForm = {
   name: "",
@@ -41,13 +22,7 @@ const emptyForm = {
 };
 
 export default function AdminDashboard() {
-  const { user, logout } = useAuth();
-  const navigate = useNavigate();
   const toast = useToast();
-  // This page has no AppShell/SidebarContent (the only other place useTheme() is currently
-  // called) — without calling it here too, landing on /admin straight from login (no other
-  // page mounted first) would never sync <html>'s "dark" class from localStorage at all.
-  const [theme, toggleTheme] = useTheme();
 
   const [shops, setShops] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -78,11 +53,6 @@ export default function AdminDashboard() {
     loadShops();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const handleLogout = async () => {
-    await logout();
-    navigate("/login", { replace: true });
-  };
 
   const handleCreate = async (e) => {
     e.preventDefault();
@@ -158,35 +128,7 @@ export default function AdminDashboard() {
         <title>Platform Admin · POS System</title>
       </Helmet>
 
-      <header className="flex items-center justify-between border-b border-surface-border bg-white-A700 px-6 py-3.5 dark:border-gray-700 dark:bg-gray-800">
-        <div className="flex items-center gap-3">
-          <Logo className="h-8 w-8" />
-          <div>
-            <p className="font-poppins text-base font-bold leading-tight text-gray-800 dark:text-gray-100">
-              Platform Admin
-            </p>
-            <p className="text-xs text-gray-500 dark:text-gray-400">Signed in as {user?.displayName}</p>
-          </div>
-        </div>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
-          >
-            {theme === "dark" ? <HiOutlineSun className="text-lg" /> : <HiOutlineMoon className="text-lg" />}
-          </button>
-          <button
-            type="button"
-            onClick={handleLogout}
-            className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-sm font-medium text-danger-600 transition-colors hover:bg-danger-50 dark:text-danger-400 dark:hover:bg-danger-500/10"
-          >
-            <HiOutlineArrowRightOnRectangle />
-            Log out
-          </button>
-        </div>
-      </header>
+      <AdminHeader />
 
       <main className="mx-auto max-w-5xl px-6 py-8">
         <div className="mb-5 flex items-center justify-between">
