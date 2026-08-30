@@ -7,6 +7,7 @@ import {
   HiOutlineKey,
   HiOutlineBuildingStorefront,
   HiOutlineChartBar,
+  HiOutlineCalculator,
 } from "react-icons/hi2";
 import Logo from "components/Logo";
 import { Modal } from "components";
@@ -21,6 +22,7 @@ const emptyPasswordForm = { currentPassword: "", newPassword: "", confirmPasswor
 const NAV_TABS = [
   { to: "/admin", label: "Shops", icon: HiOutlineBuildingStorefront, end: true },
   { to: "/admin/usage", label: "Usage", icon: HiOutlineChartBar, end: false },
+  { to: "/admin/estimator", label: "Estimator", icon: HiOutlineCalculator, end: false },
 ];
 
 const tabClass = ({ isActive }) =>

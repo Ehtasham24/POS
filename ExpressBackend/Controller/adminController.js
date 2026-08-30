@@ -13,6 +13,7 @@ const {
   setTotalDbCapacityBytes,
   SUPABASE_TIER_PRESETS,
 } = require("../Sevices/platformSettingsService");
+const { estimateShopStorage } = require("../Sevices/storageEstimatorService");
 
 const ListShops = asyncHandler(async (req, res) => {
   res.send(await listShops());
@@ -68,6 +69,15 @@ const UpdatePlatformSettings = asyncHandler(async (req, res) => {
   res.send({ totalDbCapacityBytes: await setTotalDbCapacityBytes(totalDbCapacityBytes) });
 });
 
+// A pure calculation, no side effects — POST only because the input shape (five fields)
+// is awkward as a query string, not because anything gets written.
+const EstimateStorage = asyncHandler(async (req, res) => {
+  const { numProducts, dailySalesLineItems, dailyStockAdjustments, numUsers, projectionMonths } = req.body;
+  res.send(
+    await estimateShopStorage({ numProducts, dailySalesLineItems, dailyStockAdjustments, numUsers, projectionMonths })
+  );
+});
+
 module.exports = {
   ListShops,
   CreateShop,
@@ -78,4 +88,5 @@ module.exports = {
   GetUsage,
   GetPlatformSettings,
   UpdatePlatformSettings,
+  EstimateStorage,
 };

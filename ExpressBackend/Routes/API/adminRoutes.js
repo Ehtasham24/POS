@@ -10,6 +10,7 @@ const {
   GetUsage,
   GetPlatformSettings,
   UpdatePlatformSettings,
+  EstimateStorage,
 } = require("../../Controller/adminController");
 const requireAuth = require("../../Middleware/requireAuth");
 const requireSuperAdmin = require("../../Middleware/requireSuperAdmin");
@@ -35,5 +36,9 @@ routes.get("/api/admin/usage", requireAuth, requireSuperAdmin, GetUsage);
 // only ever meaningful relative to this.
 routes.get("/api/admin/platform-settings", requireAuth, requireSuperAdmin, GetPlatformSettings);
 routes.patch("/api/admin/platform-settings", requireAuth, requireSuperAdmin, UpdatePlatformSettings);
+// A standalone "what quota should I give this shop" calculator, checked BEFORE a shop is
+// created — not wired into CreateShop/UpdateShopDetails themselves, since the admin reads
+// the recommendation here and types the resulting % into those forms manually.
+routes.post("/api/admin/storage-estimate", requireAuth, requireSuperAdmin, EstimateStorage);
 
 module.exports = routes;
