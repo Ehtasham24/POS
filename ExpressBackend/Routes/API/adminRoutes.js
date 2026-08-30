@@ -11,6 +11,7 @@ const {
   GetPlatformSettings,
   UpdatePlatformSettings,
   EstimateStorage,
+  GetShopEgressSeries,
 } = require("../../Controller/adminController");
 const requireAuth = require("../../Middleware/requireAuth");
 const requireSuperAdmin = require("../../Middleware/requireSuperAdmin");
@@ -31,6 +32,7 @@ routes.patch("/api/admin/shops/:id/active", requireAuth, requireSuperAdmin, SetS
 // this shipped alongside).
 routes.patch("/api/admin/me/password", requireAuth, requireSuperAdmin, ChangePassword);
 routes.get("/api/admin/usage", requireAuth, requireSuperAdmin, GetUsage);
+routes.get("/api/admin/shops/:id/egress-series", requireAuth, requireSuperAdmin, GetShopEgressSeries);
 // The one platform-wide (not per-shop) setting so far — how big the actual database is
 // allowed to get, per the real Supabase plan. Every shop's quota percentage (above) is
 // only ever meaningful relative to this.

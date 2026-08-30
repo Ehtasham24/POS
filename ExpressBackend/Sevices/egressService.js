@@ -35,4 +35,37 @@ const getEgressByShop = async (days = 30) => {
   return rows.map((r) => ({ shopId: r.shop_id, bytes: Number(r.bytes), requestCount: r.request_count }));
 };
 
-module.exports = { recordEgress, getEgressByShop };
+// One shop's real daily egress for the trailing N days, zero-filled for any day with no
+// recorded requests (a real, honest zero — not a gap) so a line chart has one point per
+// calendar day instead of jumping across missing ones.
+const getDailyEgressSeries = async (shopId, days = 30) => {
+  const { rows } = await pool.query(
+    `SELECT d::date AS day,
+            COALESCE(e.bytes, 0)::bigint AS bytes,
+            COALESCE(e.request_count, 0)::int AS request_count
+     FROM generate_series(CURRENT_DATE - ($1 || ' days')::interval, CURRENT_DATE, '1 day') AS d
+     LEFT JOIN shop_egress_daily e ON e.shop_id = $2 AND e.day = d::date
+     ORDER BY d`,
+    [days - 1, shopId]
+  );
+  return rows.map((r) => ({ day: r.day.toISOString().slice(0, 10), bytes: Number(r.bytes), requestCount: r.request_count }));
+};
+
+// Real, measured "bytes of egress per checkout" — summed across every shop's actual traffic
+// over the trailing window, divided by how many real sale_transactions happened in that same
+// window. Used by storageEstimatorService.js to project a NEW shop's future egress from its
+// projected transaction volume, the same way avgBytesPerRow projects future storage: from
+// this app's own currently-observed behavior, not a guessed per-checkout constant.
+const getEgressPerTransactionRatio = async (days = 30) => {
+  const { rows } = await pool.query(
+    `SELECT
+       (SELECT COALESCE(SUM(bytes), 0) FROM shop_egress_daily WHERE day >= CURRENT_DATE - ($1 || ' days')::interval) AS total_egress_bytes,
+       (SELECT COUNT(*) FROM sale_transactions WHERE created_at >= NOW() - ($1 || ' days')::interval) AS total_transactions`,
+    [days]
+  );
+  const totalEgressBytes = Number(rows[0].total_egress_bytes);
+  const totalTransactions = Number(rows[0].total_transactions);
+  return totalTransactions > 0 ? totalEgressBytes / totalTransactions : 0;
+};
+
+module.exports = { recordEgress, getEgressByShop, getDailyEgressSeries, getEgressPerTransactionRatio };

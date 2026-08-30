@@ -14,6 +14,7 @@ const {
   SUPABASE_TIER_PRESETS,
 } = require("../Sevices/platformSettingsService");
 const { estimateShopStorage } = require("../Sevices/storageEstimatorService");
+const { getDailyEgressSeries } = require("../Sevices/egressService");
 
 const ListShops = asyncHandler(async (req, res) => {
   res.send(await listShops());
@@ -78,6 +79,14 @@ const EstimateStorage = asyncHandler(async (req, res) => {
   );
 });
 
+// Real, per-day egress for one shop's detail view on the Usage page — a trend line, not
+// just the 30-day total getUsageByShop already returns.
+const GetShopEgressSeries = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const days = req.query.days ? Number(req.query.days) : 30;
+  res.send({ series: await getDailyEgressSeries(id, days), days });
+});
+
 module.exports = {
   ListShops,
   CreateShop,
@@ -89,4 +98,5 @@ module.exports = {
   GetPlatformSettings,
   UpdatePlatformSettings,
   EstimateStorage,
+  GetShopEgressSeries,
 };

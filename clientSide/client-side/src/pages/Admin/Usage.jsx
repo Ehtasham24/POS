@@ -1,7 +1,17 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet";
 import { HiOutlineMagnifyingGlass, HiOutlineBuildingStorefront, HiOutlineArrowLeft } from "react-icons/hi2";
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { EmptyState, SkeletonRows } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { apiGet } from "utils/api";
@@ -14,6 +24,7 @@ import {
   QUOTA_WARNING_PERCENT,
   quotaBarColorClass,
   quotaTextColorClass,
+  ShareBar,
 } from "./shared";
 
 // Same fixed colors pages/Report/SalesCharts.jsx already established for this app's charts
@@ -35,25 +46,6 @@ function StatTile({ label, value, valueClassName }) {
   );
 }
 
-// A magnitude-vs-total (share of something), never a category comparison — one color per
-// bar, never a categorical set, per the same reasoning as the breakdown chart's single hue.
-function ShareBar({ label, note, percent, colorClass }) {
-  return (
-    <div className="rounded-xl2 border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
-        <span className="font-semibold text-gray-800 dark:text-gray-100">{label}</span>
-        <span className="text-gray-500 dark:text-gray-400">{note}</span>
-      </div>
-      <div className="h-3 w-full overflow-hidden rounded-full bg-surface-muted dark:bg-gray-700">
-        <div
-          className={`h-full rounded-full transition-all duration-300 ${colorClass}`}
-          style={{ width: `${Math.min(Math.max(percent, percent > 0 ? 1.5 : 0), 100)}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
 export default function UsagePage() {
   const toast = useToast();
   const [usage, setUsage] = useState([]);
@@ -63,6 +55,8 @@ export default function UsagePage() {
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState(null);
   const [page, setPage] = useState(1);
+  const [egressSeries, setEgressSeries] = useState(null);
+  const [egressLoading, setEgressLoading] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -115,12 +109,49 @@ export default function UsagePage() {
   const rankedUsage = useMemo(() => usage.slice().sort((a, b) => b.approxBytes - a.approxBytes), [usage]);
   const totalPages = Math.max(1, Math.ceil(rankedUsage.length / PAGE_SIZE));
   const pagedUsage = rankedUsage.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  const selectedRank = selected ? rankedUsage.findIndex((u) => u.id === selected.id) + 1 : null;
+
+  // Ranked by estimatedRealBytes (the real, index-inclusive share), not approxBytes — same
+  // reasoning as the Quota Used column: this is "who's actually using the most database,"
+  // not just "whose rows are biggest."
+  const topShopsChartData = useMemo(
+    () =>
+      usage
+        .slice()
+        .sort((a, b) => b.estimatedRealBytes - a.estimatedRealBytes)
+        .slice(0, 8)
+        .map((u) => ({ name: u.name, bytes: u.estimatedRealBytes })),
+    [usage]
+  );
 
   const selectShop = (u) => {
     setSelectedId(u.id);
     setQuery("");
   };
   const backToList = () => setSelectedId(null);
+
+  // Real, per-day egress for the selected shop's last 30 days — fetched only when a shop is
+  // actually open in the detail view, not for every shop up front.
+  useEffect(() => {
+    if (!selectedId) {
+      setEgressSeries(null);
+      return;
+    }
+    setEgressLoading(true);
+    (async () => {
+      try {
+        const data = await apiGet(`/api/admin/shops/${selectedId}/egress-series?days=30`);
+        setEgressSeries(
+          data.series.map((row) => ({ ...row, label: row.day.slice(5) })) // "MM-DD", enough context for a 30-day window
+        );
+      } catch (err) {
+        toast.error(err.message);
+      } finally {
+        setEgressLoading(false);
+      }
+    })();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   return (
     <div className="min-h-screen bg-surface-subtle dark:bg-gray-900">
@@ -162,6 +193,27 @@ export default function UsagePage() {
 
         {!selected ? (
           <>
+            {topShopsChartData.length > 1 && (
+              <div className="mb-6 rounded-xl2 border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
+                <p className="mb-4 text-sm font-semibold text-gray-800 dark:text-gray-100">
+                  Top shops by real DB usage
+                </p>
+                <ResponsiveContainer width="100%" height={Math.max(topShopsChartData.length * 34, 100)}>
+                  <BarChart data={topShopsChartData} layout="vertical" margin={{ top: 4, right: 24, bottom: 4, left: 8 }}>
+                    <CartesianGrid stroke={GRID_COLOR} horizontal={false} />
+                    <XAxis type="number" tickFormatter={(v) => formatBytes(v)} stroke={AXIS_COLOR} fontSize={12} />
+                    <YAxis type="category" dataKey="name" width={140} stroke={AXIS_COLOR} fontSize={12} />
+                    <Tooltip
+                      cursor={{ fill: "#9ca3af1a" }}
+                      contentStyle={TOOLTIP_STYLE}
+                      formatter={(value) => [formatBytes(value), "Estimated real size"]}
+                    />
+                    <Bar dataKey="bytes" fill={BAR_COLOR} radius={[0, 4, 4, 0]} maxBarSize={22} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
             <div className="relative mb-6 max-w-md">
               <HiOutlineMagnifyingGlass className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
               <input
@@ -294,6 +346,11 @@ export default function UsagePage() {
               <span className={`rounded-md px-2 py-1 text-xs font-semibold capitalize ${TIER_CHIP_CLASS[selected.tier]}`}>
                 {selected.tier}
               </span>
+              {selectedRank && (
+                <span className="text-sm text-gray-500 dark:text-gray-400">
+                  #{selectedRank} of {usage.length} shop{usage.length === 1 ? "" : "s"} by real DB usage
+                </span>
+              )}
             </div>
 
             <div className="grid grid-cols-4 gap-4 sm:grid-cols-1">
@@ -347,6 +404,30 @@ export default function UsagePage() {
                   </p>
                 </div>
               </div>
+
+              {egressLoading ? (
+                <p className="mt-4 text-xs text-gray-400 dark:text-gray-500">Loading daily trend…</p>
+              ) : egressSeries && egressSeries.some((row) => row.bytes > 0) ? (
+                <div className="mt-4">
+                  <ResponsiveContainer width="100%" height={140}>
+                    <LineChart data={egressSeries} margin={{ top: 4, right: 8, bottom: 4, left: 8 }}>
+                      <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+                      <XAxis dataKey="label" stroke={AXIS_COLOR} fontSize={11} interval={4} />
+                      <YAxis tickFormatter={(v) => formatBytes(v)} stroke={AXIS_COLOR} fontSize={11} width={56} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(value, _name, props) => [
+                          `${formatBytes(value)} · ${props.payload.requestCount} request${props.payload.requestCount === 1 ? "" : "s"}`,
+                          "Egress",
+                        ]}
+                      />
+                      <Line type="monotone" dataKey="bytes" stroke={BAR_COLOR} strokeWidth={2} dot={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <p className="mt-4 text-xs text-gray-400 dark:text-gray-500">No requests recorded in the last 30 days.</p>
+              )}
             </div>
 
             <div className="rounded-xl2 border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">

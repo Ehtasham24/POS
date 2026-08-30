@@ -3,6 +3,12 @@ const ApiError = require("../utils/ApiError");
 const { withCache } = require("../utils/cache");
 const { USAGE_TABLES } = require("../config/usageTables");
 const { getTotalDbCapacityBytes } = require("./platformSettingsService");
+const { getEgressPerTransactionRatio } = require("./egressService");
+
+// Verified live against supabase.com/pricing earlier this session — shown as a reference
+// point next to the projected egress, not enforced as a hard cap (a real shop could be on
+// any plan).
+const SUPABASE_FREE_EGRESS_BYTES_PER_MONTH = 5 * 1024 ** 3;
 
 // "How much DB space should we allot a new/growing shop?" — answered from THIS database's
 // own real, currently-observed behavior, never a guessed constant. Two kinds of real
@@ -97,23 +103,12 @@ const parsePositiveInt = (value, label) => {
   return parsed;
 };
 
-// numProducts/numUsers are static headcounts; dailySalesLineItems/dailyStockAdjustments are
-// per-day rates multiplied out over the projection window (projectionMonths × 30 days) —
-// everything else is derived from those four via the real ratios above, then scaled to the
-// database's real, index-inclusive footprint using the same overhead technique
-// adminService.getUsageByShop/storageQuotaService.getShopStorageStatus already use: this
-// shop's share of projected row CONTENT applied to the real total database size right now.
-const estimateShopStorage = async ({ numProducts, dailySalesLineItems, dailyStockAdjustments, numUsers, projectionMonths }) => {
-  const products = parsePositiveInt(numProducts, "Number of products");
-  const dailySales = parsePositiveInt(dailySalesLineItems, "Daily sales (line items)");
-  const dailyAdjustments = parsePositiveInt(dailyStockAdjustments, "Daily stock adjustments");
-  const users = parsePositiveInt(numUsers, "Number of users");
-  const months = parsePositiveInt(projectionMonths, "Projection horizon (months)");
-  if (months < 1) throw new ApiError(400, "Projection horizon must be at least 1 month");
-
-  const totalDays = months * 30;
-  const [basis, totalDbCapacityBytes] = await Promise.all([getEstimationBasis(), getTotalDbCapacityBytes()]);
-
+// The core per-table projection at a given day count — pulled out on its own so both the
+// final (full-horizon) result AND the month-by-month trajectory chart run the exact same
+// math, just at a different totalDays, instead of two copies that could quietly drift.
+// products/users are static headcounts (don't scale with time); sales/stock_adjustments are
+// day-rates × totalDays; everything else derives from the real ratios in `basis`.
+const projectBreakdown = (basis, { products, dailySales, dailyAdjustments, users }, totalDays) => {
   const projectedSalesRows = dailySales * totalDays;
   const projectedRows = {
     products,
@@ -134,22 +129,80 @@ const estimateShopStorage = async ({ numProducts, dailySalesLineItems, dailyStoc
     return { table, projectedRows: rows, avgBytesPerRow: Math.round(basis.avgBytesPerRow[table] || 0), bytes };
   });
   const projectedContentBytes = breakdown.reduce((sum, row) => sum + row.bytes, 0);
+  const projectedTransactions = projectedRows.sale_transactions || 0;
 
-  const projectedRealBytes = Math.round(projectedContentBytes * OVERHEAD_MULTIPLIER);
-  const recommendedBytes = Math.round(projectedRealBytes * BUFFER_MULTIPLIER);
+  return { breakdown, projectedContentBytes, projectedTransactions };
+};
+
+const toRecommendedBytes = (projectedContentBytes) => Math.round(projectedContentBytes * OVERHEAD_MULTIPLIER * BUFFER_MULTIPLIER);
+
+// numProducts/numUsers are static headcounts; dailySalesLineItems/dailyStockAdjustments are
+// per-day rates multiplied out over the projection window (projectionMonths × 30 days) —
+// everything else is derived from those four via the real ratios above, then scaled to the
+// database's real, index-inclusive footprint using the same overhead technique
+// adminService.getUsageByShop/storageQuotaService.getShopStorageStatus already use: this
+// shop's share of projected row CONTENT applied to the real total database size right now.
+//
+// Alongside the storage recommendation, this also returns:
+// - trajectory: the same recommendation recomputed at every month from 1 up to the full
+//   horizon, so the UI can show a growth curve instead of just the end-state number.
+// - egress: a projected MONTHLY (not cumulative) bandwidth figure, from the real, currently
+//   -observed "egress bytes per checkout" ratio (egressService.getEgressPerTransactionRatio)
+//   applied to this shop's projected monthly transaction volume — a real measured rate, not
+//   a guess, the same way avgBytesPerRow is for storage.
+const estimateShopStorage = async ({ numProducts, dailySalesLineItems, dailyStockAdjustments, numUsers, projectionMonths }) => {
+  const products = parsePositiveInt(numProducts, "Number of products");
+  const dailySales = parsePositiveInt(dailySalesLineItems, "Daily sales (line items)");
+  const dailyAdjustments = parsePositiveInt(dailyStockAdjustments, "Daily stock adjustments");
+  const users = parsePositiveInt(numUsers, "Number of users");
+  const months = parsePositiveInt(projectionMonths, "Projection horizon (months)");
+  if (months < 1) throw new ApiError(400, "Projection horizon must be at least 1 month");
+
+  const [basis, totalDbCapacityBytes, egressPerTransaction] = await Promise.all([
+    getEstimationBasis(),
+    getTotalDbCapacityBytes(),
+    getEgressPerTransactionRatio(30),
+  ]);
+
+  const drivers = { products, dailySales, dailyAdjustments, users };
+  const full = projectBreakdown(basis, drivers, months * 30);
+  const recommendedBytes = toRecommendedBytes(full.projectedContentBytes);
   const recommendedPercent = totalDbCapacityBytes > 0 ? (recommendedBytes / totalDbCapacityBytes) * 100 : null;
+
+  const trajectory = [];
+  for (let m = 1; m <= months; m += 1) {
+    const atMonth = projectBreakdown(basis, drivers, m * 30);
+    const bytes = toRecommendedBytes(atMonth.projectedContentBytes);
+    trajectory.push({
+      month: m,
+      recommendedBytes: bytes,
+      recommendedPercent: totalDbCapacityBytes > 0 ? (bytes / totalDbCapacityBytes) * 100 : null,
+    });
+  }
+
+  // Monthly (not cumulative) transaction volume for the egress rate — the trajectory above
+  // is cumulative storage, but egress/bandwidth resets every billing month.
+  const monthlyTransactions = projectBreakdown(basis, drivers, 30).projectedTransactions;
+  const projectedMonthlyEgressBytes = Math.round(monthlyTransactions * egressPerTransaction);
 
   return {
     inputs: { numProducts: products, dailySalesLineItems: dailySales, dailyStockAdjustments: dailyAdjustments, numUsers: users, projectionMonths: months },
-    breakdown,
-    projectedContentBytes,
+    breakdown: full.breakdown,
+    projectedContentBytes: full.projectedContentBytes,
     overheadMultiplier: OVERHEAD_MULTIPLIER,
-    projectedRealBytes,
+    projectedRealBytes: Math.round(full.projectedContentBytes * OVERHEAD_MULTIPLIER),
     bufferMultiplier: BUFFER_MULTIPLIER,
     recommendedBytes,
     recommendedPercent,
     totalDbCapacityBytes,
     exceedsTotalCapacity: recommendedPercent !== null && recommendedPercent > 100,
+    trajectory,
+    egress: {
+      projectedMonthlyBytes: projectedMonthlyEgressBytes,
+      bytesPerTransaction: egressPerTransaction,
+      supabaseFreeReferenceBytes: SUPABASE_FREE_EGRESS_BYTES_PER_MONTH,
+      exceedsSupabaseFreeReference: projectedMonthlyEgressBytes > SUPABASE_FREE_EGRESS_BYTES_PER_MONTH,
+    },
   };
 };
 

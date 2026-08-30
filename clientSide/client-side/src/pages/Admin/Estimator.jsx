@@ -1,10 +1,35 @@
 import React, { useState } from "react";
 import { Helmet } from "react-helmet";
 import { HiOutlineCalculator } from "react-icons/hi2";
+import {
+  BarChart,
+  Bar,
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+} from "recharts";
 import { useToast } from "components/Toast/ToastContext";
 import { apiPost } from "utils/api";
 import AdminHeader from "./AdminHeader";
-import { inputClass, labelClass, formatBytes, USAGE_TABLE_LABEL, quotaBarColorClass, quotaTextColorClass } from "./shared";
+import {
+  inputClass,
+  labelClass,
+  formatBytes,
+  USAGE_TABLE_LABEL,
+  quotaBarColorClass,
+  quotaTextColorClass,
+  ShareBar,
+} from "./shared";
+
+// Same fixed colors pages/Report/SalesCharts.jsx and Usage.jsx already established.
+const GRID_COLOR = "#9ca3af33";
+const AXIS_COLOR = "#9ca3af";
+const TOOLTIP_STYLE = { backgroundColor: "#1f2937", border: "none", borderRadius: 8, color: "#f3f4f6", fontSize: 12 };
+const BAR_COLOR = "#4f46e5";
 
 const emptyForm = {
   numProducts: "",
@@ -206,37 +231,130 @@ export default function EstimatorPage() {
                   </p>
                 </div>
 
-                <div className="overflow-hidden rounded-xl2 border border-surface-border bg-white-A700 shadow-card dark:border-gray-700 dark:bg-gray-800">
-                  <table className="w-full border-collapse text-sm">
-                    <thead className="bg-surface-subtle dark:bg-gray-900/40">
-                      <tr>
-                        <th className="px-4 py-2.5 text-left font-semibold text-gray-600 dark:text-gray-300">Table</th>
-                        <th className="px-4 py-2.5 text-left font-semibold text-gray-600 dark:text-gray-300">Projected rows</th>
-                        <th className="px-4 py-2.5 text-left font-semibold text-gray-600 dark:text-gray-300">Bytes</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-surface-border dark:divide-gray-700">
-                      {result.breakdown
-                        .filter((row) => row.projectedRows > 0)
-                        .sort((a, b) => b.bytes - a.bytes)
-                        .map((row) => (
-                          <tr key={row.table}>
-                            <td className="px-4 py-2 text-gray-800 dark:text-gray-100">
-                              {USAGE_TABLE_LABEL[row.table] || row.table}
-                            </td>
-                            <td className="px-4 py-2 text-gray-600 dark:text-gray-300">
-                              {row.projectedRows.toLocaleString()}
-                            </td>
-                            <td className="px-4 py-2 text-gray-600 dark:text-gray-300">{formatBytes(row.bytes)}</td>
-                          </tr>
-                        ))}
-                    </tbody>
-                  </table>
-                </div>
               </>
             )}
           </div>
         </div>
+
+        {result && (
+          <div className="mt-6 space-y-6">
+            {result.trajectory.length > 1 && (
+              <div className="rounded-xl2 border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
+                <p className="mb-1 text-sm font-semibold text-gray-800 dark:text-gray-100">Growth trajectory</p>
+                <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+                  The same recommendation recomputed at every month from 1 up to the full{" "}
+                  {result.inputs.projectionMonths}-month horizon — a client rarely arrives at
+                  their full projected volume on day one.
+                </p>
+                <ResponsiveContainer width="100%" height={220}>
+                  <LineChart data={result.trajectory} margin={{ top: 4, right: 16, bottom: 4, left: 8 }}>
+                    <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+                    <XAxis
+                      dataKey="month"
+                      tickFormatter={(m) => `M${m}`}
+                      stroke={AXIS_COLOR}
+                      fontSize={12}
+                    />
+                    <YAxis tickFormatter={(v) => `${v.toFixed(1)}%`} stroke={AXIS_COLOR} fontSize={12} width={52} />
+                    <Tooltip
+                      contentStyle={TOOLTIP_STYLE}
+                      formatter={(value, _name, props) => [
+                        `${value.toFixed(2)}% · ${formatBytes(props.payload.recommendedBytes)}`,
+                        "Recommended quota",
+                      ]}
+                      labelFormatter={(m) => `Month ${m}`}
+                    />
+                    <Line type="monotone" dataKey="recommendedPercent" stroke={BAR_COLOR} strokeWidth={2} dot={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            )}
+
+            <ShareBar
+              label="Projected monthly egress"
+              note={`${formatBytes(result.egress.projectedMonthlyBytes)}/month, from a real ${formatBytes(
+                Math.round(result.egress.bytesPerTransaction)
+              )}-per-checkout rate measured across this platform's actual traffic · Supabase Free tier reference: ${formatBytes(
+                result.egress.supabaseFreeReferenceBytes
+              )}/month`}
+              percent={(result.egress.projectedMonthlyBytes / result.egress.supabaseFreeReferenceBytes) * 100}
+              colorClass={quotaBarColorClass(
+                (result.egress.projectedMonthlyBytes / result.egress.supabaseFreeReferenceBytes) * 100
+              )}
+            />
+            {result.egress.exceedsSupabaseFreeReference && (
+              <p className="-mt-4 rounded-lg bg-danger-50 px-3 py-2 text-xs font-medium text-danger-700 dark:bg-danger-500/10 dark:text-danger-400">
+                This client's projected traffic would exceed Supabase's Free tier egress
+                allowance on its own — worth a bigger plan regardless of storage headroom.
+              </p>
+            )}
+
+            <div className="rounded-xl2 border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
+              <p className="mb-4 text-sm font-semibold text-gray-800 dark:text-gray-100">Breakdown by table</p>
+              <ResponsiveContainer
+                width="100%"
+                height={Math.max(result.breakdown.filter((r) => r.projectedRows > 0).length * 34, 100)}
+              >
+                <BarChart
+                  data={result.breakdown.filter((r) => r.projectedRows > 0).sort((a, b) => b.bytes - a.bytes)}
+                  layout="vertical"
+                  margin={{ top: 4, right: 24, bottom: 4, left: 8 }}
+                >
+                  <CartesianGrid stroke={GRID_COLOR} horizontal={false} />
+                  <XAxis type="number" tickFormatter={(v) => formatBytes(v)} stroke={AXIS_COLOR} fontSize={12} />
+                  <YAxis
+                    type="category"
+                    dataKey="table"
+                    tickFormatter={(t) => USAGE_TABLE_LABEL[t] || t}
+                    width={116}
+                    stroke={AXIS_COLOR}
+                    fontSize={12}
+                  />
+                  <Tooltip
+                    cursor={{ fill: "#9ca3af1a" }}
+                    contentStyle={TOOLTIP_STYLE}
+                    formatter={(value, _name, props) => [
+                      `${formatBytes(value)} · ${props.payload.projectedRows.toLocaleString()} row${
+                        props.payload.projectedRows === 1 ? "" : "s"
+                      }`,
+                      "Projected size",
+                    ]}
+                    labelFormatter={(t) => USAGE_TABLE_LABEL[t] || t}
+                  />
+                  <Bar dataKey="bytes" fill={BAR_COLOR} radius={[0, 4, 4, 0]} maxBarSize={22} />
+                </BarChart>
+              </ResponsiveContainer>
+
+              <div className="mt-5 overflow-hidden rounded-xl2 border border-surface-border dark:border-gray-700">
+                <table className="w-full border-collapse text-sm">
+                  <thead className="bg-surface-subtle dark:bg-gray-900/40">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left font-semibold text-gray-600 dark:text-gray-300">Table</th>
+                      <th className="px-4 py-2.5 text-left font-semibold text-gray-600 dark:text-gray-300">Projected rows</th>
+                      <th className="px-4 py-2.5 text-left font-semibold text-gray-600 dark:text-gray-300">Bytes</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-surface-border dark:divide-gray-700">
+                    {result.breakdown
+                      .filter((row) => row.projectedRows > 0)
+                      .sort((a, b) => b.bytes - a.bytes)
+                      .map((row) => (
+                        <tr key={row.table}>
+                          <td className="px-4 py-2 text-gray-800 dark:text-gray-100">
+                            {USAGE_TABLE_LABEL[row.table] || row.table}
+                          </td>
+                          <td className="px-4 py-2 text-gray-600 dark:text-gray-300">
+                            {row.projectedRows.toLocaleString()}
+                          </td>
+                          <td className="px-4 py-2 text-gray-600 dark:text-gray-300">{formatBytes(row.bytes)}</td>
+                        </tr>
+                      ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
       </main>
     </div>
   );

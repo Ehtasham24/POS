@@ -1,6 +1,7 @@
-// Shared constants/helpers between the admin console's pages (Shops, Usage) and its header —
-// kept in one place so the two pages' styling and vocabulary (tier colors, table labels,
-// byte formatting) can't quietly drift apart from each other.
+// Shared constants/helpers between the admin console's pages (Shops, Usage, Estimator) and
+// its header — kept in one place so the pages' styling and vocabulary (tier colors, table
+// labels, byte formatting) can't quietly drift apart from each other.
+import React from "react";
 
 export const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-1.5 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
@@ -55,3 +56,24 @@ export const quotaTextColorClass = (percent) => {
   if (percent >= 50) return "text-amber-600 dark:text-amber-400";
   return "text-success-600 dark:text-success-500";
 };
+
+// A magnitude-vs-total (share of something), never a category comparison — one color per
+// bar, never a categorical set, per the same reasoning as the per-table breakdown charts'
+// single hue. Used by both Usage.jsx (real, measured shares) and Estimator.jsx (projected
+// shares) so the two pages' "here's a percentage of something bigger" visual never drifts.
+export function ShareBar({ label, note, percent, colorClass }) {
+  return (
+    <div className="rounded-xl2 border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
+      <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-sm">
+        <span className="font-semibold text-gray-800 dark:text-gray-100">{label}</span>
+        <span className="text-gray-500 dark:text-gray-400">{note}</span>
+      </div>
+      <div className="h-3 w-full overflow-hidden rounded-full bg-surface-muted dark:bg-gray-700">
+        <div
+          className={`h-full rounded-full transition-all duration-300 ${colorClass}`}
+          style={{ width: `${Math.min(Math.max(percent, percent > 0 ? 1.5 : 0), 100)}%` }}
+        />
+      </div>
+    </div>
+  );
+}
