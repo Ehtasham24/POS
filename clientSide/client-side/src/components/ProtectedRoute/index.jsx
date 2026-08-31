@@ -42,6 +42,18 @@ export default function ProtectedRoute({ children, roles, feature, adminOnly = f
     return <Navigate to="/login" state={{ from: location.pathname }} replace />;
   }
 
+  // A temp password (issued by an admin-approved forgot-password request — see
+  // passwordResetService.js) forces a stop here before anything else is reachable, the
+  // same way the !user check above forces a stop at /login. Checked before `forbidden`
+  // so a locked-out user isn't shown a "you don't have access" toast for a page they'd
+  // otherwise be allowed to see once they've actually set a real password.
+  if (user.mustChangePassword && location.pathname !== "/set-new-password") {
+    return <Navigate to="/set-new-password" replace />;
+  }
+  if (!user.mustChangePassword && location.pathname === "/set-new-password") {
+    return <Navigate to={homePath} replace />;
+  }
+
   if (forbidden) {
     return <Navigate to={homePath} replace />;
   }

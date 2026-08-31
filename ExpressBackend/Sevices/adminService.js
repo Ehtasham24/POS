@@ -213,6 +213,86 @@ const updateShopDetails = async (shopId, { name, maxUsers, storageQuotaPercent }
   return normalizeShopRow(rows[0]);
 };
 
+// Owner Profile — deliberately separate from updateShopDetails above: this edits a ROW ON
+// `users`, not `shops`. One owner per shop, per how createShop provisions it (INSERT ...
+// role='owner' exactly once); LIMIT 1 ORDER BY created_at is just a defensive tie-breaker,
+// not an expected real scenario. username/password are intentionally NOT editable here —
+// username changes ripple into login globally, and password changes go through the
+// forgot-password request flow (passwordResetService.js) instead.
+const getShopOwner = async (shopId) => {
+  const { rows } = await pool.query(
+    `SELECT id, username, display_name, email, phone, cnic
+     FROM users WHERE shop_id = $1 AND role = 'owner' AND is_active = true
+     ORDER BY created_at LIMIT 1`,
+    [shopId]
+  );
+  if (!rows[0]) throw new ApiError(404, "No owner found for this shop");
+  const row = rows[0];
+  return {
+    id: row.id,
+    username: row.username,
+    displayName: row.display_name,
+    email: row.email,
+    phone: row.phone,
+    cnic: row.cnic,
+  };
+};
+
+const updateShopOwner = async (shopId, { displayName, email, phone, cnic }) => {
+  if (displayName === undefined && email === undefined && phone === undefined && cnic === undefined) {
+    throw new ApiError(400, "Nothing to update");
+  }
+  if (displayName !== undefined && !displayName.trim()) {
+    throw new ApiError(400, "Owner's display name is required");
+  }
+
+  const updates = [];
+  const params = [shopId];
+  if (displayName !== undefined) {
+    params.push(displayName.trim());
+    updates.push(`display_name = $${params.length}`);
+  }
+  if (email !== undefined) {
+    params.push(email || null);
+    updates.push(`email = $${params.length}`);
+  }
+  if (phone !== undefined) {
+    params.push(phone || null);
+    updates.push(`phone = $${params.length}`);
+  }
+  if (cnic !== undefined) {
+    params.push(cnic || null);
+    updates.push(`cnic = $${params.length}`);
+  }
+
+  try {
+    const { rows } = await pool.query(
+      `UPDATE users SET ${updates.join(", ")}
+       WHERE shop_id = $1 AND role = 'owner' AND is_active = true
+       RETURNING id, username, display_name, email, phone, cnic`,
+      params
+    );
+    if (!rows[0]) throw new ApiError(404, "No owner found for this shop");
+    const row = rows[0];
+    return {
+      id: row.id,
+      username: row.username,
+      displayName: row.display_name,
+      email: row.email,
+      phone: row.phone,
+      cnic: row.cnic,
+    };
+  } catch (err) {
+    if (err.code === "23505") {
+      // idx_users_cnic (migration 026) — a real, nationally-unique government ID, so a
+      // collision here means the CNIC was mistyped or already belongs to a different owner.
+      throw new ApiError(409, "This CNIC is already on file for a different account");
+    }
+    if (err instanceof ApiError) throw err;
+    throw new ApiError(500, err.message);
+  }
+};
+
 // The one place a shop's tier actually changes — and so the one place the Phase 6
 // downgrade automations (flattenBatchProducts, closeOpenShiftsForDowngrade) finally get
 // called from. Each automation is keyed off the SPECIFIC feature being lost, not "is this
@@ -358,6 +438,8 @@ module.exports = {
   listShops,
   createShop,
   updateShopDetails,
+  getShopOwner,
+  updateShopOwner,
   updateShopTier,
   setShopActive,
   changeSuperAdminPassword,

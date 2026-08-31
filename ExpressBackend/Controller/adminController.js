@@ -3,6 +3,8 @@ const {
   listShops,
   createShop,
   updateShopDetails,
+  getShopOwner,
+  updateShopOwner,
   updateShopTier,
   setShopActive,
   changeSuperAdminPassword,
@@ -15,6 +17,7 @@ const {
 } = require("../Sevices/platformSettingsService");
 const { estimateShopStorage } = require("../Sevices/storageEstimatorService");
 const { getDailyEgressSeries } = require("../Sevices/egressService");
+const { listRequests, approveRequest, rejectRequest } = require("../Sevices/passwordResetService");
 
 const ListShops = asyncHandler(async (req, res) => {
   res.send(await listShops());
@@ -87,6 +90,33 @@ const GetShopEgressSeries = asyncHandler(async (req, res) => {
   res.send({ series: await getDailyEgressSeries(id, days), days });
 });
 
+const GetShopOwner = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  res.send(await getShopOwner(id));
+});
+
+const UpdateShopOwner = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { displayName, email, phone, cnic } = req.body;
+  res.send(await updateShopOwner(id, { displayName, email, phone, cnic }));
+});
+
+const ListPasswordResetRequests = asyncHandler(async (req, res) => {
+  res.send(await listRequests(req.query.status));
+});
+
+const ApprovePasswordResetRequest = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  res.send(await approveRequest(id, req.user));
+});
+
+const RejectPasswordResetRequest = asyncHandler(async (req, res) => {
+  const { id } = req.params;
+  const { notes } = req.body;
+  await rejectRequest(id, req.user, notes);
+  res.status(204).send();
+});
+
 module.exports = {
   ListShops,
   CreateShop,
@@ -99,4 +129,9 @@ module.exports = {
   UpdatePlatformSettings,
   EstimateStorage,
   GetShopEgressSeries,
+  GetShopOwner,
+  UpdateShopOwner,
+  ListPasswordResetRequests,
+  ApprovePasswordResetRequest,
+  RejectPasswordResetRequest,
 };

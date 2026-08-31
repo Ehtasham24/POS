@@ -16,6 +16,7 @@ import AdminDashboard from "pages/Admin";
 import AdminUsage from "pages/Admin/Usage";
 import AdminEstimator from "pages/Admin/Estimator";
 import LoginPage from "pages/Login";
+import SetNewPasswordPage from "pages/SetNewPassword";
 import NotFound from "pages/NotFound";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import { ToastProvider } from "components/Toast/ToastContext";
@@ -46,6 +47,17 @@ function App() {
             <Router>
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                {/* Reached only via ProtectedRoute's own mustChangePassword redirect (a
+                    temp password issued by an admin-approved forgot-password request) —
+                    not linked from anywhere, and not reachable once the flag is cleared. */}
+                <Route
+                  path="/set-new-password"
+                  element={
+                    <ProtectedRoute>
+                      <SetNewPasswordPage />
+                    </ProtectedRoute>
+                  }
+                />
                 {/* Platform admin console (migration 022) — a superadmin's only route.
                     ProtectedRoute's adminOnly boundary keeps a shop's own Owner/Cashier out
                     of this exactly as strictly as it keeps a superadmin out of every route

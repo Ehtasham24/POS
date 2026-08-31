@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { Helmet } from "react-helmet";
-import { HiOutlinePlus, HiOutlinePencil, HiOutlineCircleStack } from "react-icons/hi2";
+import { HiOutlinePlus, HiOutlinePencil, HiOutlineCircleStack, HiOutlineUser } from "react-icons/hi2";
 import { Modal, EmptyState, SkeletonRows } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { apiGet, apiPost, apiPatch } from "utils/api";
@@ -37,6 +37,14 @@ export default function AdminDashboard() {
   const [editTarget, setEditTarget] = useState(null);
   const [editForm, setEditForm] = useState({ name: "", maxUsers: 5, storageQuotaPercent: "" });
   const [editSaving, setEditSaving] = useState(false);
+
+  // Owner Profile — a shop's owner identity (name/email/phone/CNIC), what a forgot
+  // -password request gets checked against (see PasswordResetRequestsBadge.jsx).
+  // Separate from editTarget/editForm above since this edits a `users` row, not `shops`.
+  const [ownerTarget, setOwnerTarget] = useState(null);
+  const [ownerForm, setOwnerForm] = useState({ displayName: "", email: "", phone: "", cnic: "" });
+  const [ownerLoading, setOwnerLoading] = useState(false);
+  const [ownerSaving, setOwnerSaving] = useState(false);
 
   // Platform Settings: the one number every shop's quota percentage is actually relative
   // to — see migration 025. Supabase has no queryable "what plan are we on" from inside
@@ -148,6 +156,45 @@ export default function AdminDashboard() {
       toast.error(err.message);
     } finally {
       setEditSaving(false);
+    }
+  };
+
+  const openOwnerProfile = async (shop) => {
+    setOwnerTarget(shop);
+    setOwnerLoading(true);
+    try {
+      const owner = await apiGet(`/api/admin/shops/${shop.id}/owner`);
+      setOwnerForm({
+        displayName: owner.displayName,
+        email: owner.email || "",
+        phone: owner.phone || "",
+        cnic: owner.cnic || "",
+      });
+    } catch (err) {
+      toast.error(err.message);
+      setOwnerTarget(null);
+    } finally {
+      setOwnerLoading(false);
+    }
+  };
+
+  const handleOwnerSave = async (e) => {
+    e.preventDefault();
+    setOwnerSaving(true);
+    try {
+      await apiPatch(`/api/admin/shops/${ownerTarget.id}/owner`, {
+        displayName: ownerForm.displayName,
+        email: ownerForm.email || null,
+        phone: ownerForm.phone || null,
+        cnic: ownerForm.cnic || null,
+      });
+      toast.success(`${ownerTarget.name}'s owner profile updated.`);
+      setOwnerTarget(null);
+      loadShops();
+    } catch (err) {
+      toast.error(err.message);
+    } finally {
+      setOwnerSaving(false);
     }
   };
 
@@ -279,9 +326,19 @@ export default function AdminDashboard() {
                     <td className="px-4 py-3 text-right">
                       <button
                         type="button"
+                        onClick={() => openOwnerProfile(shop)}
+                        aria-label={`Owner profile for ${shop.name}`}
+                        title="Owner profile"
+                        className="mr-1 inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+                      >
+                        <HiOutlineUser className="text-base" />
+                      </button>
+                      <button
+                        type="button"
                         onClick={() => openEdit(shop)}
                         aria-label={`Edit ${shop.name}`}
-                        className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+                        title="Edit shop"
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
                       >
                         <HiOutlinePencil className="text-base" />
                       </button>
@@ -460,6 +517,82 @@ export default function AdminDashboard() {
             </button>
           </div>
         </form>
+      </Modal>
+
+      <Modal
+        isOpen={!!ownerTarget}
+        onClose={() => setOwnerTarget(null)}
+        title={ownerTarget ? `${ownerTarget.name} — Owner Profile` : "Owner Profile"}
+      >
+        {ownerLoading ? (
+          <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">Loading…</p>
+        ) : (
+          <form className="space-y-4" onSubmit={handleOwnerSave}>
+            <p className="text-xs text-gray-500 dark:text-gray-400">
+              This is what a forgot-password request gets checked against — see the key icon
+              in the header once an owner submits one. Username and password aren't editable
+              here; password resets go through that same request flow.
+            </p>
+            <div>
+              <label className={labelClass}>Owner name</label>
+              <input
+                type="text"
+                required
+                value={ownerForm.displayName}
+                onChange={(e) => setOwnerForm((prev) => ({ ...prev, displayName: e.target.value }))}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Email</label>
+              <input
+                type="email"
+                value={ownerForm.email}
+                onChange={(e) => setOwnerForm((prev) => ({ ...prev, email: e.target.value }))}
+                className={inputClass}
+              />
+            </div>
+            <div>
+              <label className={labelClass}>Phone</label>
+              <input
+                type="tel"
+                value={ownerForm.phone}
+                onChange={(e) => setOwnerForm((prev) => ({ ...prev, phone: e.target.value }))}
+                className={inputClass}
+                placeholder="03XXXXXXXXX"
+              />
+            </div>
+            <div>
+              <label className={labelClass}>CNIC</label>
+              <input
+                type="text"
+                value={ownerForm.cnic}
+                onChange={(e) => setOwnerForm((prev) => ({ ...prev, cnic: e.target.value }))}
+                className={inputClass}
+                placeholder="XXXXX-XXXXXXX-X"
+              />
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Must be unique across shops — this is what most reliably tells two owners apart.
+              </p>
+            </div>
+            <div className="flex justify-end gap-3 pt-2">
+              <button
+                type="button"
+                onClick={() => setOwnerTarget(null)}
+                className="rounded-lg bg-surface-muted px-4 py-2 text-sm text-gray-800 transition-colors hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                disabled={ownerSaving}
+                className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-medium text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {ownerSaving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
 
       <Modal isOpen={showPlatformSettings} onClose={() => setShowPlatformSettings(false)} title="Platform Settings">

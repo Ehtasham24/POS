@@ -1,49 +1,40 @@
 import { useState } from "react";
-import { useNavigate, useLocation } from "react-router-dom";
 import { HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import Logo from "components/Logo";
-import { useAuth } from "auth/AuthContext";
 import { useLanguage } from "i18n/LanguageContext";
 import useTheme from "hooks/useTheme";
-import ForgotPasswordModal from "./ForgotPasswordModal";
+import { useAuth } from "auth/AuthContext";
+import { apiPatch } from "utils/api";
 
-// Deliberately not wrapped in AppShell — no sidebar/nav makes sense before there's a
-// logged-in user to show them for. Same login screen for both a shop's own staff and a
-// platform superadmin (App.jsx routes both here) — Login itself doesn't know or care which
-// one is signing in, it just redirects based on the role login() returns.
-export default function LoginPage() {
-  const { login } = useAuth();
+// Landed on by ProtectedRoute whenever user.mustChangePassword is true (set by an admin
+// -approved forgot-password request — see passwordResetService.js's approveRequest). Not
+// wrapped in AppShell — same reasoning as the Login page itself: nothing else should be
+// reachable until this is done.
+export default function SetNewPasswordPage() {
   const { t } = useLanguage();
-  const navigate = useNavigate();
-  const location = useLocation();
-  // Called here too (not just from AppShell/the Admin dashboard) — this is the very first
-  // page anyone sees, logged in or not, so it needs its own sync of <html>'s "dark" class
-  // from localStorage rather than relying on some other, later-mounted page to have done it.
+  const { checkSession } = useAuth();
   const [theme, toggleTheme] = useTheme();
 
-  const [username, setUsername] = useState("");
-  const [password, setPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
+    if (newPassword !== confirmPassword) {
+      setError(t("auth.newPasswordMismatch"));
+      return;
+    }
     setSubmitting(true);
     try {
-      const loggedInUser = await login(username, password);
-      // A superadmin (migration 022) has no shop, so "home" is always the admin console —
-      // never location.state?.from, which could be a shop-scoped URL left over from a
-      // completely different account's session on this browser (ProtectedRoute would just
-      // bounce them straight back out of it anyway, but there's no reason to round-trip
-      // through that). Everyone else keeps the normal "back to wherever you were headed"
-      // behavior, falling back to the selling screen.
-      const home =
-        loggedInUser.role === "superadmin" ? "/admin" : location.state?.from || "/";
-      navigate(home, { replace: true });
+      await apiPatch("/api/auth/set-new-password", { newPassword });
+      // Re-fetches /api/auth/me so user.mustChangePassword flips to false in AuthContext —
+      // ProtectedRoute then stops redirecting here and normal navigation resumes.
+      await checkSession();
     } catch (err) {
-      setError(err.message || t("auth.loginError"));
+      setError(err.message);
     } finally {
       setSubmitting(false);
     }
@@ -63,33 +54,37 @@ export default function LoginPage() {
         <div className="mb-6 flex flex-col items-center gap-2">
           <Logo className="h-12 w-12" />
           <h1 className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">
-            {t("auth.title")}
+            {t("auth.setNewPasswordTitle")}
           </h1>
+          <p className="text-center text-sm text-gray-500 dark:text-gray-400">{t("auth.setNewPasswordDesc")}</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
             <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
-              {t("auth.username")}
+              {t("auth.newPassword")}
             </label>
             <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              type="password"
+              required
+              minLength={8}
               autoFocus
-              autoComplete="username"
+              autoComplete="new-password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
               className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
           <div>
             <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
-              {t("auth.password")}
+              {t("auth.confirmNewPassword")}
             </label>
             <input
               type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
+              required
+              autoComplete="new-password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
               className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
             />
           </div>
@@ -102,23 +97,13 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={submitting || !username || !password}
+            disabled={submitting || !newPassword || !confirmPassword}
             className="w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitting ? t("auth.loggingIn") : t("auth.login")}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowForgotPassword(true)}
-            className="block w-full text-center text-sm font-medium text-primary-600 transition-colors hover:underline dark:text-primary-400"
-          >
-            {t("auth.forgotPassword")}
+            {submitting ? t("auth.setNewPasswordSubmitting") : t("auth.setNewPasswordSubmit")}
           </button>
         </form>
       </div>
-
-      <ForgotPasswordModal isOpen={showForgotPassword} onClose={() => setShowForgotPassword(false)} />
     </div>
   );
 }

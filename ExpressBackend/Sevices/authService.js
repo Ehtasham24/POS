@@ -17,6 +17,7 @@ const { hashPassword, comparePassword, signToken } = require("../utils/auth");
 // that row, which toPublicUser and requireAuth both already handle explicitly.
 const USER_SHOP_QUERY = `
   SELECT u.id, u.username, u.password_hash, u.display_name, u.role, u.is_active, u.shop_id,
+         u.must_change_password,
          s.tier AS shop_tier, s.is_active AS shop_is_active, s.max_users AS shop_max_users
   FROM users u
   LEFT JOIN shops s ON s.id = u.shop_id
@@ -29,6 +30,7 @@ const toPublicUser = (row) => ({
   role: row.role,
   isActive: row.is_active,
   shopId: row.shop_id,
+  mustChangePassword: row.must_change_password,
   shopTier: row.shop_tier,
   shopIsActive: row.shop_is_active,
   shopMaxUsers: row.shop_max_users,
@@ -54,4 +56,19 @@ const findUserById = async (id) => {
   return rows[0] ? toPublicUser(rows[0]) : null;
 };
 
-module.exports = { login, findUserById, hashPassword };
+// The "I logged in with a temp password, now pick a real one" step — no current-password
+// check, unlike changeSuperAdminPassword (adminService.js), since reaching this endpoint
+// already proves identity via requireAuth on the session the temp password itself created.
+// Clears must_change_password so ProtectedRoute (clientSide) stops redirecting here.
+const setNewPassword = async (userId, newPassword) => {
+  if (!newPassword || newPassword.length < 8) {
+    throw new ApiError(400, "New password must be at least 8 characters");
+  }
+  const passwordHash = await hashPassword(newPassword);
+  await pool.query(
+    `UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1`,
+    [userId, passwordHash]
+  );
+};
+
+module.exports = { login, findUserById, hashPassword, setNewPassword };

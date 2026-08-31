@@ -1,5 +1,6 @@
 const asyncHandler = require("../utils/asyncHandler");
-const { login } = require("../Sevices/authService");
+const { login, setNewPassword } = require("../Sevices/authService");
+const { createRequest } = require("../Sevices/passwordResetService");
 const { COOKIE_NAME, COOKIE_OPTIONS } = require("../utils/auth");
 const { getFeaturesForTier } = require("../config/features");
 
@@ -21,6 +22,7 @@ const withShopInfo = (user) => ({
   displayName: user.displayName,
   role: user.role,
   isActive: user.isActive,
+  mustChangePassword: user.mustChangePassword,
   shop: user.shopId
     ? { tier: user.shopTier, features: getFeaturesForTier(user.shopTier), maxUsers: user.shopMaxUsers }
     : null,
@@ -47,4 +49,22 @@ const Me = asyncHandler(async (req, res) => {
   res.send(withShopInfo(req.user));
 });
 
-module.exports = { Login, Logout, Me };
+// Public — this IS the "I can't log in" path, so it can't require a session. Always
+// responds with the same neutral message regardless of whether the username matched
+// anything, mirroring login()'s own "same error either way" anti-enumeration comment —
+// a real match still submits a request behind the scenes (passwordResetService.js).
+const ForgotPassword = asyncHandler(async (req, res) => {
+  const { username, claimedCnic, claimedPhone } = req.body;
+  await createRequest({ username, claimedCnic, claimedPhone });
+  res.send({ message: "If we found a matching account, your request has been submitted to the platform admin." });
+});
+
+// requireAuth-gated, not public — reaching here already means the caller has a valid
+// session (typically one just created by logging in with an admin-issued temp password).
+const SetNewPassword = asyncHandler(async (req, res) => {
+  const { newPassword } = req.body;
+  await setNewPassword(req.user.id, newPassword);
+  res.status(204).send();
+});
+
+module.exports = { Login, Logout, Me, ForgotPassword, SetNewPassword };

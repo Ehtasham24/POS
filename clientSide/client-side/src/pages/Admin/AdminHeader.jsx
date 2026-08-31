@@ -16,6 +16,7 @@ import { useAuth } from "auth/AuthContext";
 import useTheme from "hooks/useTheme";
 import { apiPatch } from "utils/api";
 import { inputClass, labelClass } from "./shared";
+import PasswordResetRequestsBadge from "./PasswordResetRequestsBadge";
 
 const emptyPasswordForm = { currentPassword: "", newPassword: "", confirmPassword: "" };
 
@@ -89,6 +90,7 @@ export default function AdminHeader() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <PasswordResetRequestsBadge />
             <button
               type="button"
               onClick={toggleTheme}

@@ -7,6 +7,7 @@ const AuthContext = createContext({
   loading: true,
   login: async () => {},
   logout: async () => {},
+  checkSession: async () => {},
 });
 
 export function AuthProvider({ children }) {
@@ -75,7 +76,7 @@ export function AuthProvider({ children }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, checkSession }}>
       {children}
     </AuthContext.Provider>
   );

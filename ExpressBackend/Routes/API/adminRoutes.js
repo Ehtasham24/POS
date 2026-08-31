@@ -12,6 +12,11 @@ const {
   UpdatePlatformSettings,
   EstimateStorage,
   GetShopEgressSeries,
+  GetShopOwner,
+  UpdateShopOwner,
+  ListPasswordResetRequests,
+  ApprovePasswordResetRequest,
+  RejectPasswordResetRequest,
 } = require("../../Controller/adminController");
 const requireAuth = require("../../Middleware/requireAuth");
 const requireSuperAdmin = require("../../Middleware/requireSuperAdmin");
@@ -42,5 +47,25 @@ routes.patch("/api/admin/platform-settings", requireAuth, requireSuperAdmin, Upd
 // created — not wired into CreateShop/UpdateShopDetails themselves, since the admin reads
 // the recommendation here and types the resulting % into those forms manually.
 routes.post("/api/admin/storage-estimate", requireAuth, requireSuperAdmin, EstimateStorage);
+// Owner Profile — a shop's owner identity (name/email/phone/CNIC), separate from
+// UpdateShopDetails since it edits a `users` row, not `shops`. username/password
+// deliberately excluded — see adminService.js's updateShopOwner comment.
+routes.get("/api/admin/shops/:id/owner", requireAuth, requireSuperAdmin, GetShopOwner);
+routes.patch("/api/admin/shops/:id/owner", requireAuth, requireSuperAdmin, UpdateShopOwner);
+// Forgot-password requests — a shop user submits one (POST /api/auth/forgot-password,
+// public), a superadmin reviews/approves/rejects it here.
+routes.get("/api/admin/password-reset-requests", requireAuth, requireSuperAdmin, ListPasswordResetRequests);
+routes.patch(
+  "/api/admin/password-reset-requests/:id/approve",
+  requireAuth,
+  requireSuperAdmin,
+  ApprovePasswordResetRequest
+);
+routes.patch(
+  "/api/admin/password-reset-requests/:id/reject",
+  requireAuth,
+  requireSuperAdmin,
+  RejectPasswordResetRequest
+);
 
 module.exports = routes;
