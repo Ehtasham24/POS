@@ -11,6 +11,7 @@ import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { useFeature } from "auth/useFeature";
 import { apiPost } from "utils/api";
+import useUrlFilterState from "hooks/useUrlFilterState";
 
 // Local (not UTC) "YYYY-MM-DDTHH:mm" — the format <input type="datetime-local"> expects.
 const formatLocal = (date) => {
@@ -45,29 +46,50 @@ const SalesDataComponent = () => {
   const [salesData, setSalesData] = useState([]);
   const [timeSeriesData, setTimeSeriesData] = useState([]);
   const [totalProfitLoss, setTotalProfitLoss] = useState(0);
-  const [filterType, setFilterType] = useState("all");
-  const [paymentMethod, setPaymentMethod] = useState("");
+  // URL-backed (hooks/useUrlFilterState), not plain useState — a bare useState here reset
+  // to defaults on every remount, which is exactly what happens navigating away (e.g.
+  // ShrinkageSummary's "View Detail" -> Stock Adjustments) and back; this survives that.
+  const [filterType, setFilterType] = useUrlFilterState("filterType", "all");
+  const [paymentMethod, setPaymentMethod] = useUrlFilterState("paymentMethod", "");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [startDate, setStartDate] = useState(startOfToday);
-  const [endDate, setEndDate] = useState(endOfToday);
+  // Called directly, not passed as a bare reference — unlike useState, this hook has no
+  // special lazy-initializer case for a function value, so `startOfToday` (the function
+  // itself) would otherwise become the stored value verbatim, only ever actually invoked
+  // when something coerces it to a string (a template literal, a query param) later on,
+  // producing that function's own SOURCE CODE text instead of a date. Confirmed live —
+  // this was the exact bug caught during this fix's own browser verification.
+  const [startDate, setStartDate] = useUrlFilterState("startDate", startOfToday());
+  const [endDate, setEndDate] = useUrlFilterState("endDate", endOfToday());
   const chartsRef = useRef(null);
+  // Guards against the classic out-of-order-response race: adjusting a datetime-local
+  // input fires onChange per field segment, so several fetches can be in flight at once —
+  // without this, whichever RESPONSE happens to resolve last wins, not whichever request
+  // was actually issued last, so an older/slower response for a since-abandoned date range
+  // could silently overwrite the charts with stale data even though the filter on screen
+  // has already moved on. ShrinkageSummary/PaymentMediumSummary on this same page already
+  // guard their own single fetch this same way with a `cancelled` boolean; this is the
+  // equivalent for fetchSalesData/fetchTimeSeries, which chain two fetches per filter change.
+  const requestIdRef = useRef(0);
 
-  const fetchTimeSeries = async () => {
+  const fetchTimeSeries = async (requestId) => {
     try {
       const data = await apiPost("/api/Sales/timeseries", {
         startDate,
         endDate,
         paymentMethod: paymentMethod || undefined,
       });
+      if (requestId !== requestIdRef.current) return; // a newer filter change has since started
       setTimeSeriesData(data);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       console.error("Error fetching sales trend:", err);
       toast.error("Couldn't load the sales trend chart — check your connection and try again.");
     }
   };
 
   const fetchSalesData = async (type) => {
+    const requestId = ++requestIdRef.current;
     setLoading(true);
     setError(null);
     let url = "/api/Sales";
@@ -80,14 +102,16 @@ const SalesDataComponent = () => {
 
     try {
       const data = await apiPost(url, payload);
+      if (requestId !== requestIdRef.current) return; // superseded by a newer filter change
       setSalesData(data.salesData);
       setTotalProfitLoss(data.totalProfitLoss);
     } catch (err) {
+      if (requestId !== requestIdRef.current) return;
       setError(err.message);
     } finally {
-      setLoading(false);
+      if (requestId === requestIdRef.current) setLoading(false);
     }
-    if (hasSalesCharts) fetchTimeSeries();
+    if (hasSalesCharts && requestId === requestIdRef.current) fetchTimeSeries(requestId);
   };
 
   useEffect(() => {

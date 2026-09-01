@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import useUrlFilterState from "hooks/useUrlFilterState";
 import {
   HiOutlineArchiveBoxXMark,
   HiOutlineChevronDown,
@@ -45,20 +45,25 @@ export default function StockAdjustmentsPage() {
   const { formatDateTime } = useTimezone();
   const toast = useToast();
 
-  // Seeded from the URL once on mount — this is how the Sales Report's Shrinkage section
-  // ("View Detail" on a reason or a product row, ShrinkageSummary.jsx) lands here already
-  // scoped to exactly that reason/product and date range, without this page needing to know
-  // anything about the Report it might have been reached from.
-  const [searchParams] = useSearchParams();
+  // URL-backed (hooks/useUrlFilterState) — this is both how the Sales Report's Shrinkage
+  // section ("View Detail" on a reason or a product row, ShrinkageSummary.jsx) lands here
+  // already scoped to exactly that reason/product and date range, AND how a filter change
+  // made on this page itself survives navigating away and back (a plain useState would
+  // reset to these same defaults on remount, same class of bug this fixes on Report.jsx).
   const [adjustments, setAdjustments] = useState(null);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [page, setPage] = useState(1);
   const PAGE_SIZE = 20;
-  const [reasonFilter, setReasonFilter] = useState(() => searchParams.get("reasonCode") || "all");
-  const [startDate, setStartDate] = useState(() => toDateOnly(searchParams.get("startDate")));
-  const [endDate, setEndDate] = useState(() => toDateOnly(searchParams.get("endDate")));
-  const [productFilter, setProductFilter] = useState(() => searchParams.get("productId") || "");
+  const [reasonFilter, setReasonFilter] = useUrlFilterState("reasonCode", "all");
+  const [startDateRaw, setStartDate] = useUrlFilterState("startDate", "");
+  const [endDateRaw, setEndDate] = useUrlFilterState("endDate", "");
+  // toDateOnly is a safe no-op on an already-date-only value (no "T" to split on), so this
+  // normalizes both a fresh datetime-local value arriving from Report.jsx's own filters and
+  // a plain date this page's own <input type="date"> sets directly.
+  const startDate = toDateOnly(startDateRaw);
+  const endDate = toDateOnly(endDateRaw);
+  const [productFilter, setProductFilter] = useUrlFilterState("productId", "");
   const [expandedId, setExpandedId] = useState(null);
 
   const fetchAdjustments = async (pageToLoad) => {

@@ -496,6 +496,8 @@ const translations = {
       paymentMediumBreakdown: "By Payment Medium",
       unrecordedMedium: "Unrecorded",
       shrinkageTitle: "Shrinkage",
+      shrinkageTooltip:
+        "Stock that left your inventory without a sale — damage, expiry, theft, or a physical count correction. Recorded via Inventory's Adjust Stock action, not through a checkout.",
       shrinkageUnitsLost: "Units Lost",
       shrinkageCostImpact: "Cost Impact",
       shrinkageByReason: "By Reason",
@@ -1002,6 +1004,8 @@ const translations = {
       paymentMediumBreakdown: "ادائیگی کے ذریعے کے مطابق",
       unrecordedMedium: "غیر ریکارڈ شدہ",
       shrinkageTitle: "کمی/نقصان",
+      shrinkageTooltip:
+        "وہ اسٹاک جو بغیر فروخت کے انوینٹری سے نکل گیا — نقصان، میعاد ختم، چوری، یا فزیکل گنتی کی تصحیح۔ یہ انوینٹری کے 'Adjust Stock' آپشن سے ریکارڈ ہوتا ہے، چیک آؤٹ سے نہیں۔",
       shrinkageUnitsLost: "ضائع شدہ یونٹس",
       shrinkageCostImpact: "لاگت کا اثر",
       shrinkageByReason: "وجہ کے مطابق",
