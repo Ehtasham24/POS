@@ -16,6 +16,7 @@ import AdminDashboard from "pages/Admin";
 import AdminUsage from "pages/Admin/Usage";
 import AdminEstimator from "pages/Admin/Estimator";
 import LoginPage from "pages/Login";
+import AdminLoginPage from "pages/AdminLogin";
 import SetNewPasswordPage from "pages/SetNewPassword";
 import NotFound from "pages/NotFound";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
@@ -47,6 +48,10 @@ function App() {
             <Router>
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                {/* Separate from /login, deliberately — see pages/AdminLogin's own
+                    top comment for why the two used to be one shared screen and no
+                    longer are. */}
+                <Route path="/admin/login" element={<AdminLoginPage />} />
                 {/* Reached only via ProtectedRoute's own mustChangePassword redirect (a
                     temp password issued by an admin-approved forgot-password request) —
                     not linked from anywhere, and not reachable once the flag is cleared. */}

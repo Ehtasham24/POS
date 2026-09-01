@@ -39,7 +39,13 @@ export default function ProtectedRoute({ children, roles, feature, adminOnly = f
   if (loading) return null; // avoids a login-page flash while the initial /me call is in flight
 
   if (!user) {
-    return <Navigate to="/login" state={{ from: location.pathname }} replace />;
+    // Two separate sign-in surfaces (App.jsx) — an admin-only route sends an unauthenticated
+    // visitor to the admin portal's own login, never the shop staff one, so nobody types a
+    // platform-admin username into a form whose "Forgot password?" is deliberately scoped
+    // to shop accounts only (see passwordResetService.js's role != 'superadmin' filter).
+    return (
+      <Navigate to={adminOnly ? "/admin/login" : "/login"} state={{ from: location.pathname }} replace />
+    );
   }
 
   // A temp password (issued by an admin-approved forgot-password request — see

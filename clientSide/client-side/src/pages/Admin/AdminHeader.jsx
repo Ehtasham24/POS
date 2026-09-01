@@ -51,7 +51,7 @@ export default function AdminHeader() {
 
   const handleLogout = async () => {
     await logout();
-    navigate("/login", { replace: true });
+    navigate("/admin/login", { replace: true });
   };
 
   const handleChangePassword = async (e) => {

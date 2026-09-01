@@ -1,35 +1,29 @@
 import { useState } from "react";
-import { useNavigate, useLocation, Link } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import Logo from "components/Logo";
 import { useAuth } from "auth/AuthContext";
-import { useLanguage } from "i18n/LanguageContext";
 import useTheme from "hooks/useTheme";
-import ForgotPasswordModal from "./ForgotPasswordModal";
 
-// Deliberately not wrapped in AppShell — no sidebar/nav makes sense before there's a
-// logged-in user to show them for. Shop staff only (owner/cashier) — a platform superadmin
-// has its own separate portal at /admin/login (pages/AdminLogin), so a superadmin
-// account logging in here is rejected rather than silently let through. That separation is
-// deliberate, not cosmetic: it's what keeps "Forgot password?" below scoped to shop
-// accounts only — see passwordResetService.js's role != 'superadmin' filter, and the
-// incident that motivated it (a request submitted against "admin" here got self-approved
-// and silently locked the platform admin out).
-export default function LoginPage() {
+// Deliberately plain English, not routed through i18n/translations.js — same reasoning as
+// the rest of the admin console (pages/Admin/index.jsx's own top comment): this portal's
+// only audience is the platform operator, never shop staff.
+//
+// A separate page from pages/Login (not a shared component with a mode flag) is the whole
+// point — the two used to be one screen, and a request typed against "admin" on it once
+// got self-approved and silently locked the platform admin out (see
+// passwordResetService.js's role != 'superadmin' filter). No "Forgot password?" here at
+// all: recovering a locked-out platform admin account is a DB-access-required operation
+// (adminService.js's changeSuperAdminPassword comment), never a self-service request.
+export default function AdminLoginPage() {
   const { login, logout } = useAuth();
-  const { t } = useLanguage();
   const navigate = useNavigate();
-  const location = useLocation();
-  // Called here too (not just from AppShell/the Admin dashboard) — this is the very first
-  // page anyone sees, logged in or not, so it needs its own sync of <html>'s "dark" class
-  // from localStorage rather than relying on some other, later-mounted page to have done it.
   const [theme, toggleTheme] = useTheme();
 
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [showForgotPassword, setShowForgotPassword] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -37,16 +31,16 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const loggedInUser = await login(username, password);
-      if (loggedInUser.role === "superadmin") {
-        // Valid credentials, wrong portal — log the session right back out rather than
-        // continue into a mismatched app the way the shared-login page used to.
+      if (loggedInUser.role !== "superadmin") {
+        // Valid shop credentials, wrong portal — same enforcement pages/Login/index.jsx
+        // does in reverse.
         await logout();
-        setError("This is the shop login. Platform admins sign in at the admin portal.");
+        setError("This is the admin portal. Shop staff sign in at the regular login.");
         return;
       }
-      navigate(location.state?.from || "/", { replace: true });
+      navigate("/admin", { replace: true });
     } catch (err) {
-      setError(err.message || t("auth.loginError"));
+      setError(err.message || "Something went wrong. Please try again.");
     } finally {
       setSubmitting(false);
     }
@@ -65,16 +59,13 @@ export default function LoginPage() {
       <div className="w-full max-w-sm rounded-2xl border border-surface-border bg-white-A700 p-8 shadow-card dark:border-gray-700 dark:bg-gray-800">
         <div className="mb-6 flex flex-col items-center gap-2">
           <Logo className="h-12 w-12" />
-          <h1 className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">
-            {t("auth.title")}
-          </h1>
+          <h1 className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">Platform Admin</h1>
+          <p className="text-sm text-gray-500 dark:text-gray-400">Sign in to the admin console</p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
           <div>
-            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
-              {t("auth.username")}
-            </label>
+            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">Username</label>
             <input
               type="text"
               value={username}
@@ -85,9 +76,7 @@ export default function LoginPage() {
             />
           </div>
           <div>
-            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
-              {t("auth.password")}
-            </label>
+            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">Password</label>
             <input
               type="password"
               value={password}
@@ -108,27 +97,17 @@ export default function LoginPage() {
             disabled={submitting || !username || !password}
             className="w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {submitting ? t("auth.loggingIn") : t("auth.login")}
-          </button>
-
-          <button
-            type="button"
-            onClick={() => setShowForgotPassword(true)}
-            className="block w-full text-center text-sm font-medium text-primary-600 transition-colors hover:underline dark:text-primary-400"
-          >
-            {t("auth.forgotPassword")}
+            {submitting ? "Signing in…" : "Sign In"}
           </button>
         </form>
 
         <Link
-          to="/admin/login"
+          to="/login"
           className="mt-4 block text-center text-xs text-gray-400 transition-colors hover:text-gray-600 hover:underline dark:text-gray-500 dark:hover:text-gray-300"
         >
-          Platform admin? Sign in here.
+          Not a platform admin? Shop login.
         </Link>
       </div>
-
-      <ForgotPasswordModal isOpen={showForgotPassword} onClose={() => setShowForgotPassword(false)} />
     </div>
   );
 }

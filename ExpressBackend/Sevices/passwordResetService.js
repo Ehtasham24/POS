@@ -33,8 +33,17 @@ const createRequest = async ({ username, claimedCnic, claimedPhone }) => {
     throw new ApiError(400, "Provide your CNIC or phone number so the admin can verify your identity");
   }
 
+  // role != 'superadmin' is deliberate, not an oversight — a platform admin's own account
+  // recovery is documented (adminService.js's changeSuperAdminPassword comment) as a DB
+  // -access-required operation, never a self-service request. There's exactly one
+  // superadmin account, so "someone else reviews and approves it" is impossible for that
+  // account anyway — it would always be a superadmin approving a request against
+  // themselves, which defeats the entire "a human verifies your identity" point of this
+  // flow. This is what actually happened once already (see git history/commit fixing
+  // this) — a request against "admin" got submitted and self-approved, silently locking
+  // the platform admin out with a temp password nobody had written down.
   const { rows } = await pool.query(
-    `SELECT id, shop_id FROM users WHERE username = $1 AND is_active = true`,
+    `SELECT id, shop_id FROM users WHERE username = $1 AND is_active = true AND role != 'superadmin'`,
     [username]
   );
   const user = rows[0];
