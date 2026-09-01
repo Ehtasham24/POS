@@ -74,17 +74,35 @@ const redeemVoucher = async (client, { code, amount, transactionId, requestingUs
   return inserted[0];
 };
 
-// Store Credit page: every voucher still holding a balance, with its optional tagged customer.
-const listActiveVouchers = async (shopId) => {
+// Store Credit page: every voucher still holding a balance, with its optional tagged
+// customer. Server-side paginated (page/pageSize -> LIMIT/OFFSET), same shape
+// getVoucherHistory below already returns.
+const listActiveVouchers = async (shopId, page = 1, pageSize = DEFAULT_PAGE_SIZE) => {
+  // COUNT and SUM together — totalOutstanding is a real liability figure (every voucher's
+  // unredeemed balance), so it has to come from the whole filtered set, not just whatever
+  // page happens to be on screen (a client-side sum over `vouchers` would silently
+  // undercount once this is paginated).
+  const countResult = await pool.query(
+    `SELECT COUNT(*) AS total, COALESCE(SUM(balance), 0) AS total_outstanding
+     FROM store_credit_voucher_balances WHERE balance > 0 AND shop_id = $1`,
+    [shopId]
+  );
+  const totalCount = parseInt(countResult.rows[0].total, 10) || 0;
+  const totalOutstanding = Number(countResult.rows[0].total_outstanding);
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const offset = (safePage - 1) * pageSize;
+
   const { rows } = await pool.query(
     `SELECT vb.refund_id, vb.initial_amount, vb.balance, vb.refunded_at, vb.contact_id, c.name AS contact_name
      FROM store_credit_voucher_balances vb
      LEFT JOIN contacts c ON c.id = vb.contact_id
      WHERE vb.balance > 0 AND vb.shop_id = $1
-     ORDER BY vb.refunded_at DESC`,
-    [shopId]
+     ORDER BY vb.refunded_at DESC
+     LIMIT $2 OFFSET $3`,
+    [shopId, pageSize, offset]
   );
-  return rows;
+  return { vouchers: rows, totalCount, totalOutstanding, totalPages, page: safePage, pageSize };
 };
 
 // Paginated redemption history for one voucher — mirrors the running_balance shape already

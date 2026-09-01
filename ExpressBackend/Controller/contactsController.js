@@ -2,8 +2,13 @@ const { getContacts, createContact, updateContact } = require("../Sevices/contac
 const asyncHandler = require("../utils/asyncHandler");
 
 const GetContacts = asyncHandler(async (req, res) => {
-  const { type } = req.query;
-  const contacts = await getContacts(type, req.user.shopId);
+  const { type, page, pageSize } = req.query;
+  const contacts = await getContacts(
+    type,
+    req.user.shopId,
+    page ? Number(page) : undefined,
+    pageSize ? Number(pageSize) : undefined
+  );
   res.send(contacts);
 });
 

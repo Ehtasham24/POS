@@ -19,6 +19,9 @@ import { Modal, SkeletonRows, EmptyState, InfoTooltip } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiGet, apiDelete } from "utils/api";
+import Pagination from "components/Pagination";
+
+const PAGE_SIZE = 20;
 
 // Payable and receivable both used the same red-when-pending color, which made a party
 // showing up in both tables (see Net Off) look identically "bad" in either — red only
@@ -162,6 +165,10 @@ function LedgerTable({
   historyRefreshKey,
   onEditTransaction,
   onDeleteTransaction,
+  totalCount,
+  totalPages,
+  page,
+  onPageChange,
 }) {
   const { t } = useLanguage();
   const [expandedContactId, setExpandedContactId] = useState(null);
@@ -268,6 +275,15 @@ function LedgerTable({
           )}
         </table>
       </div>
+      {!loading && totalCount > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-surface-border px-4 py-3 dark:border-gray-800">
+          <span className="text-sm text-gray-500 dark:text-gray-400">
+            {totalCount.toLocaleString()} {personLabel.toLowerCase()}
+            {totalCount === 1 ? "" : "s"} · Page {page} of {totalPages}
+          </span>
+          {totalPages > 1 && <Pagination page={page} totalPages={totalPages} onPageChange={onPageChange} />}
+        </div>
+      )}
     </div>
   );
 }
@@ -277,6 +293,12 @@ export default function CreditDebitPage() {
   const { t } = useLanguage();
   const [payableParties, setPayableParties] = useState([]);
   const [receivableParties, setReceivableParties] = useState([]);
+  const [payableBalanceMap, setPayableBalanceMap] = useState({});
+  const [receivableBalanceMap, setReceivableBalanceMap] = useState({});
+  const [payableTotal, setPayableTotal] = useState({ count: 0, pages: 1, balance: 0 });
+  const [receivableTotal, setReceivableTotal] = useState({ count: 0, pages: 1, balance: 0 });
+  const [payablePage, setPayablePage] = useState(1);
+  const [receivablePage, setReceivablePage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [showAddDebit, setShowAddDebit] = useState(false);
   const [showAddCredit, setShowAddCredit] = useState(false);
@@ -293,14 +315,26 @@ export default function CreditDebitPage() {
   // it doesn't own.
   const [historyRefreshKey, setHistoryRefreshKey] = useState(0);
 
-  const fetchLedger = async () => {
+  const fetchLedger = async (payablePageToLoad = 1, receivablePageToLoad = 1) => {
     try {
-      const [payable, receivable] = await Promise.all([
-        apiGet("/api/parties?direction=payable"),
-        apiGet("/api/parties?direction=receivable"),
+      // The two paginated lists (page's own current rows) and the two unbounded
+      // contact_id->balance maps (Net Off's cross-direction lookup — see
+      // partyLedgerService.js's getBalanceMap comment) are fetched independently, since
+      // pagination on one must never cause the other to silently lose contacts.
+      const [payable, receivable, payableBalances, receivableBalances] = await Promise.all([
+        apiGet(`/api/parties?direction=payable&page=${payablePageToLoad}&pageSize=${PAGE_SIZE}`),
+        apiGet(`/api/parties?direction=receivable&page=${receivablePageToLoad}&pageSize=${PAGE_SIZE}`),
+        apiGet("/api/parties/balances?direction=payable"),
+        apiGet("/api/parties/balances?direction=receivable"),
       ]);
-      setPayableParties(payable);
-      setReceivableParties(receivable);
+      setPayableParties(payable.parties);
+      setReceivableParties(receivable.parties);
+      setPayableTotal({ count: payable.totalCount, pages: payable.totalPages, balance: payable.totalBalance });
+      setReceivableTotal({ count: receivable.totalCount, pages: receivable.totalPages, balance: receivable.totalBalance });
+      setPayablePage(payable.page);
+      setReceivablePage(receivable.page);
+      setPayableBalanceMap(payableBalances);
+      setReceivableBalanceMap(receivableBalances);
     } catch (error) {
       console.error("Error fetching credit/debit ledger:", error);
       toast.error("Couldn't load the ledger — check your connection and try again.");
@@ -310,24 +344,27 @@ export default function CreditDebitPage() {
   };
 
   const refreshAll = () => {
-    fetchLedger();
+    fetchLedger(payablePage, receivablePage);
     setHistoryRefreshKey((k) => k + 1);
   };
 
   useEffect(() => {
-    refreshAll();
+    fetchLedger(1, 1);
+    setHistoryRefreshKey((k) => k + 1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const pendingDebitTotal = payableParties.reduce((sum, p) => sum + Number(p.balance), 0);
-  const pendingCreditTotal = receivableParties.reduce((sum, p) => sum + Number(p.balance), 0);
+  // Real totals across every party in each direction (server-computed — see
+  // partyLedgerService.js's listParties), not a client-side reduce over whichever page
+  // happens to be loaded.
+  const pendingDebitTotal = payableTotal.balance;
+  const pendingCreditTotal = receivableTotal.balance;
 
   // contact_id -> balance lookups so each table can tell whether a given party also has a
-  // balance on the *other* side (needed to show/hide the Net Off action).
-  const payableBalanceByContact = Object.fromEntries(payableParties.map((p) => [p.contact_id, p.balance]));
-  const receivableBalanceByContact = Object.fromEntries(
-    receivableParties.map((p) => [p.contact_id, p.balance])
-  );
+  // balance on the *other* side (needed to show/hide the Net Off action) — the full,
+  // unpaginated maps fetched above, not derived from the current page's rows.
+  const payableBalanceByContact = payableBalanceMap;
+  const receivableBalanceByContact = receivableBalanceMap;
 
   const handleDeleteTx = async () => {
     setDeletingTx(true);
@@ -396,6 +433,10 @@ export default function CreditDebitPage() {
               historyRefreshKey={historyRefreshKey}
               onEditTransaction={setEditTx}
               onDeleteTransaction={setDeleteTx}
+              totalCount={payableTotal.count}
+              totalPages={payableTotal.pages}
+              page={payablePage}
+              onPageChange={(p) => fetchLedger(p, receivablePage)}
             />
           </div>
 
@@ -428,6 +469,10 @@ export default function CreditDebitPage() {
               historyRefreshKey={historyRefreshKey}
               onEditTransaction={setEditTx}
               onDeleteTransaction={setDeleteTx}
+              totalCount={receivableTotal.count}
+              totalPages={receivableTotal.pages}
+              page={receivablePage}
+              onPageChange={(p) => fetchLedger(payablePage, p)}
             />
           </div>
 

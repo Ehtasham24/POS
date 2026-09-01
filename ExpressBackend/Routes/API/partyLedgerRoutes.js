@@ -2,6 +2,7 @@ const express = require("express");
 const routes = express.Router();
 const {
   getParties,
+  getBalances,
   getTransactions,
   postTransaction,
   putTransaction,
@@ -16,6 +17,9 @@ const requireFeature = require("../../Middleware/requireFeature");
 // have been wrong). Credit/Debit is Owner-only in full — a Cashier has no access to any
 // route in this file. Smart-tier+.
 routes.get("/api/parties", requireAuth, requireOwner, requireFeature("partyLedger"), getParties);
+// Unbounded contact_id->balance map for one direction — LedgerTable's cross-direction
+// "Net Off" lookup, kept independent of listParties' pagination (see partyLedgerService.js).
+routes.get("/api/parties/balances", requireAuth, requireOwner, requireFeature("partyLedger"), getBalances);
 routes.get("/api/parties/:contactId/transactions", requireAuth, requireOwner, requireFeature("partyLedger"), getTransactions);
 routes.post("/api/parties/transactions", requireAuth, requireOwner, requireFeature("partyLedger"), postTransaction);
 routes.put("/api/parties/transactions/:id", requireAuth, requireOwner, requireFeature("partyLedger"), putTransaction);

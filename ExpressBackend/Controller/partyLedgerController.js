@@ -1,5 +1,6 @@
 const {
   listParties,
+  getBalanceMap,
   getPartyTransactions,
   addTransaction,
   updateTransaction,
@@ -9,8 +10,19 @@ const {
 const asyncHandler = require("../utils/asyncHandler");
 
 const getParties = asyncHandler(async (req, res) => {
+  const { direction, page, pageSize } = req.query;
+  const result = await listParties(
+    direction,
+    req.user.shopId,
+    page ? parseInt(page, 10) : 1,
+    pageSize ? parseInt(pageSize, 10) : 20
+  );
+  res.send(result);
+});
+
+const getBalances = asyncHandler(async (req, res) => {
   const { direction } = req.query;
-  const result = await listParties(direction, req.user.shopId);
+  const result = await getBalanceMap(direction, req.user.shopId);
   res.send(result);
 });
 
@@ -57,6 +69,7 @@ const postNetOff = asyncHandler(async (req, res) => {
 
 module.exports = {
   getParties,
+  getBalances,
   getTransactions,
   postTransaction,
   putTransaction,

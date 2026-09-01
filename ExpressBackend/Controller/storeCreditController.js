@@ -17,7 +17,12 @@ const lookupVoucher = asyncHandler(async (req, res) => {
 // Owner-only below — same reasoning/gating as Credit/Debit: the full voucher list and
 // per-voucher history are a book-keeping view, not something a Cashier needs mid-sale.
 const getVouchers = asyncHandler(async (req, res) => {
-  const result = await listActiveVouchers(req.user.shopId);
+  const { page, pageSize } = req.query;
+  const result = await listActiveVouchers(
+    req.user.shopId,
+    page ? parseInt(page, 10) : 1,
+    pageSize ? parseInt(pageSize, 10) : 20
+  );
   res.send(result);
 });
 

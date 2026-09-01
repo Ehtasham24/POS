@@ -6,19 +6,31 @@ import { EmptyState, SkeletonCards } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiGet } from "utils/api";
+import Pagination from "components/Pagination";
+
+const PAGE_SIZE = 24; // multiple of the 3/2/1-col card grid so a full page never ends mid-row
 
 export default function ContactsPage() {
   const toast = useToast();
   const { t } = useLanguage();
   const [contacts, setContacts] = useState([]);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingContact, setEditingContact] = useState(null);
 
-  const fetchContacts = async () => {
+  const fetchContacts = async (pageToLoad = 1) => {
     try {
-      setContacts(await apiGet("/api/contacts"));
+      const params = new URLSearchParams({ page: pageToLoad, pageSize: PAGE_SIZE });
+      if (filter !== "all") params.set("type", filter);
+      const result = await apiGet(`/api/contacts?${params.toString()}`);
+      setContacts(result.contacts);
+      setTotalCount(result.totalCount);
+      setTotalPages(result.totalPages);
+      setPage(result.page);
     } catch (error) {
       console.error("Error fetching contacts:", error);
       toast.error("Couldn't load contacts — check your connection and try again.");
@@ -27,10 +39,11 @@ export default function ContactsPage() {
     }
   };
 
+  // Switching the vendor/customer/all filter starts back at page 1.
   useEffect(() => {
-    fetchContacts();
+    fetchContacts(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [filter]);
 
   const openAdd = () => {
     setEditingContact(null);
@@ -41,12 +54,6 @@ export default function ContactsPage() {
     setEditingContact(contact);
     setIsModalOpen(true);
   };
-
-  const filteredContacts = contacts.filter((contact) => {
-    if (filter === "vendor") return contact.is_vendor;
-    if (filter === "customer") return contact.is_customer;
-    return true;
-  });
 
   return (
     <>
@@ -85,11 +92,11 @@ export default function ContactsPage() {
 
         {loading ? (
           <SkeletonCards />
-        ) : filteredContacts.length === 0 ? (
+        ) : contacts.length === 0 ? (
           <EmptyState icon={HiOutlineUserGroup} title={t("contacts.empty")} />
         ) : (
           <div className="grid grid-cols-3 gap-4 md:grid-cols-2 sm:grid-cols-1">
-            {filteredContacts.map((contact) => (
+            {contacts.map((contact) => (
               <div
                 key={contact.id}
                 className="rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800"
@@ -133,13 +140,22 @@ export default function ContactsPage() {
             ))}
           </div>
         )}
+
+        {!loading && totalCount > 0 && (
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-3">
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              {totalCount.toLocaleString()} contact{totalCount === 1 ? "" : "s"} · Page {page} of {totalPages}
+            </span>
+            {totalPages > 1 && <Pagination page={page} totalPages={totalPages} onPageChange={fetchContacts} />}
+          </div>
+        )}
       </AppShell>
 
       <ContactModal
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
         contact={editingContact}
-        onSaved={fetchContacts}
+        onSaved={() => fetchContacts(page)}
       />
     </>
   );

@@ -1,6 +1,12 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { Helmet } from "react-helmet";
-import { HiOutlineMagnifyingGlass, HiOutlineBuildingStorefront, HiOutlineArrowLeft } from "react-icons/hi2";
+import {
+  HiOutlineMagnifyingGlass,
+  HiOutlineBuildingStorefront,
+  HiOutlineArrowLeft,
+  HiOutlinePlay,
+  HiOutlineStop,
+} from "react-icons/hi2";
 import {
   BarChart,
   Bar,
@@ -35,6 +41,15 @@ const TOOLTIP_STYLE = { backgroundColor: "#1f2937", border: "none", borderRadius
 const BAR_COLOR = "#4f46e5"; // primary-600 — one measure (bytes) across tables, not series
 const PAGE_SIZE = 10;
 
+// Live Monitor — off by default (an admin opts in, same reasoning StorageWarningBadge's
+// "invisible until it matters" gives a cost/attention budget): polling /api/admin/usage
+// every 3s means ~14 table-count queries per tick for as long as this stays open, which
+// is fine for one admin actively watching a dashboard but not something to run by default
+// on every page load. LIVE_WINDOW * LIVE_POLL_MS = a 3-minute rolling window, the same
+// "recent activity" horizon a CPU/memory monitor typically shows.
+const LIVE_POLL_MS = 3000;
+const LIVE_WINDOW = 60;
+
 function StatTile({ label, value, valueClassName }) {
   return (
     <div className="rounded-xl2 border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-700 dark:bg-gray-800">
@@ -58,13 +73,25 @@ export default function UsagePage() {
   const [egressSeries, setEgressSeries] = useState(null);
   const [egressLoading, setEgressLoading] = useState(false);
 
+  // Live Monitor — a rolling buffer of real snapshots (totalRows/approxBytes/egressBytes
+  // per shop), polled while liveMode is on. The chart itself is the DELTA between
+  // consecutive snapshots divided by the real elapsed time — genuine rows/sec and
+  // bytes/sec, computed from real numbers, the same way a CPU/memory monitor derives a
+  // load percentage from consecutive counter reads rather than a single instantaneous value.
+  const [liveMode, setLiveMode] = useState(false);
+  const [liveSamples, setLiveSamples] = useState([]);
+
+  const applyUsageResponse = (data) => {
+    setUsage(data.shops);
+    setTotalDbCapacityBytes(data.totalDbCapacityBytes);
+    setActualDatabaseSizeBytes(data.actualDatabaseSizeBytes);
+    return data;
+  };
+
   useEffect(() => {
     (async () => {
       try {
-        const data = await apiGet("/api/admin/usage");
-        setUsage(data.shops);
-        setTotalDbCapacityBytes(data.totalDbCapacityBytes);
-        setActualDatabaseSizeBytes(data.actualDatabaseSizeBytes);
+        await applyUsageResponse(await apiGet("/api/admin/usage"));
       } catch (err) {
         toast.error(err.message);
       } finally {
@@ -73,6 +100,28 @@ export default function UsagePage() {
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  useEffect(() => {
+    if (!liveMode) return;
+    const tick = async () => {
+      try {
+        const data = await apiGet("/api/admin/usage");
+        applyUsageResponse(data);
+        const snapshot = { t: Date.now(), shops: {} };
+        data.shops.forEach((s) => {
+          snapshot.shops[s.id] = { totalRows: s.totalRows, approxBytes: s.approxBytes, egressBytes: s.egressBytes };
+        });
+        setLiveSamples((prev) => [...prev, snapshot].slice(-LIVE_WINDOW));
+      } catch (err) {
+        // A single missed tick shouldn't toast-spam an admin watching a live chart — the
+        // next tick tries again in LIVE_POLL_MS regardless.
+        console.error("Live Monitor poll failed:", err);
+      }
+    };
+    tick();
+    const interval = setInterval(tick, LIVE_POLL_MS);
+    return () => clearInterval(interval);
+  }, [liveMode]);
 
   // ILIKE-equivalent (case-insensitive substring) done client-side — the full shop list is
   // already in hand from the one /api/admin/usage fetch above, so there's no reason to round
@@ -130,6 +179,42 @@ export default function UsagePage() {
   };
   const backToList = () => setSelectedId(null);
 
+  // Rows/sec + egress bytes/sec — the delta between consecutive real snapshots divided by
+  // real elapsed time, scoped to the selected shop when one is open, or summed across all
+  // shops on the list view. Clamped at 0: a negative delta (e.g. a void reducing row count,
+  // or the 30-day egress window itself rolling forward a day) reads as "no activity this
+  // tick," not a fabricated negative rate.
+  const liveActivitySeries = useMemo(() => {
+    if (liveSamples.length < 2) return [];
+    const shopId = selected?.id;
+    const totals = (snap) =>
+      shopId
+        ? snap.shops[shopId] || { totalRows: 0, approxBytes: 0, egressBytes: 0 }
+        : Object.values(snap.shops).reduce(
+            (sum, s) => ({
+              totalRows: sum.totalRows + s.totalRows,
+              approxBytes: sum.approxBytes + s.approxBytes,
+              egressBytes: sum.egressBytes + s.egressBytes,
+            }),
+            { totalRows: 0, approxBytes: 0, egressBytes: 0 }
+          );
+    const points = [];
+    for (let i = 1; i < liveSamples.length; i++) {
+      const prev = liveSamples[i - 1];
+      const curr = liveSamples[i];
+      const dtSec = (curr.t - prev.t) / 1000;
+      if (dtSec <= 0) continue;
+      const p = totals(prev);
+      const c = totals(curr);
+      points.push({
+        time: new Date(curr.t).toLocaleTimeString([], { minute: "2-digit", second: "2-digit" }),
+        rowsPerSec: Math.max(0, (c.totalRows - p.totalRows) / dtSec),
+        egressBytesPerSec: Math.max(0, (c.egressBytes - p.egressBytes) / dtSec),
+      });
+    }
+    return points;
+  }, [liveSamples, selected]);
+
   // Real, per-day egress for the selected shop's last 30 days — fetched only when a shop is
   // actually open in the detail view, not for every shop up front.
   useEffect(() => {
@@ -162,19 +247,49 @@ export default function UsagePage() {
       <AdminHeader />
 
       <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="mb-5">
-          <h1 className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">Resource Usage</h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            One shared database, no per-tenant infrastructure — usage here is measured
-            directly from each shop's own row counts, actual row sizes, and real response
-            bytes sent, never inferred.
-          </p>
-          {totalDbCapacityBytes != null && (
-            <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-              Every shop's "Quota Used" below is a share of the total DB capacity — change it
-              from the Shops tab's Platform Settings button.
+        <div className="mb-5 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h1 className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">Resource Usage</h1>
+            <p className="text-sm text-gray-500 dark:text-gray-400">
+              One shared database, no per-tenant infrastructure — usage here is measured
+              directly from each shop's own row counts, actual row sizes, and real response
+              bytes sent, never inferred.
             </p>
-          )}
+            {totalDbCapacityBytes != null && (
+              <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
+                Every shop's "Quota Used" below is a share of the total DB capacity — change it
+                from the Shops tab's Platform Settings button.
+              </p>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => {
+              if (liveMode) setLiveSamples([]);
+              setLiveMode((prev) => !prev);
+            }}
+            className={`flex shrink-0 items-center gap-2 rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors ${
+              liveMode
+                ? "bg-danger-600 text-white-A700 hover:bg-danger-700"
+                : "border border-surface-border text-gray-700 hover:bg-surface-muted dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
+            }`}
+          >
+            {liveMode ? (
+              <>
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-white-A700 opacity-75" />
+                  <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-white-A700" />
+                </span>
+                Stop Live Monitor
+                <HiOutlineStop className="text-base" />
+              </>
+            ) : (
+              <>
+                <HiOutlinePlay className="text-base" />
+                Start Live Monitor
+              </>
+            )}
+          </button>
         </div>
 
         {actualDatabaseSizeBytes != null && totalDbCapacityBytes != null && (
@@ -188,6 +303,67 @@ export default function UsagePage() {
               percent={(actualDatabaseSizeBytes / totalDbCapacityBytes) * 100}
               colorClass={quotaBarColorClass((actualDatabaseSizeBytes / totalDbCapacityBytes) * 100)}
             />
+          </div>
+        )}
+
+        {liveMode && (
+          <div className="mb-6 rounded-xl2 border border-danger-500/40 bg-white-A700 p-5 shadow-card dark:bg-gray-800">
+            <div className="mb-1 flex items-center gap-2">
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-danger-500 opacity-75" />
+                <span className="relative inline-flex h-2 w-2 rounded-full bg-danger-600" />
+              </span>
+              <p className="text-sm font-semibold text-gray-800 dark:text-gray-100">
+                Live Activity {selected ? `— ${selected.name}` : "— All Shops"}
+              </p>
+            </div>
+            <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
+              Polling every {LIVE_POLL_MS / 1000}s, {LIVE_WINDOW}-tick rolling window (~
+              {Math.round((LIVE_POLL_MS * LIVE_WINDOW) / 60000)} min) — each point is the real
+              change in row count / egress between two consecutive polls, divided by the real
+              time between them, the same way a CPU/memory monitor derives a load line from
+              consecutive counter reads.
+            </p>
+            {liveActivitySeries.length === 0 ? (
+              <p className="text-sm text-gray-500 dark:text-gray-400">Collecting the first sample…</p>
+            ) : (
+              <div className="grid grid-cols-2 gap-6 sm:grid-cols-1">
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Rows / sec
+                  </p>
+                  <ResponsiveContainer width="100%" height={120}>
+                    <LineChart data={liveActivitySeries} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+                      <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+                      <XAxis dataKey="time" stroke={AXIS_COLOR} fontSize={10} interval="preserveStartEnd" />
+                      <YAxis stroke={AXIS_COLOR} fontSize={10} width={32} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(value) => [`${value.toFixed(2)} rows/sec`, "Write rate"]}
+                      />
+                      <Line type="monotone" dataKey="rowsPerSec" stroke="#22c55e" strokeWidth={2} dot={false} isAnimationActive={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+                <div>
+                  <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                    Egress / sec
+                  </p>
+                  <ResponsiveContainer width="100%" height={120}>
+                    <LineChart data={liveActivitySeries} margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
+                      <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+                      <XAxis dataKey="time" stroke={AXIS_COLOR} fontSize={10} interval="preserveStartEnd" />
+                      <YAxis tickFormatter={(v) => formatBytes(v)} stroke={AXIS_COLOR} fontSize={10} width={48} />
+                      <Tooltip
+                        contentStyle={TOOLTIP_STYLE}
+                        formatter={(value) => [`${formatBytes(value)}/sec`, "Throughput"]}
+                      />
+                      <Line type="monotone" dataKey="egressBytesPerSec" stroke={BAR_COLOR} strokeWidth={2} dot={false} isAnimationActive={false} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -269,6 +445,7 @@ export default function UsagePage() {
                         <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Tier</th>
                         <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Approx Size</th>
                         <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Share of DB</th>
+                        <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Quota Allotted</th>
                         <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Quota Used</th>
                         <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Egress (30d)</th>
                       </tr>
@@ -291,11 +468,21 @@ export default function UsagePage() {
                             </td>
                             <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{formatBytes(u.approxBytes)}</td>
                             <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{share.toFixed(1)}%</td>
+                            <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                              {u.storage_quota_bytes ? formatBytes(u.storage_quota_bytes) : (
+                                <span className="text-gray-400 dark:text-gray-500">—</span>
+                              )}
+                            </td>
                             <td className="px-4 py-3">
                               {quotaPct === null ? (
                                 <span className="text-gray-400 dark:text-gray-500">No quota</span>
                               ) : (
-                                <span className={`font-semibold ${quotaTextColorClass(quotaPct)}`}>{quotaPct.toFixed(1)}%</span>
+                                <>
+                                  <span className={`font-semibold ${quotaTextColorClass(quotaPct)}`}>{quotaPct.toFixed(1)}%</span>
+                                  <p className="text-xs text-gray-400 dark:text-gray-500">
+                                    {formatBytes(u.estimatedRealBytes)} used
+                                  </p>
+                                </>
                               )}
                             </td>
                             <td className="px-4 py-3 text-gray-600 dark:text-gray-300">{formatBytes(u.egressBytes)}</td>

@@ -52,7 +52,19 @@ const createAdjustment = async (requestingUser, { productId, lotId, quantityChan
   }
 };
 
-const listAdjustments = async ({ productId, startDate, endDate, reasonCode } = {}, shopId) => {
+// Server-side paginated (page/pageSize -> LIMIT/OFFSET), same shape as
+// salesService.js's getBilledHistory ({ ..., totalCount, totalPages, page, pageSize }) —
+// this is an append-only log with no natural cap (unlike e.g. store-credit vouchers, which
+// self-limit to balance > 0), so it's the one Inventory-adjacent list that actually needs
+// real server-side pagination rather than a client-side slice over the full history.
+//
+// Pagination is opt-in, same reasoning as bankPaymentService.js's listIntents/
+// contactsService.js's getContacts: scripts/verify-shop-isolation.js (and potentially any
+// other future caller wanting "just everything") calls this route with no page param at
+// all and expects a plain array back — a JS default parameter (`page = 1`) would have
+// applied on every call regardless, since a destructured default fires on `undefined` too;
+// this checks for that explicitly before deciding which shape to return.
+const listAdjustments = async ({ productId, startDate, endDate, reasonCode, page, pageSize } = {}, shopId) => {
   const params = [shopId];
   const conditions = ["a.shop_id = $1"];
   if (productId) {
@@ -68,12 +80,12 @@ const listAdjustments = async ({ productId, startDate, endDate, reasonCode } = {
   }
   const where = `WHERE ${conditions.join(" AND ")}`;
 
-  // Full chain back to the original delivery when the adjustment is against a lot: the
-  // lot's own vendor/received date/received-by, not just the adjustment's own attribution —
-  // this is what actually answers "where did this specific unit come from, and who accepted
-  // it" for a discarded/damaged/expired item, not just "who discarded it."
-  const { rows } = await pool.query(
-    `SELECT a.*, p.productname, p.batch_tracked,
+  // Shared SELECT — full chain back to the original delivery when the adjustment is
+  // against a lot: the lot's own vendor/received date/received-by, not just the
+  // adjustment's own attribution — this is what actually answers "where did this specific
+  // unit come from, and who accepted it" for a discarded/damaged/expired item, not just
+  // "who discarded it."
+  const selectSql = `SELECT a.*, p.productname, p.batch_tracked,
             l.lot_code, l.received_at AS lot_received_at,
             u.display_name AS adjusted_by_name,
             vendor.name AS lot_vendor_name,
@@ -82,13 +94,32 @@ const listAdjustments = async ({ productId, startDate, endDate, reasonCode } = {
      JOIN products p ON p.id = a.product_id
      LEFT JOIN lots l ON l.id = a.lot_id
      LEFT JOIN contacts vendor ON vendor.id = l.vendor_id
-     LEFT JOIN users receiver ON receiver.id = l.received_by
-     LEFT JOIN users u ON u.id = a.adjusted_by
-     ${where}
-     ORDER BY a.adjusted_at DESC`,
+     LEFT JOIN users receiver ON receiver.id = l.received_by`;
+
+  if (page === undefined) {
+    const { rows } = await pool.query(`${selectSql} LEFT JOIN users u ON u.id = a.adjusted_by ${where} ORDER BY a.adjusted_at DESC`, params);
+    return rows;
+  }
+
+  const effectivePageSize = pageSize || 20;
+  const countResult = await pool.query(
+    `SELECT COUNT(*) AS total FROM stock_adjustments a ${where}`,
     params
   );
-  return rows;
+  const totalCount = parseInt(countResult.rows[0].total, 10) || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / effectivePageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const offset = (safePage - 1) * effectivePageSize;
+
+  const { rows } = await pool.query(
+    `${selectSql}
+     LEFT JOIN users u ON u.id = a.adjusted_by
+     ${where}
+     ORDER BY a.adjusted_at DESC
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, effectivePageSize, offset]
+  );
+  return { adjustments: rows, totalCount, totalPages, page: safePage, pageSize: effectivePageSize };
 };
 
 // Total units and cost impact of shrinkage (negative adjustments only — a positive

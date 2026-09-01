@@ -20,9 +20,12 @@ const GetBankPaymentIntent = asyncHandler(async (req, res) => {
 });
 
 const ListBankPaymentIntents = asyncHandler(async (req, res) => {
-  const { status, channel } = req.query;
-  const intents = await listIntents({ status, channel }, req.user.shopId);
-  res.send(intents);
+  const { status, channel, page, pageSize } = req.query;
+  const result = await listIntents(
+    { status, channel, page: page ? Number(page) : undefined, pageSize: pageSize ? Number(pageSize) : undefined },
+    req.user.shopId
+  );
+  res.send(result);
 });
 
 const ConfirmBankPaymentIntent = asyncHandler(async (req, res) => {

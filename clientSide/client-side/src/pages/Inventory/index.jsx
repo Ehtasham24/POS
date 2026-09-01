@@ -23,6 +23,48 @@ import { useLanguage } from "i18n/LanguageContext";
 import { useTimezone } from "timezone/TimezoneContext";
 import { apiGet, apiDelete } from "utils/api";
 import * as offlineCache from "offline/cache";
+import Pagination from "components/Pagination";
+import useDebounce from "hooks/useDebounce";
+
+const PAGE_SIZE = 20;
+
+// Mirrors the server-side filter+paginate logic in Controller/inventoryController.js —
+// only ever run against offlineCache.getInventory()'s result, which queries the local
+// mirror directly and always returns the old full/unfiltered `{ items, summary }` shape
+// regardless of what the online endpoint would return. Offline mode is already a reduced-
+// capability fallback; this keeps search/filter/pagination working there too instead of
+// silently reverting to an unpaginated full dump the moment the network drops.
+const filterAndPaginateLocally = (inventory, { search, categoryFilter, statusFilter, page }) => {
+  let items = inventory.items;
+  if (categoryFilter !== "all") items = items.filter((i) => String(i.category_id) === categoryFilter);
+  if (statusFilter !== "all") items = items.filter((i) => i.status === statusFilter);
+  if (search.trim()) {
+    const q = search.trim().toLowerCase();
+    items = items.filter((i) => i.productname.toLowerCase().includes(q));
+  }
+  const categories = [
+    ...new Map(inventory.items.filter((i) => i.category_id).map((i) => [i.category_id, i.category_name])),
+  ].map(([id, name]) => ({ id, name }));
+  const totalCount = items.length;
+  const totalPages = Math.max(1, Math.ceil(totalCount / PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pagedItems = items.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
+  return {
+    items: pagedItems,
+    summary: {
+      totalSkus: items.length,
+      totalStockValue: items.reduce((sum, i) => sum + Number(i.stock_value || 0), 0),
+      lowStockCount: items.filter((i) => i.status === "low_stock").length,
+      outOfStockCount: items.filter((i) => i.status === "out_of_stock").length,
+      lowStockThreshold: inventory.summary.lowStockThreshold,
+    },
+    categories,
+    totalCount,
+    totalPages,
+    page: safePage,
+    pageSize: PAGE_SIZE,
+  };
+};
 
 const statusStyles = {
   in_stock: "bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-500",
@@ -211,6 +253,8 @@ export default function InventoryPage() {
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [search, setSearch] = useState("");
+  const debouncedSearch = useDebounce(search, 300);
+  const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [updateItem, setUpdateItem] = useState(null);
@@ -218,21 +262,36 @@ export default function InventoryPage() {
   const [deleteItem, setDeleteItem] = useState(null);
   const [deleting, setDeleting] = useState(false);
 
-  const fetchInventory = async () => {
+  const fetchInventory = async (pageToLoad) => {
     try {
-      setInventory(
-        await offlineCache.withFallback(() => apiGet("/api/inventory"), offlineCache.getInventory)
+      const params = new URLSearchParams();
+      if (categoryFilter !== "all") params.set("category", categoryFilter);
+      if (statusFilter !== "all") params.set("status", statusFilter);
+      if (debouncedSearch.trim()) params.set("search", debouncedSearch.trim());
+      params.set("page", pageToLoad);
+      params.set("pageSize", PAGE_SIZE);
+      const result = await offlineCache.withFallback(
+        () => apiGet(`/api/inventory?${params.toString()}`),
+        () =>
+          offlineCache
+            .getInventory()
+            .then((full) =>
+              filterAndPaginateLocally(full, { search: debouncedSearch, categoryFilter, statusFilter, page: pageToLoad })
+            )
       );
+      setInventory(result);
+      setPage(result.page);
     } catch (error) {
       console.error("Error fetching inventory:", error);
       toast.error("Couldn't load inventory — check your connection and try again.");
     }
   };
 
+  // Any filter change starts back at page 1 — same reasoning as StockAdjustments.
   useEffect(() => {
-    fetchInventory();
+    fetchInventory(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [categoryFilter, statusFilter, debouncedSearch]);
 
   const handleConfirmDelete = async () => {
     if (!deleteItem) return;
@@ -241,7 +300,7 @@ export default function InventoryPage() {
       await apiDelete(`/product/${deleteItem.id}`);
       toast.success(`${deleteItem.productname} deleted successfully`);
       setDeleteItem(null);
-      fetchInventory();
+      fetchInventory(page);
     } catch (error) {
       console.error("Error deleting product:", error);
       toast.error(error.message);
@@ -274,33 +333,13 @@ export default function InventoryPage() {
     );
   }
 
-  const categories = [
-    ...new Map(
-      inventory.items
-        .filter((item) => item.category_id)
-        .map((item) => [item.category_id, item.category_name])
-    ),
-  ];
-
-  const filteredItems = inventory.items.filter((item) => {
-    if (categoryFilter !== "all" && String(item.category_id) !== categoryFilter) return false;
-    if (statusFilter !== "all" && item.status !== statusFilter) return false;
-    if (search.trim() && !item.productname.toLowerCase().includes(search.trim().toLowerCase())) {
-      return false;
-    }
-    return true;
-  });
-
-  // Derived from filteredItems, not inventory.summary (the server's unfiltered totals) —
-  // the stat cards used to always show every category's numbers even with a category (or
-  // status/search) filter active below them, which read as if the filter wasn't doing
-  // anything up top.
-  const summary = {
-    totalSkus: filteredItems.length,
-    totalStockValue: filteredItems.reduce((sum, item) => sum + Number(item.stock_value), 0),
-    lowStockCount: filteredItems.filter((item) => item.status === "low_stock").length,
-    outOfStockCount: filteredItems.filter((item) => item.status === "out_of_stock").length,
-  };
+  // Both now come straight from the server response — categories cover the FULL catalog
+  // (so the dropdown never loses an option just because its items aren't on this page),
+  // summary reflects the active filter (search/category/status), computed over the whole
+  // filtered set server-side, not just whatever page happens to be on screen.
+  const categories = inventory.categories.map((c) => [c.id, c.name]);
+  const filteredItems = inventory.items;
+  const summary = inventory.summary;
 
   const statCards = [
     {
@@ -478,6 +517,17 @@ export default function InventoryPage() {
             </tbody>
           </table>
         </div>
+        {inventory.totalCount > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-surface-border px-4 py-3 dark:border-gray-800">
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              {inventory.totalCount.toLocaleString()} item{inventory.totalCount === 1 ? "" : "s"} · Page {page} of{" "}
+              {inventory.totalPages}
+            </span>
+            {inventory.totalPages > 1 && (
+              <Pagination page={page} totalPages={inventory.totalPages} onPageChange={fetchInventory} />
+            )}
+          </div>
+        )}
       </div>
     </AppShell>
 
@@ -487,7 +537,7 @@ export default function InventoryPage() {
       product={editItem}
       onUpdated={() => {
         setEditItem(null);
-        fetchInventory();
+        fetchInventory(page);
       }}
     />
 
@@ -504,7 +554,7 @@ export default function InventoryPage() {
           quantity: updateItem.quantity,
         }
       }
-      onChanged={fetchInventory}
+      onChanged={() => fetchInventory(page)}
     />
 
     <AdjustStockModal
@@ -513,7 +563,7 @@ export default function InventoryPage() {
       product={adjustItem}
       onAdjusted={() => {
         setAdjustItem(null);
-        fetchInventory();
+        fetchInventory(page);
       }}
     />
 

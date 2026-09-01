@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { HiOutlineQrCode, HiOutlineExclamationTriangle } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { SkeletonRows, EmptyState, PaymentMediumSummary } from "components";
+import Pagination from "components/Pagination";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { useTimezone } from "timezone/TimezoneContext";
@@ -53,16 +54,41 @@ export default function BankPaymentsPage() {
   // confirmation stopping is otherwise invisible until someone notices a payment sitting
   // unconfirmed far longer than usual.
   const [forwarderStatus, setForwarderStatus] = useState(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
+  // Kept separate from `intents` (the current page's rows) — this needs the TRUE count
+  // across every page, not just what's currently on screen. Same unpaginated call shape
+  // PendingBankPaymentsBell.jsx already uses for its own live count (listIntents' opt-in
+  // pagination: no `page` param -> plain array), just run twice for both pending-ish
+  // statuses since a single call only filters one status at a time.
+  const [pendingCount, setPendingCount] = useState(0);
 
-  const fetchIntents = async () => {
+  const fetchIntents = async (pageToLoad = 1) => {
     try {
-      const data = await apiGet("/api/bank-payments/intents");
-      setIntents(data);
+      const result = await apiGet(`/api/bank-payments/intents?page=${pageToLoad}&pageSize=${PAGE_SIZE}`);
+      setIntents(result.intents);
+      setTotalCount(result.totalCount);
+      setTotalPages(result.totalPages);
+      setPage(result.page);
     } catch (error) {
       console.error("Error fetching bank payments:", error);
       toast.error("Couldn't load bank payments — check your connection and try again.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  const fetchPendingCount = async () => {
+    try {
+      const [awaiting, ambiguous] = await Promise.all([
+        apiGet("/api/bank-payments/intents?status=awaiting_payment"),
+        apiGet("/api/bank-payments/intents?status=ambiguous"),
+      ]);
+      setPendingCount(awaiting.length + ambiguous.length);
+    } catch (error) {
+      console.error("Error fetching pending count:", error);
     }
   };
 
@@ -75,7 +101,8 @@ export default function BankPaymentsPage() {
   };
 
   useEffect(() => {
-    fetchIntents();
+    fetchIntents(1);
+    fetchPendingCount();
     fetchForwarderStatus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -93,10 +120,10 @@ export default function BankPaymentsPage() {
     try {
       await apiPatch(`/api/bank-payments/intents/${id}/confirm`);
       toast.success(t("paymentMediums.paidToast"));
-      await fetchIntents();
+      await Promise.all([fetchIntents(page), fetchPendingCount()]);
     } catch (error) {
       toast.error(error.message || t("paymentMediums.confirmError"));
-      await fetchIntents(); // last_confirm_error is now set server-side — refresh to show it
+      await fetchIntents(page); // last_confirm_error is now set server-side — refresh to show it
     } finally {
       setActioningId(null);
     }
@@ -109,7 +136,7 @@ export default function BankPaymentsPage() {
     try {
       await apiPatch(`/api/bank-payments/intents/${id}/cancel`, { reason: reason || undefined });
       toast.success(t("paymentMediums.cancelledToast"));
-      await fetchIntents();
+      await Promise.all([fetchIntents(page), fetchPendingCount()]);
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -121,15 +148,13 @@ export default function BankPaymentsPage() {
     setActioningId(id);
     try {
       await apiPatch(`/api/bank-payments/intents/${id}/requeue`);
-      await fetchIntents();
+      await Promise.all([fetchIntents(page), fetchPendingCount()]);
     } catch (error) {
       toast.error(error.message);
     } finally {
       setActioningId(null);
     }
   };
-
-  const pendingCount = intents.filter((i) => i.status === "awaiting_payment" || i.status === "ambiguous").length;
 
   return (
     <AppShell title={t("paymentMediums.title")}>
@@ -313,6 +338,14 @@ export default function BankPaymentsPage() {
               )}
             </table>
           </div>
+          {totalCount > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-surface-border px-4 py-3 dark:border-gray-800">
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                {totalCount.toLocaleString()} payment{totalCount === 1 ? "" : "s"} · Page {page} of {totalPages}
+              </span>
+              {totalPages > 1 && <Pagination page={page} totalPages={totalPages} onPageChange={fetchIntents} />}
+            </div>
+          )}
         </div>
       </div>
 
@@ -324,7 +357,7 @@ export default function BankPaymentsPage() {
           // The modal polls the intent's own status while open — re-fetch the list on
           // close so a payment that got confirmed while re-viewing the QR is reflected
           // immediately here too, instead of waiting for some other trigger to refresh.
-          fetchIntents();
+          fetchIntents(page);
         }}
       />
     </AppShell>

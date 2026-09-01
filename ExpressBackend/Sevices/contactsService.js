@@ -1,16 +1,35 @@
 const { pool } = require("../Db");
 
-const getContacts = async (type, shopId) => {
-  let query = `SELECT * FROM contacts WHERE shop_id = $1`;
+// Pagination (page/pageSize -> LIMIT/OFFSET) is opt-in, same reasoning as
+// bankPaymentService.js's listIntents — several OTHER callers (ContactSelect.jsx's
+// credit/debit picker, the vendor dropdowns in addProductModel/updateProductModal,
+// contactModal) need the FULL list for a picker, not one page of it. Only
+// pages/Contacts/index.jsx (the actual management page) passes `page`, and gets the
+// paginated shape back; every other caller is unaffected.
+const getContacts = async (type, shopId, page, pageSize) => {
+  const conditions = ["shop_id = $1"];
   const params = [shopId];
-  if (type === "vendor") {
-    query += ` AND is_vendor = true`;
-  } else if (type === "customer") {
-    query += ` AND is_customer = true`;
+  if (type === "vendor") conditions.push("is_vendor = true");
+  else if (type === "customer") conditions.push("is_customer = true");
+  const where = `WHERE ${conditions.join(" AND ")}`;
+
+  if (page === undefined) {
+    const { rows } = await pool.query(`SELECT * FROM contacts ${where} ORDER BY name`, params);
+    return rows;
   }
-  query += ` ORDER BY name`;
-  const result = await pool.query(query, params);
-  return result.rows;
+
+  const effectivePageSize = pageSize || 20;
+  const countResult = await pool.query(`SELECT COUNT(*) AS total FROM contacts ${where}`, params);
+  const totalCount = parseInt(countResult.rows[0].total, 10) || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / effectivePageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const offset = (safePage - 1) * effectivePageSize;
+
+  const { rows } = await pool.query(
+    `SELECT * FROM contacts ${where} ORDER BY name LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, effectivePageSize, offset]
+  );
+  return { contacts: rows, totalCount, totalPages, page: safePage, pageSize: effectivePageSize };
 };
 
 const getContactById = async (id, shopId) => {

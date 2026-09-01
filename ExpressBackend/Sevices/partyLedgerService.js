@@ -30,8 +30,27 @@ const getBalance = async (contactId, direction, shopId) => {
 // INNER JOIN (not LEFT) is deliberate — party_balances only has a row for a (contact,
 // direction) pair once it has ≥1 transaction, so this naturally excludes contacts that
 // have never been charged/paid in this direction.
-const listParties = async (direction, shopId) => {
+//
+// Server-side paginated (page/pageSize -> LIMIT/OFFSET). totalBalance is a real aggregate
+// over every party in this direction, not just the current page — pages/CreditDebit's own
+// "total payable/receivable" figure needs the true sum regardless of which page is showing
+// (a client-side reduce over `rows` would silently undercount once paginated).
+const listParties = async (direction, shopId, page = 1, pageSize = DEFAULT_PAGE_SIZE) => {
   if (!VALID_DIRECTIONS.has(direction)) throw new ApiError(400, "Invalid direction");
+
+  const countResult = await pool.query(
+    `SELECT COUNT(*) AS total, COALESCE(SUM(pb.balance), 0) AS total_balance
+     FROM contacts c
+     JOIN party_balances pb ON pb.contact_id = c.id AND pb.direction = $1 AND pb.shop_id = $2
+     WHERE c.shop_id = $2`,
+    [direction, shopId]
+  );
+  const totalCount = parseInt(countResult.rows[0].total, 10) || 0;
+  const totalBalance = Number(countResult.rows[0].total_balance);
+  const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const offset = (safePage - 1) * pageSize;
+
   const { rows } = await pool.query(
     `SELECT c.id AS contact_id, c.name, c.phone,
             pb.balance, pb.total_charged, pb.total_paid,
@@ -39,10 +58,26 @@ const listParties = async (direction, shopId) => {
      FROM contacts c
      JOIN party_balances pb ON pb.contact_id = c.id AND pb.direction = $1 AND pb.shop_id = $2
      WHERE c.shop_id = $2
-     ORDER BY c.name`,
+     ORDER BY c.name
+     LIMIT $3 OFFSET $4`,
+    [direction, shopId, pageSize, offset]
+  );
+  return { parties: rows, totalCount, totalBalance, totalPages, page: safePage, pageSize };
+};
+
+// Every contact's balance in one direction, unbounded, id->balance only (no name/phone/
+// pagination) — deliberately separate from listParties above. LedgerTable's "Net Off"
+// action needs to look up a PAYABLE row's contact in the RECEIVABLE balances (or vice
+// versa) regardless of which page either list is currently showing; this stays a full,
+// cheap map so that cross-direction lookup can never silently miss a contact just because
+// they're not on the currently-loaded page of the other direction's list.
+const getBalanceMap = async (direction, shopId) => {
+  if (!VALID_DIRECTIONS.has(direction)) throw new ApiError(400, "Invalid direction");
+  const { rows } = await pool.query(
+    `SELECT contact_id, balance FROM party_balances WHERE direction = $1 AND shop_id = $2`,
     [direction, shopId]
   );
-  return rows;
+  return Object.fromEntries(rows.map((r) => [r.contact_id, Number(r.balance)]));
 };
 
 // Paginated transaction history for one party — the data behind the expandable row.
@@ -205,6 +240,7 @@ const netOffParty = async (contactId, amount, occurredOn, note, shopId) => {
 
 module.exports = {
   listParties,
+  getBalanceMap,
   getPartyTransactions,
   addTransaction,
   updateTransaction,

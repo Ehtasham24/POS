@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { HiOutlineReceiptRefund, HiOutlineChevronDown, HiOutlineChevronRight } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { SkeletonRows, EmptyState } from "components";
+import Pagination from "components/Pagination";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { useTimezone } from "timezone/TimezoneContext";
@@ -21,19 +22,34 @@ export default function StoreCreditPage() {
   const [vouchers, setVouchers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [expandedRefundId, setExpandedRefundId] = useState(null);
+  const [totalOutstanding, setTotalOutstanding] = useState(0);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
 
-  useEffect(() => {
-    apiGet("/api/store-credit/vouchers")
-      .then(setVouchers)
+  const fetchVouchers = (pageToLoad = 1) => {
+    apiGet(`/api/store-credit/vouchers?page=${pageToLoad}&pageSize=${PAGE_SIZE}`)
+      .then((result) => {
+        setVouchers(result.vouchers);
+        // A real liability total across every voucher, not just this page — see
+        // storeCreditService.js's own comment on why this comes from the server now.
+        setTotalOutstanding(result.totalOutstanding);
+        setTotalCount(result.totalCount);
+        setTotalPages(result.totalPages);
+        setPage(result.page);
+      })
       .catch((error) => {
         console.error("Error fetching store credit vouchers:", error);
         toast.error("Couldn't load store credit — check your connection and try again.");
       })
       .finally(() => setLoading(false));
+  };
+
+  useEffect(() => {
+    fetchVouchers(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-
-  const totalOutstanding = vouchers.reduce((sum, v) => sum + Number(v.balance), 0);
 
   return (
     <AppShell title={t("storeCredit.title")}>
@@ -125,6 +141,14 @@ export default function StoreCreditPage() {
               )}
             </table>
           </div>
+          {totalCount > 0 && (
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t border-surface-border px-4 py-3 dark:border-gray-800">
+              <span className="text-sm text-gray-500 dark:text-gray-400">
+                {totalCount.toLocaleString()} voucher{totalCount === 1 ? "" : "s"} · Page {page} of {totalPages}
+              </span>
+              {totalPages > 1 && <Pagination page={page} totalPages={totalPages} onPageChange={fetchVouchers} />}
+            </div>
+          )}
         </div>
       </div>
     </AppShell>

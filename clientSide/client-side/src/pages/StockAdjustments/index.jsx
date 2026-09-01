@@ -8,6 +8,7 @@ import {
 } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { EmptyState, SkeletonRows } from "components";
+import Pagination from "components/Pagination";
 import { useLanguage } from "i18n/LanguageContext";
 import { useTimezone } from "timezone/TimezoneContext";
 import { useToast } from "components/Toast/ToastContext";
@@ -50,28 +51,39 @@ export default function StockAdjustmentsPage() {
   // anything about the Report it might have been reached from.
   const [searchParams] = useSearchParams();
   const [adjustments, setAdjustments] = useState(null);
+  const [totalCount, setTotalCount] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [page, setPage] = useState(1);
+  const PAGE_SIZE = 20;
   const [reasonFilter, setReasonFilter] = useState(() => searchParams.get("reasonCode") || "all");
   const [startDate, setStartDate] = useState(() => toDateOnly(searchParams.get("startDate")));
   const [endDate, setEndDate] = useState(() => toDateOnly(searchParams.get("endDate")));
   const [productFilter, setProductFilter] = useState(() => searchParams.get("productId") || "");
   const [expandedId, setExpandedId] = useState(null);
 
-  const fetchAdjustments = async () => {
+  const fetchAdjustments = async (pageToLoad) => {
     try {
       const params = new URLSearchParams();
       if (reasonFilter !== "all") params.set("reasonCode", reasonFilter);
       if (startDate) params.set("startDate", startDate);
       if (endDate) params.set("endDate", endDate);
       if (productFilter) params.set("productId", productFilter);
-      const query = params.toString();
-      setAdjustments(await apiGet(`/api/stock-adjustments${query ? `?${query}` : ""}`));
+      params.set("page", pageToLoad);
+      params.set("pageSize", PAGE_SIZE);
+      const result = await apiGet(`/api/stock-adjustments?${params.toString()}`);
+      setAdjustments(result.adjustments);
+      setTotalCount(result.totalCount);
+      setTotalPages(result.totalPages);
+      setPage(result.page);
     } catch (error) {
       toast.error(error.message || "Couldn't load stock adjustments.");
     }
   };
 
+  // Any filter change starts back at page 1 — a stale page number from a much longer
+  // unfiltered list could otherwise land past the end of a newly-narrowed result set.
   useEffect(() => {
-    fetchAdjustments();
+    fetchAdjustments(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reasonFilter, startDate, endDate, productFilter]);
 
@@ -266,6 +278,16 @@ export default function StockAdjustmentsPage() {
             )}
           </table>
         </div>
+        {totalCount > 0 && (
+          <div className="flex flex-wrap items-center justify-between gap-3 border-t border-surface-border px-4 py-3 dark:border-gray-800">
+            <span className="text-sm text-gray-500 dark:text-gray-400">
+              {totalCount.toLocaleString()} adjustment{totalCount === 1 ? "" : "s"} · Page {page} of {totalPages}
+            </span>
+            {totalPages > 1 && (
+              <Pagination page={page} totalPages={totalPages} onPageChange={fetchAdjustments} />
+            )}
+          </div>
+        )}
       </div>
     </AppShell>
   );

@@ -12,9 +12,19 @@ const CreateStockAdjustment = asyncHandler(async (req, res) => {
 });
 
 const ListStockAdjustments = asyncHandler(async (req, res) => {
-  const { productId, startDate, endDate, reasonCode } = req.query;
-  const adjustments = await listAdjustments({ productId, startDate, endDate, reasonCode }, req.user.shopId);
-  res.send(adjustments);
+  const { productId, startDate, endDate, reasonCode, page, pageSize } = req.query;
+  const result = await listAdjustments(
+    {
+      productId,
+      startDate,
+      endDate,
+      reasonCode,
+      page: page ? Number(page) : undefined,
+      pageSize: pageSize ? Number(pageSize) : undefined,
+    },
+    req.user.shopId
+  );
+  res.send(result);
 });
 
 const GetShrinkageSummary = asyncHandler(async (req, res) => {

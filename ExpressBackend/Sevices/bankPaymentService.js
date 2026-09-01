@@ -182,7 +182,14 @@ const recordGatewayResponse = async (id, code) => {
 // filtered to status='awaiting_payment' for the common case. channel is optional too (e.g.
 // a future JazzCash-only view) — omitted, every channel is returned, same as before this
 // param existed.
-const listIntents = async ({ status, channel } = {}, shopId) => {
+//
+// Pagination (page/pageSize -> LIMIT/OFFSET) is opt-in: PendingBankPaymentsBell.jsx polls
+// this same endpoint for a true live COUNT of pending intents (no page param), and a
+// LIMIT'd fetch would silently under-report that count. Passing `page` at all switches this
+// to the paginated shape ({ intents, totalCount, totalPages, page, pageSize }) — that's what
+// BankPayments/index.jsx (the actual history table) does; the bell keeps calling it exactly
+// as before and gets the plain array back unchanged.
+const listIntents = async ({ status, channel, page, pageSize } = {}, shopId) => {
   const params = [shopId];
   const conditions = ["shop_id = $1"];
   if (status) {
@@ -193,9 +200,30 @@ const listIntents = async ({ status, channel } = {}, shopId) => {
     params.push(channel);
     conditions.push(`channel = $${params.length}`);
   }
-  const query = `SELECT * FROM bank_payment_intents WHERE ${conditions.join(" AND ")} ORDER BY created_at DESC`;
-  const { rows } = await pool.query(query, params);
-  return rows.map(withReference);
+  const where = `WHERE ${conditions.join(" AND ")}`;
+
+  if (page === undefined) {
+    const { rows } = await pool.query(
+      `SELECT * FROM bank_payment_intents ${where} ORDER BY created_at DESC`,
+      params
+    );
+    return rows.map(withReference);
+  }
+
+  const effectivePageSize = pageSize || 20;
+  const countResult = await pool.query(`SELECT COUNT(*) AS total FROM bank_payment_intents ${where}`, params);
+  const totalCount = parseInt(countResult.rows[0].total, 10) || 0;
+  const totalPages = Math.max(1, Math.ceil(totalCount / effectivePageSize));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const offset = (safePage - 1) * effectivePageSize;
+
+  const { rows } = await pool.query(
+    `SELECT * FROM bank_payment_intents ${where}
+     ORDER BY created_at DESC
+     LIMIT $${params.length + 1} OFFSET $${params.length + 2}`,
+    [...params, effectivePageSize, offset]
+  );
+  return { intents: rows.map(withReference), totalCount, totalPages, page: safePage, pageSize: effectivePageSize };
 };
 
 // Turns a pending intent into a real sale — the ONLY place that happens for a bank-
