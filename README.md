@@ -15,6 +15,7 @@ One codebase runs many independent shops on a shared database, each shop fully i
 - [Technology Stack](#technology-stack)
 - [Architecture at a Glance](#architecture-at-a-glance)
 - [Getting Started](#getting-started)
+- [Production Deployment](#production-deployment)
 - [Project Structure](#project-structure)
 
 ---
@@ -74,7 +75,7 @@ Date-ranged sales reports with revenue/profit trend charts, payment-medium break
 A service-worker-backed PWA with a local IndexedDB mirror of live data. When connectivity drops, sales queue locally and the UI keeps working; when it's restored, queued sales replay against the server in the original order and the local mirror refreshes — all automatic, no user action required.
 
 ### Multi-Tenant Platform & Superadmin Console
-A dedicated Superadmin role — entirely separate from any shop, with its own login portal — can create and manage shops, assign subscription tiers, set per-shop storage quotas, and review platform-wide activity. Every shop's data is scoped and isolated at the query level, verified by an automated cross-shop isolation test suite.
+A dedicated Superadmin role — entirely separate from any shop, with its own login portal — can create and manage shops, assign subscription tiers, set per-shop storage quotas, and review platform-wide activity. Every shop's data is isolated twice: by the application's own queries, and by PostgreSQL row-level security underneath them. An automated cross-shop test suite verifies both.
 
 ### Storage Usage Monitoring & Estimator
 - **Usage dashboard** — real per-shop database size, storage quota consumption, and egress (bandwidth) trends, with an optional live monitor that polls and graphs actual rows/second and bytes/second, the same way a system resource monitor would.
@@ -84,7 +85,7 @@ A dedicated Superadmin role — entirely separate from any shop, with its own lo
 Three roles — **Superadmin** (platform-wide), **Owner** (full shop access), and **Cashier** (day-to-day operations) — with every route, feature, and action gated server-side, not just hidden in the UI.
 
 ### Security
-JWT-based session auth, bcrypt-hashed passwords, an admin-reviewed password-recovery flow that explicitly excludes the platform Superadmin account from self-service reset, and a fully separate login portal for platform admins versus shop staff.
+JWT-based session auth, bcrypt-hashed passwords, an admin-reviewed password-recovery flow that explicitly excludes the platform Superadmin account from self-service reset, and a fully separate login portal for platform admins versus shop staff. Shop data is isolated both in the application and by database row-level security. Each shop's bank-SMS forwarder authenticates with its own secret, so a payment alert can only ever confirm that shop's own sales.
 
 ### Localization
 Complete English and Urdu translations across the entire application, switchable per shop.
@@ -118,7 +119,7 @@ Every feature gate lives in one registry, so upgrading a shop's tier unlocks the
 
 ## Architecture at a Glance
 
-- **Shared-schema multi-tenancy** — every table carries a `shop_id`; every query is scoped by it, verified by an automated shop-isolation test suite rather than assumed.
+- **Shared-schema multi-tenancy, enforced twice** — every table carries a `shop_id` and every query filters by it; independently, PostgreSQL **row-level security** pins each request's database transaction to its own shop, so even a query that forgot its filter can only ever see that shop's rows. The shop always comes from the signed session, never from anything the client sends. An automated isolation suite (`ExpressBackend/scripts/verify-shop-isolation.js`) tests both layers.
 - **Service-layer pattern** — HTTP concerns (Controllers) are kept separate from business logic (Services), which own their own transactions (`BEGIN`/`COMMIT`/`ROLLBACK` with row-level locking wherever two requests could race).
 - **Derived, never stored, balances** — every running total (party balances, store-credit balances, stock quantities) is computed from its source transactions via SQL, so it structurally cannot drift out of sync.
 - **Offline-first frontend** — a local read-mirror plus an outbox queue for writes, reconciled automatically on reconnect.
@@ -145,10 +146,40 @@ npm install
 npm start
 ```
 
+## Production Deployment
+
+```
+Internet ──HTTPS:443──▶ nginx ──HTTP──▶ Express (127.0.0.1:4000) ──▶ PostgreSQL (Supabase)
+```
+
+**Reverse proxy.** `deploy/nginx/pos.conf` is a ready-to-use nginx site config. nginx handles the Let's Encrypt certificate, gzip, security headers, rate limits on login/password-reset/webhooks, a 2 MB request-size cap, and year-long caching of the content-hashed frontend bundle. Setup steps are in the file's header. Only ports 80 and 443 should be public. If ports 4000/4001 are reachable directly, clients can bypass the proxy and its rate limits.
+
+**Backend environment** behind the proxy:
+
+| Variable | Value | Why |
+|---|---|---|
+| `TRUST_PROXY` | `loopback` | Trust nginx's `X-Forwarded-*` headers. Without it, the session cookie loses its `Secure` flag and logins don't stick. |
+| `APP_HTTPS` | `false` | TLS ends at nginx, so Express serves plain HTTP. |
+| `CORS_ORIGIN` | `https://your-domain` | Only needed if the frontend is served from a different origin. |
+| `DB_TENANT_RLS` | *(leave unset)* | Row-level security is on by default. `off` exists only as an emergency switch. |
+
+**Database migrations** live in `ExpressBackend/migrations/` and are idempotent. Apply them in numeric order. `028_row_level_security.sql` creates the `pos_app` role that shop requests run as. It also closes Supabase's public Data API (`anon` role) on every app table.
+
+**Latency.** Row-level security adds two short round trips to each standalone query. Host the backend in the same region as the database (for example, Supabase `ap-south-1` with the server in Mumbai), where that adds about 1 ms per query.
+
+**Verify** after every deploy or schema change:
+```bash
+cd ExpressBackend
+node scripts/verify-shop-isolation.js   # backend must be running
+```
+
+**Adding a new shop-owned table:** give it `shop_id NOT NULL` with no default, then add it to the `tenant_tables` list in a new migration modelled on `028`. Until you do, the app gets "permission denied" on that table. It fails loudly instead of quietly exposing every shop's rows.
+
 ## Project Structure
 
 ```
 POS/
+├── deploy/nginx/            # Production reverse-proxy config
 ├── ExpressBackend/          # Node/Express API
 │   ├── Controller/          # HTTP-layer request/response handling
 │   ├── Sevices/              # Business logic, transactions, and data access

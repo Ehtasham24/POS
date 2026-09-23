@@ -1,4 +1,4 @@
-const { pool } = require("../Db");
+const { pool, systemPool } = require("../Db");
 const { withCache } = require("../utils/cache");
 const { USAGE_TABLES } = require("../config/usageTables");
 const { getTotalDbCapacityBytes } = require("./platformSettingsService");
@@ -39,12 +39,14 @@ const getShopStorageBytes = async (shopId) => {
 // Same measurement as getShopStorageBytes, just with no WHERE clause — every shop's content
 // summed together. Used only as the denominator for turning one shop's row-content share
 // into a share of the REAL, index-inclusive database size (see estimatedRealBytes below);
-// never shown on its own.
+// never shown on its own. systemPool, since it genuinely spans every shop — under row-level
+// security (Db.js) the tenant pool would silently sum only this shop's rows, making the shop
+// look like it owns the entire database.
 const globalApproxBytesCacheKey = "storage-usage:global-total";
 const getAllShopsApproxBytesTotal = async () => {
   let totalBytes = 0;
   for (const table of USAGE_TABLES) {
-    const { rows } = await pool.query(
+    const { rows } = await systemPool.query(
       `SELECT COALESCE(SUM(pg_column_size(t.*)), 0)::bigint AS approx_bytes FROM ${table} t`
     );
     totalBytes += Number(rows[0].approx_bytes);

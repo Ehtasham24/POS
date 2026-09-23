@@ -1,4 +1,4 @@
-const { pool } = require("../Db");
+const { pool, systemPool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { hashPassword } = require("../utils/auth");
 
@@ -55,7 +55,9 @@ const createUser = async ({ username, password, displayName, role }, shopId) => 
     }
   }
 
-  const existing = await pool.query("SELECT 1 FROM users WHERE username = $1", [username]);
+  // systemPool: this check has to see every shop's usernames, not just this shop's — under
+  // row-level security (Db.js) the tenant pool only sees this shop's own users.
+  const existing = await systemPool.query("SELECT 1 FROM users WHERE username = $1", [username]);
   if (existing.rows.length) throw new ApiError(409, "That username is already taken");
 
   const passwordHash = await hashPassword(password);

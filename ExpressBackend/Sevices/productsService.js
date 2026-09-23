@@ -1,6 +1,7 @@
 const { pool } = require("../Db");
 const { createLot } = require("./lotService");
 const ApiError = require("../utils/ApiError");
+const { assertOwnedByShop } = require("../utils/shopOwnership");
 const { hasFeature } = require("../config/features");
 
 const getItems = async (shopId) => {
@@ -44,6 +45,10 @@ const getItemByName = async (name, shopId) => {
 };
 
 const postItems = async (name, buying_price, quantity, category_id, batchOptions = {}, shopId) => {
+  // Before the try below, which rewraps anything it catches as a generic 500. Product
+  // listings JOIN categories on this id, so another shop's category id would put that
+  // shop's category name on this shop's product.
+  await assertOwnedByShop(pool, shopId, { categories: category_id });
   try {
     const isBatch = !!batchOptions.batch_tracked;
 
@@ -101,6 +106,9 @@ const updateItems = async (name, price, category_id, id, shopId, { quantity, sho
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    // Inside the transaction (the catch below passes ApiErrors through unchanged). Product
+    // listings JOIN categories on this id, so it must be this shop's own category.
+    await assertOwnedByShop(client, shopId, { categories: category_id });
     const productResult = await client.query(
       `SELECT batch_tracked FROM products WHERE id=$1 AND shop_id=$2 FOR UPDATE`,
       [id, shopId]
@@ -153,6 +161,7 @@ const updateItemByName = async (name, buying_price, quantity, category_id, shopI
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+    await assertOwnedByShop(client, shopId, { categories: category_id });
     const productResult = await client.query(
       `SELECT batch_tracked FROM products WHERE productname = $1 AND shop_id = $2 FOR UPDATE`,
       [name, shopId]

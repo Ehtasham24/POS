@@ -1,4 +1,4 @@
-const { pool } = require("../Db");
+const { systemPool } = require("../Db");
 
 // The REAL database size — Postgres's own accounting (data pages + indexes + TOAST +
 // padding), not an estimate. This is what actually determines whether a Supabase plan's
@@ -9,8 +9,10 @@ const { pool } = require("../Db");
 // itself doesn't include index size or storage overhead. Use this one for "how close are we
 // to the plan's actual limit"; use the per-shop estimates for "which shop is using how much
 // relative to the others."
+//
+// systemPool: a whole-database, platform-level number, not any one shop's data.
 const getActualDatabaseSizeBytes = async () => {
-  const { rows } = await pool.query(`SELECT pg_database_size(current_database())::bigint AS bytes`);
+  const { rows } = await systemPool.query(`SELECT pg_database_size(current_database())::bigint AS bytes`);
   return Number(rows[0].bytes);
 };
 

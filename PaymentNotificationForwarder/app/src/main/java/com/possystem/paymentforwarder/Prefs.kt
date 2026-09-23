@@ -6,8 +6,9 @@ import android.content.Context
 // the POS backend's LAN address on its dedicated plain-HTTP webhook port (see
 // ExpressBackend/Server.js's comment on why that port exists — a phone can't be expected
 // to trust the app's own HTTPS dev certificate), e.g. "http://192.168.1.5:4001". secret
-// must match ExpressBackend/Development.env's NOTIFICATION_FORWARDER_SECRET exactly —
-// typed in once here, checked by Middleware/requireForwarderSecret.js on every request.
+// is this shop's own forwarder secret (POS -> Settings -> Bank SMS Forwarder -> Generate
+// secret), typed in once here and checked by Middleware/requireForwarderSecret.js on every
+// request — it's also how the server knows which shop this phone belongs to.
 class Prefs(context: Context) {
     private val prefs = context.getSharedPreferences("forwarder_prefs", Context.MODE_PRIVATE)
 

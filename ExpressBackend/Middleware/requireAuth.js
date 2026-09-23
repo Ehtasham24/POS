@@ -1,6 +1,7 @@
 const ApiError = require("../utils/ApiError");
 const { verifyToken, COOKIE_NAME } = require("../utils/auth");
 const { findUserById } = require("../Sevices/authService");
+const { runAsTenant } = require("../Db");
 
 // Mounted per-router (router.use(requireAuth) inside each protected router file — see
 // categoriesRoutes.js etc.), NOT globally in Server.js. This app's routers don't share a
@@ -69,6 +70,12 @@ async function requireAuth(req, res, next) {
   // report) — requireFeature/tier-gated routes are never mounted on any admin route, so
   // nothing downstream ever needs req.shop to be non-null for that role.
   req.shop = user.shopId ? { id: user.shopId, tier: user.shopTier } : null;
+
+  // Everything downstream of here (the route's own handler and every query it makes) runs
+  // with the database pinned to this shop — see Db.js. The shop id comes from the DB row
+  // just read above, never from anything the client sent. A superadmin has no shop, so
+  // their requests run outside any tenant context, same as before.
+  if (req.shop) return runAsTenant(req.shop.id, next);
   next();
 }
 

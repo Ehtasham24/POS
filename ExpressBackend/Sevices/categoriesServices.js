@@ -51,7 +51,10 @@ const getProductsForCategory = async (id, shopId) => {
       JOIN "categories" c ON p."category_id" = c.id AND c.shop_id = $2
       LEFT JOIN "lots" l ON l.product_id = p.id AND l.qty_remaining > 0
       WHERE c.id = $1 AND p.shop_id = $2
-      GROUP BY p.id;
+      GROUP BY p.id
+      -- Explicit, or the order is whatever the query plan happens to produce — and that
+      -- changes with the plan (it did the moment row-level security was added).
+      ORDER BY p.id;
     `;
     const result = await pool.query(query, [id, shopId]);
     return result;

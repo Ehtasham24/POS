@@ -345,9 +345,8 @@ const cancelIntent = async (id, requestingUser, reason) => {
 // than any of them being auto-confirmed. `id -> candidates` lets each intent record only
 // the specific conflicting notification(s)/intent(s) relevant to it. No shopId — same
 // reasoning as confirmIntent's automated path: matchingService.js finds these candidate
-// ids itself (see its own file for the current single-forwarder limitation), and each
-// UPDATE here acts only on an id it already found, not a name/list a shop boundary needs
-// to gate.
+// ids itself, already restricted to the forwarder's own shop, and each UPDATE here acts
+// only on an id it already found, not a name/list a shop boundary needs to gate.
 const flagAmbiguous = async (candidatesByIntentId) => {
   const ids = Object.keys(candidatesByIntentId);
   if (ids.length === 0) return [];

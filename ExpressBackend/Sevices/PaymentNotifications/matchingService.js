@@ -15,7 +15,11 @@ const MATCH_WINDOW_HOURS = 72;
 // window → zero matches does nothing, exactly one auto-confirms via the SAME
 // confirmIntent() the manual "Mark as Paid" button calls, more than one flips every
 // intent involved to 'ambiguous' and never guesses.
-const handleIncomingNotification = async ({ packageName, title, text, postedAt }) => {
+//
+// shopId is the forwarder's own shop (from its per-shop secret, requireForwarderSecret.js) —
+// a notification received on one shop's phone is only ever matched against that shop's own
+// pending payments, never another shop's that happens to be waiting on the same amount.
+const handleIncomingNotification = async ({ packageName, title, text, postedAt }, shopId) => {
   const fullText = [title, text].filter(Boolean).join(" — ");
   const parser = getParser(packageName);
 
@@ -36,11 +40,12 @@ const handleIncomingNotification = async ({ packageName, title, text, postedAt }
   const { rows: candidates } = await pool.query(
     `SELECT * FROM bank_payment_intents
      WHERE status = 'awaiting_payment'
+       AND shop_id = $4
        AND amount = $1
        AND created_at <= $2
        AND created_at >= $2::timestamp - ($3 || ' hours')::interval
      ORDER BY created_at ASC`,
-    [parsed.amount, receivedAt, MATCH_WINDOW_HOURS]
+    [parsed.amount, receivedAt, MATCH_WINDOW_HOURS, shopId]
   );
 
   if (candidates.length === 0) {

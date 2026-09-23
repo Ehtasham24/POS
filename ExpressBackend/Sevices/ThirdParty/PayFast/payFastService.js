@@ -92,7 +92,14 @@ const pfValidIP = async (req) => {
   ];
 
   let validIps = [];
-  const pfIp = req.headers["x-forwarded-for"] || req.connection.remoteAddress;
+  // req.ip, not the raw X-Forwarded-For header — any client can send that header itself
+  // with any IP it likes, which made this allow-list trivially bypassable. req.ip only
+  // honors X-Forwarded-For when the request really came through a trusted proxy (server.js's
+  // TRUST_PROXY), and is the socket's own address otherwise. A dual-stack socket reports an
+  // IPv4 client as "::ffff:a.b.c.d", which would never equal the plain IPv4 addresses
+  // ipLookup returns — hence the prefix strip. (Behind a proxy or tunnel without
+  // TRUST_PROXY, req.ip is the proxy's address and the check correctly fails.)
+  const pfIp = (req.ip || "").replace(/^::ffff:/, "");
 
   try {
     for (let key in validHosts) {

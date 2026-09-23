@@ -30,8 +30,13 @@ fix.
      machine's current LAN IP; find it again anytime with `ipconfig` on the PC running the
      POS backend — look for the "Wi-Fi" adapter's IPv4 address). Port **4001**, not 4000 —
      see `ExpressBackend/Server.js`'s comment on why the phone talks to a separate plain-HTTP
-     port instead of the app's own HTTPS port.
-   - **Secret**: copy `NOTIFICATION_FORWARDER_SECRET` exactly from `ExpressBackend/Development.env`.
+     port instead of the app's own HTTPS port. If the POS runs behind the nginx reverse
+     proxy with a real domain (`deploy/nginx/pos.conf`), use `https://<your-domain>` instead.
+   - **Secret**: each shop has its own. In the POS, log in as that shop's Owner → **Settings
+     → Bank SMS Forwarder → Generate secret**, then copy it here exactly. It's shown only
+     once; generating a new one disconnects the phone until the new one is entered. The
+     secret is also how the server knows which shop this phone belongs to — a bank SMS is
+     only ever matched against that shop's own pending payments.
    - Tap **Save Settings**.
 4. Tap **Grant Notification Access** → find "Payment Notification Forwarder" in the list
    Android opens → turn it on. Come back to the app; the status line should flip to

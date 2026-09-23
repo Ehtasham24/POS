@@ -17,6 +17,7 @@ import { printTestReceipt } from "utils/printReceipt";
 import useThermalPrinterStatus from "hooks/useThermalPrinterStatus";
 import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
 import UsersCard from "./UsersCard";
+import ForwarderCard from "./ForwarderCard";
 import { useFeature } from "auth/useFeature";
 
 const updateSetting = (key, value) => apiPut("/api/settings", { key, value: String(value) });
@@ -135,6 +136,8 @@ export default function SettingsPage() {
   // tier system: on a downgraded shop that request now 403s, surfacing as a generic
   // "This feature isn't available on your plan" toast with no obvious cause on this page.
   const hasMultiUser = useFeature("multiUser");
+  // Same reason as hasMultiUser: the forwarder-secret endpoints are bankTransfer (Smart+).
+  const hasBankTransfer = useFeature("bankTransfer");
   const [settings, setSettings] = useState(null);
   const [threshold, setThreshold] = useState("10");
   const [savingThreshold, setSavingThreshold] = useState(false);
@@ -384,6 +387,8 @@ export default function SettingsPage() {
         <PrinterCard />
 
         {hasMultiUser && <UsersCard />}
+
+        {hasBankTransfer && <ForwarderCard />}
 
         <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
           <div className="flex items-start gap-4">

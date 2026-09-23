@@ -18,6 +18,16 @@ reminded.
     cached or stored as a mutable column.
   - i18n strings go through `src/i18n/translations.js` + `useLanguage()`/`t()`,
     both English and Urdu.
+  - Shop isolation is enforced twice: every query filters by the shop from the
+    session (`req.user.shopId` / `req.shop.id`, never the request body), and
+    Postgres row-level security enforces it again underneath (`Db.js`,
+    migration 028). A new shop-owned table needs `shop_id NOT NULL` with no
+    default, plus a migration granting `pos_app` access with a policy. A query
+    that genuinely has to span every shop uses `systemPool`, with a comment
+    saying why. Any id taken from a request body that points at another record
+    (contact, category, sale, lot) goes through `utils/shopOwnership.js` before
+    the write. Run `ExpressBackend/scripts/verify-shop-isolation.js` after
+    touching any of this.
 - When you touch a file and notice duplicated logic, dead code, or an
   unnecessarily complex implementation nearby, clean it up as part of the
   change. Don't leave code worse than you found it — but don't go rewrite

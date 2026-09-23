@@ -1,4 +1,4 @@
-const { pool } = require("../Db");
+const { pool, systemPool } = require("../Db");
 
 // The write side of this — one row per shop per day, incremented per request — lives in
 // Server.js's egress-tracking middleware. Kept here purely as a data-access layer so that
@@ -9,9 +9,12 @@ const { pool } = require("../Db");
 // a dropped or delayed egress write should never slow down or fail an actual API response.
 // ON CONFLICT accumulates rather than overwrites, since a shop can have many requests in
 // the same calendar day.
+//
+// systemPool: platform accounting written by server.js's own middleware (shopId comes from
+// req.shop, never the client), outside any one request's tenant transaction.
 const recordEgress = async (shopId, bytes) => {
   if (!shopId || !(bytes > 0)) return;
-  await pool.query(
+  await systemPool.query(
     `INSERT INTO shop_egress_daily (shop_id, day, bytes, request_count)
      VALUES ($1, CURRENT_DATE, $2, 1)
      ON CONFLICT (shop_id, day) DO UPDATE

@@ -1,5 +1,6 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
+const { assertOwnedByShop } = require("../utils/shopOwnership");
 
 // Replaces creditDebitServies.js — credit/debit stored three independently-maintained
 // running totals per row (amount_due/amount_received/amount_pending) with no timestamps
@@ -12,11 +13,6 @@ const VALID_DIRECTIONS = new Set(["receivable", "payable"]);
 const VALID_KINDS = new Set(["charge", "payment", "adjustment"]);
 
 const DEFAULT_PAGE_SIZE = 20;
-
-const assertContactExists = async (contactId, shopId) => {
-  const { rows } = await pool.query(`SELECT id FROM contacts WHERE id = $1 AND shop_id = $2`, [contactId, shopId]);
-  if (!rows[0]) throw new ApiError(400, "Contact not found");
-};
 
 const getBalance = async (contactId, direction, shopId) => {
   const { rows } = await pool.query(
@@ -123,7 +119,8 @@ const addTransaction = async ({ contactId, direction, kind, amount, occurredOn, 
     throw new ApiError(400, `${kind === "charge" ? "Charge" : "Payment"} amount must be greater than 0`);
   }
 
-  await assertContactExists(contactId, shopId);
+  // The contact, plus the optional sale/lot this entry came from — all must be this shop's.
+  await assertOwnedByShop(pool, shopId, { contacts: contactId, sales: saleId, lots: lotId });
 
   if (kind === "payment") {
     const currentBalance = await getBalance(contactId, direction, shopId);
@@ -199,7 +196,7 @@ const netOffParty = async (contactId, amount, occurredOn, note, shopId) => {
     throw new ApiError(400, "Amount must be greater than 0");
   }
 
-  await assertContactExists(contactId, shopId);
+  await assertOwnedByShop(pool, shopId, { contacts: contactId });
 
   const [payableBalance, receivableBalance] = await Promise.all([
     getBalance(contactId, "payable", shopId),

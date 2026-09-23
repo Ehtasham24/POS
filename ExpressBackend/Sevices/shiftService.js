@@ -1,6 +1,7 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { dateRangeCondition } = require("../utils/dateRangeFilter");
+const { assertOwnedByShop } = require("../utils/shopOwnership");
 
 // How long a shift can go with no real activity (a sale, refund, or cash movement) before
 // Sevices/shiftSweep.js's periodic check treats it as abandoned — a crashed app, a closed
@@ -170,6 +171,9 @@ const recordCashMovement = async (shiftId, requestingUser, amount, reason, conta
   if (!shift) throw new ApiError(404, "Shift not found");
   if (shift.status !== "open") throw new ApiError(409, "This shift is already closed");
   assertCanAct(shift, requestingUser);
+  // getShiftDetail LEFT JOINs contacts on this id to show the contact's name — unchecked, a
+  // cash movement pointing at another shop's contact read that shop's contact name back out.
+  await assertOwnedByShop(pool, requestingUser.shopId, { contacts: contactId });
 
   const { rows: inserted } = await pool.query(
     `INSERT INTO shift_cash_movements (shift_id, amount, reason, contact_id, recorded_by, shop_id)

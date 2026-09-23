@@ -5,6 +5,7 @@ const { applyStockDelta } = require("./lotService");
 const { getOpenShift, touchActivity } = require("./shiftService");
 const { hasFeature } = require("../config/features");
 const ApiError = require("../utils/ApiError");
+const { assertOwnedByShop } = require("../utils/shopOwnership");
 
 const getRecentSales = async (shopId) => {
   try {
@@ -602,6 +603,9 @@ const refundSale = async (
   // page), not required for redemption, which always works by the refund's own number.
   const qty = Number(quantity);
   if (!Number.isFinite(qty) || qty <= 0) throw new ApiError(400, "Invalid refund quantity");
+  // The Store Credit page shows the contact's name next to the voucher — it has to be this
+  // shop's contact, not just any id that exists.
+  await assertOwnedByShop(pool, requestingUser.shopId, { contacts: contactId });
 
   const client = await pool.connect();
   try {
@@ -772,7 +776,7 @@ const fetchSales = async (startDate, endDate, paymentMethod = null, shopId) => {
          AND s.shop_id = $4
          AND ($3::text IS NULL OR st.payment_method = $3)
        GROUP BY p.productname, p.category_id, c.category_name, p.shop_id  -- Group by necessary columns including category name
-       ORDER BY profit_loss DESC`,
+       ORDER BY profit_loss DESC, p.productname  -- tiebreaker: equal margins keep a stable order`,
       [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null, shopId]
     );
 
@@ -852,7 +856,7 @@ const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = 
          AND ($3::text IS NULL OR st.payment_method = $3)
        GROUP BY p.productname, p.category_id, c.category_name, p.shop_id  -- Group by product name and category
        HAVING ${profitCondition} -- Apply the profit condition for profit-only items
-       ORDER BY overall_profit_loss DESC`,
+       ORDER BY overall_profit_loss DESC, p.productname  -- tiebreaker: stable order among equals`,
       [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null, shopId]
     );
 

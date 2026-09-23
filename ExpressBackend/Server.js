@@ -34,6 +34,22 @@ const server = express();
 const Port = process.env.PORT || 4000;
 
 const Server = async () => {
+  // Behind a reverse proxy (deploy/nginx/pos.conf), TLS ends at the proxy and this app only
+  // ever sees plain HTTP from it. Without trusting the proxy's X-Forwarded-Proto/-For,
+  // req.secure stays false — and utils/auth.js sets the session cookie with
+  // `secure: req.secure` + SameSite=None, which browsers reject unless Secure, so every
+  // login would silently fail to stick. req.ip would also be the proxy's own address instead
+  // of the client's (PayFast's IP allow-list check relies on it).
+  //
+  // Opt-in, never a blanket `true`: trusting forwarded headers when NO proxy is in front
+  // would let any client spoof its own IP/protocol just by sending those headers itself.
+  // TRUST_PROXY takes Express's own value syntax — "loopback" when the proxy runs on this
+  // same machine (the usual case), a hop count like "1", or a comma-separated IP list.
+  if (process.env.TRUST_PROXY) {
+    const value = process.env.TRUST_PROXY;
+    server.set("trust proxy", /^\d+$/.test(value) ? Number(value) : value);
+  }
+
   const corsOptions = {
     origin: process.env.CORS_ORIGIN || "http://localhost:3000", // Update this for production as needed
     // Needed for the session cookie to actually round-trip in npm start's dev mode,
@@ -115,10 +131,12 @@ const Server = async () => {
   // required for mobile devices on the LAN to install this as a PWA / use camera-gated
   // APIs, since browsers only treat HTTPS — or localhost — as a secure context).
   // Falls back to plain HTTP otherwise, which is all `npm start`'s two-server dev
-  // workflow (CRA dev server + this API) needs.
+  // workflow (CRA dev server + this API) needs. APP_HTTPS=false forces plain HTTP even when
+  // the certs exist — the setup behind a reverse proxy, which terminates TLS itself with a
+  // real certificate (see deploy/nginx/pos.conf).
   const certPath = path.join(__dirname, "certs/lan-cert.pem");
   const keyPath = path.join(__dirname, "certs/lan-key.pem");
-  const useHttps = fs.existsSync(certPath) && fs.existsSync(keyPath);
+  const useHttps = process.env.APP_HTTPS !== "false" && fs.existsSync(certPath) && fs.existsSync(keyPath);
 
   try {
     if (useHttps) {
@@ -149,7 +167,11 @@ const Server = async () => {
   // header, so plain HTTP here is a deliberate, scoped trade-off, not an oversight.
   const webhookApp = express();
   webhookApp.use(express.json());
-  webhookApp.use(routesPaymentNotifications);
+  // Only the phone's two secret-authenticated routes — not the whole router, whose staff
+  // routes (forwarder status, secret management) rely on the session cookie.
+  webhookApp.use(routesPaymentNotifications.webhookRoutes);
+  // Same JSON error shape as the main app (401/403 from the secret/plan checks).
+  webhookApp.use(errorHandler);
   const webhookPort = process.env.WEBHOOK_PORT || 4001;
   http
     .createServer(webhookApp)
