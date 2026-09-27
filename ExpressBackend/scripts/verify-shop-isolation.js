@@ -581,14 +581,23 @@ async function main() {
 
     // Straight at the database, bypassing every app-level filter: an UNFILTERED query run the
     // way Db.js runs a shop's request must still only see that shop.
-    const asShop2 = async (sql) => {
+    const asShop = async (shopId, sql) => {
       const client = await pool.connect();
       try {
-        await client.query(`BEGIN; SET LOCAL ROLE pos_app; SELECT set_config('app.shop_id', '${Number(created.shopId)}', true)`);
+        await client.query(`BEGIN; SET LOCAL ROLE pos_app; SELECT set_config('app.shop_id', '${Number(shopId)}', true)`);
         return await client.query(sql);
       } finally {
         await client.query("ROLLBACK");
         client.release();
+      }
+    };
+    const asShop2 = (sql) => asShop(created.shopId, sql);
+    const errorOf = async (run) => {
+      try {
+        await run();
+        return null;
+      } catch (e) {
+        return e.message;
       }
     };
     const unfiltered = await asShop2(`SELECT DISTINCT shop_id FROM products`);
@@ -604,6 +613,39 @@ async function main() {
       crossInsertError = e.message;
     }
     check("Shop 2 can't insert a row into shop 1 even with raw SQL", /row-level security/.test(crossInsertError || ""), crossInsertError);
+
+    // Platform tables (migration 031). Sign-in history and the admin audit trail are never
+    // readable from a shop request; a shop reads only its own subscription payments and
+    // only the announcements addressed to every shop or to itself — and writes neither.
+    for (const table of ["login_events", "admin_audit_log"]) {
+      const denied = await errorOf(() => asShop2(`SELECT COUNT(*) FROM ${table}`));
+      check(`A shop request can't read ${table} at all`, /permission denied/.test(denied || ""), denied);
+    }
+    const { rows: probePayment } = await pool.query(
+      `INSERT INTO subscription_payments (shop_id, amount, method, covers_from, covers_until)
+       VALUES ($1, 1000, 'cash', CURRENT_DATE, CURRENT_DATE + 30) RETURNING id`,
+      [created.shopId]
+    );
+    created.paymentId = probePayment[0].id;
+    // Scheduled far in the future, so no real shop 1 screen ever shows it while the test runs.
+    const { rows: probeNotice } = await pool.query(
+      `INSERT INTO announcements (title, shop_id, starts_at) VALUES ('rls-probe', $1, NOW() + INTERVAL '10 years') RETURNING id`,
+      [shop1Id]
+    );
+    created.announcementId = probeNotice[0].id;
+    const ownPayments = await asShop2(`SELECT shop_id FROM subscription_payments`);
+    const otherShopsView = await asShop(shop1Id, `SELECT id FROM subscription_payments WHERE id = ${Number(created.paymentId)}`);
+    check(
+      "Subscription payments: a shop sees its own, never another shop's",
+      ownPayments.rows.length === 1 && ownPayments.rows[0].shop_id === created.shopId && otherShopsView.rows.length === 0,
+      { ownPayments: ownPayments.rows, otherShopsView: otherShopsView.rows }
+    );
+    const paymentWrite = await errorOf(() =>
+      asShop2(`UPDATE subscription_payments SET covers_until = covers_until + 365 WHERE shop_id = ${Number(created.shopId)}`)
+    );
+    check("A shop can't extend its own subscription", /permission denied/.test(paymentWrite || ""), paymentWrite);
+    const otherNotice = await asShop2(`SELECT id FROM announcements WHERE id = ${Number(created.announcementId)}`);
+    check("An announcement addressed to shop 1 is invisible to shop 2", otherNotice.rows.length === 0, otherNotice.rows);
 
     // Foreign keys are checked WITHOUT row-level security, so this is the one gap RLS can't
     // close — migration 029's same-shop keys do. Run as the table owner (no RLS at all) to
@@ -630,6 +672,8 @@ async function main() {
       // Children before parents (FKs): intents/redemptions -> refunds -> sales ->
       // receipts -> shifts, and lots before products/contacts.
       if (created.intentId) await pool.query(`DELETE FROM bank_payment_intents WHERE id = $1`, [created.intentId]);
+      if (created.paymentId) await pool.query(`DELETE FROM subscription_payments WHERE id = $1`, [created.paymentId]);
+      if (created.announcementId) await pool.query(`DELETE FROM announcements WHERE id = $1`, [created.announcementId]);
       for (const table of [
         "bank_payment_intents",
         "store_credit_redemptions",

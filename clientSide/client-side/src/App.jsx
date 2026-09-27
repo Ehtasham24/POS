@@ -26,8 +26,12 @@ const Contacts = lazyPage(() => import("pages/Contacts"));
 const StoreCredit = lazyPage(() => import("pages/StoreCredit"));
 const BankPayments = lazyPage(() => import("pages/BankPayments"));
 const Shifts = lazyPage(() => import("pages/Shifts"));
-const AdminDashboard = lazyPage(() => import("pages/Admin"));
+const AdminOverview = lazyPage(() => import("pages/Admin/Overview"));
+const AdminShops = lazyPage(() => import("pages/Admin"));
+const AdminHealth = lazyPage(() => import("pages/Admin/Health"));
 const AdminUsage = lazyPage(() => import("pages/Admin/Usage"));
+const AdminActivity = lazyPage(() => import("pages/Admin/Activity"));
+const AdminAnnouncements = lazyPage(() => import("pages/Admin/Announcements"));
 const AdminEstimator = lazyPage(() => import("pages/Admin/Estimator"));
 const AdminLoginPage = lazyPage(() => import("pages/AdminLogin"));
 const SetNewPasswordPage = lazyPage(() => import("pages/SetNewPassword"));
@@ -80,30 +84,25 @@ function App() {
                       ProtectedRoute's adminOnly boundary keeps a shop's own Owner/Cashier out
                       of this exactly as strictly as it keeps a superadmin out of every route
                       below it. */}
-                  <Route
-                    path="/admin"
-                    element={
-                      <ProtectedRoute adminOnly>
-                        <AdminDashboard />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/admin/usage"
-                    element={
-                      <ProtectedRoute adminOnly>
-                        <AdminUsage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/admin/estimator"
-                    element={
-                      <ProtectedRoute adminOnly>
-                        <AdminEstimator />
-                      </ProtectedRoute>
-                    }
-                  />
+                  {[
+                    ["/admin", AdminOverview],
+                    ["/admin/shops", AdminShops],
+                    ["/admin/health", AdminHealth],
+                    ["/admin/usage", AdminUsage],
+                    ["/admin/activity", AdminActivity],
+                    ["/admin/announcements", AdminAnnouncements],
+                    ["/admin/estimator", AdminEstimator],
+                  ].map(([path, Page]) => (
+                    <Route
+                      key={path}
+                      path={path}
+                      element={
+                        <ProtectedRoute adminOnly>
+                          <Page />
+                        </ProtectedRoute>
+                      }
+                    />
+                  ))}
                   {/* The register. "/categories/:id" and "/productlist/:id" are older deep links
                       (Global Search still navigates to the first) — they open the same screen
                       with that category's tab selected. */}

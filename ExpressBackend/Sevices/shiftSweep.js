@@ -1,4 +1,5 @@
 const { autoCloseIdleShifts } = require("./shiftService");
+const { trackJob } = require("./monitoringService");
 
 // Checked every 2 minutes — frequent enough that an abandoned shift is never left "open"
 // much longer than shiftService.js's own IDLE_MINUTES threshold, without hammering the DB
@@ -13,7 +14,8 @@ const SWEEP_INTERVAL_MS = 2 * 60 * 1000;
 const startShiftAutoCloseSweep = () => {
   setInterval(async () => {
     try {
-      const closedCount = await autoCloseIdleShifts();
+      // trackJob: last run / last error for the admin console's Health page.
+      const closedCount = await trackJob("Shift auto-close", autoCloseIdleShifts);
       if (closedCount > 0) {
         console.log(`Shift auto-close sweep: closed ${closedCount} idle shift(s)`);
       }

@@ -177,4 +177,13 @@ const pool = {
   end: () => rawPool.end(),
 };
 
-module.exports = { pool, systemPool: rawPool, runAsTenant, RLS_ENABLED };
+// Connection pool occupancy, for the admin console's Health page. `waiting` above zero means
+// requests are queueing for a connection.
+const poolStats = () => ({
+  total: rawPool.totalCount,
+  idle: rawPool.idleCount,
+  waiting: rawPool.waitingCount,
+  max: rawPool.options.max,
+});
+
+module.exports = { pool, systemPool: rawPool, runAsTenant, RLS_ENABLED, poolStats };

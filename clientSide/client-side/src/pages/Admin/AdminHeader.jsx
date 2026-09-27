@@ -8,6 +8,10 @@ import {
   HiOutlineBuildingStorefront,
   HiOutlineChartBar,
   HiOutlineCalculator,
+  HiOutlineSquares2X2,
+  HiOutlineHeart,
+  HiOutlineClipboardDocumentList,
+  HiOutlineMegaphone,
 } from "react-icons/hi2";
 import Logo from "components/Logo";
 import { Modal } from "components";
@@ -21,8 +25,12 @@ import PasswordResetRequestsBadge from "./PasswordResetRequestsBadge";
 const emptyPasswordForm = { currentPassword: "", newPassword: "", confirmPassword: "" };
 
 const NAV_TABS = [
-  { to: "/admin", label: "Shops", icon: HiOutlineBuildingStorefront, end: true },
+  { to: "/admin", label: "Overview", icon: HiOutlineSquares2X2, end: true },
+  { to: "/admin/shops", label: "Shops", icon: HiOutlineBuildingStorefront, end: false },
+  { to: "/admin/health", label: "Health", icon: HiOutlineHeart, end: false },
   { to: "/admin/usage", label: "Usage", icon: HiOutlineChartBar, end: false },
+  { to: "/admin/activity", label: "Activity", icon: HiOutlineClipboardDocumentList, end: false },
+  { to: "/admin/announcements", label: "Announcements", icon: HiOutlineMegaphone, end: false },
   { to: "/admin/estimator", label: "Estimator", icon: HiOutlineCalculator, end: false },
 ];
 
@@ -117,7 +125,7 @@ export default function AdminHeader() {
             </button>
           </div>
         </div>
-        <nav className="flex gap-1 px-6">
+        <nav className="flex gap-1 overflow-x-auto whitespace-nowrap px-6 sm:px-4">
           {NAV_TABS.map(({ to, label, icon: Icon, end }) => (
             <NavLink key={to} to={to} end={end} className={tabClass}>
               <Icon className="text-base" />

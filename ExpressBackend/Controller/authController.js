@@ -30,7 +30,7 @@ const withShopInfo = (user) => ({
 
 const Login = asyncHandler(async (req, res) => {
   const { username, password } = req.body;
-  const { token, user } = await login(username, password);
+  const { token, user } = await login(username, password, { ip: req.ip, userAgent: req.get("user-agent") });
   res.cookie(COOKIE_NAME, token, { ...COOKIE_OPTIONS, secure: req.secure });
   res.send(withShopInfo(user));
 });

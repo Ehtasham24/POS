@@ -597,6 +597,12 @@ const translations = {
       busiestDays: "Busiest days of the week",
       busiestDaysHint: "Net sales on each weekday, all weeks in the period added together.",
     },
+    notices: {
+      dueSoon: "Your subscription is due on {date} ({days} days left). Please renew in time so the app keeps working.",
+      dueToday: "Your subscription is due today. Please renew so the app keeps working.",
+      overdue: "Your subscription was due on {date} and is {days} days overdue. Please pay your provider to avoid interruption.",
+      dismiss: "Dismiss",
+    },
     notFound: {
       title: "Page not found",
       desc: "The page you're looking for doesn't exist or may have been moved.",
@@ -1196,6 +1202,12 @@ const translations = {
       busiestHoursHint: "دن کے ہر گھنٹے کی نیٹ سیلز، دورانیے کے تمام دن ملا کر۔",
       busiestDays: "ہفتے کے مصروف ترین دن",
       busiestDaysHint: "ہفتے کے ہر دن کی نیٹ سیلز، دورانیے کے تمام ہفتے ملا کر۔",
+    },
+    notices: {
+      dueSoon: "آپ کی سبسکرپشن {date} کو ختم ہو رہی ہے ({days} دن باقی)۔ براہ کرم وقت پر تجدید کریں تاکہ ایپ چلتی رہے۔",
+      dueToday: "آپ کی سبسکرپشن آج ختم ہو رہی ہے۔ براہ کرم تجدید کریں تاکہ ایپ چلتی رہے۔",
+      overdue: "آپ کی سبسکرپشن {date} کو ختم ہو چکی ہے اور ادائیگی {days} دن سے واجب الادا ہے۔ رکاوٹ سے بچنے کے لیے اپنے فراہم کنندہ کو ادائیگی کریں۔",
+      dismiss: "بند کریں",
     },
     notFound: {
       title: "صفحہ نہیں ملا",

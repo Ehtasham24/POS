@@ -1,15 +1,21 @@
-const { pool } = require("../Db");
+const { pool, poolStats } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { hashPassword, comparePassword } = require("../utils/auth");
-const { hasFeature } = require("../config/features");
+const { hasFeature, TIER_RANK } = require("../config/features");
 const { USAGE_TABLES } = require("../config/usageTables");
 const { closeOpenShiftsForDowngrade } = require("./shiftService");
 const { flattenBatchProducts } = require("./productsService");
 const { getEgressByShop } = require("./egressService");
 const { getTotalDbCapacityBytes } = require("./platformSettingsService");
 const { getActualDatabaseSizeBytes } = require("./dbStatsService");
+const { DEFAULT_TIMEZONE, getBusinessTimezone } = require("./settingsService");
+const { DUE_ON_SQL, subscriptionStatus, listPayments } = require("./subscriptionService");
+const { issueTempPassword } = require("./passwordResetService");
+const { listLoginEvents, loginSecuritySummary } = require("./loginSecurityService");
+const { listAudit } = require("./auditService");
+const monitoring = require("./monitoringService");
 
-const VALID_TIERS = ["basic", "smart", "advanced"];
+const VALID_TIERS = Object.keys(TIER_RANK);
 
 // node-postgres returns NUMERIC columns as strings too (same reasoning as BIGINT — it can't
 // assume a value fits a JS number without precision loss), so storage_quota_percent needs
@@ -64,14 +70,30 @@ const slugify = (name) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-+|-+$)/g, "") || "shop";
 
+// Per shop: when it last sold something and when anyone last signed in — how the admin
+// spots a shop that has quietly stopped using the system.
+const SHOP_ACTIVITY_SQL = `
+  (SELECT MAX(sa.sale_time) FROM sales sa WHERE sa.shop_id = s.id) AS last_sale_at,
+  (SELECT MAX(e.created_at) FROM login_events e WHERE e.shop_id = s.id AND e.outcome = 'success') AS last_login_at`;
+
+const isOnline = (shopId) => {
+  const seen = monitoring.shopLastSeenAt(shopId);
+  return !!seen && Date.now() - seen.getTime() < monitoring.ONLINE_WINDOW_MS;
+};
+
 const listShops = async () => {
   const { rows } = await pool.query(
     `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users, s.storage_quota_percent,
-            (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id AND u.is_active = true) AS user_count
+            (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id AND u.is_active = true) AS user_count,
+            ${DUE_ON_SQL} AS due_on, ${SHOP_ACTIVITY_SQL}
      FROM shops s
      ORDER BY s.created_at DESC`
   );
-  return rows.map(normalizeShopRow);
+  return rows.map((row) => ({
+    ...normalizeShopRow(row),
+    subscription: subscriptionStatus(row.due_on),
+    onlineNow: isOnline(row.id),
+  }));
 };
 
 // Shared by createShop and updateShopDetails below — a bare integer >= 1, everything else
@@ -328,7 +350,7 @@ const updateShopTier = async (shopId, newTier) => {
     [shopId, newTier]
   );
 
-  return { shop: normalizeShopRow(updated[0]), automations };
+  return { shop: normalizeShopRow(updated[0]), automations, previousTier: oldTier };
 };
 
 const setShopActive = async (shopId, isActive) => {
@@ -433,8 +455,269 @@ const getUsageByShop = async () => {
   return { shops: [...usageByShopId.values()], totalDbCapacityBytes, actualDatabaseSizeBytes };
 };
 
+// Days without a sale before an active shop is flagged as having gone quiet.
+const DORMANT_DAYS = 7;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// The admin console's landing page: the whole platform at a glance, and the short list of
+// things that need the admin's attention (billing, shops gone quiet, sign-in attacks,
+// server errors, storage). Sales days are on the platform's own clock (DEFAULT_TIMEZONE).
+const getPlatformOverview = async () => {
+  const tz = DEFAULT_TIMEZONE;
+  const [shopRows, userRows, daily, topShops, pendingResets, dbSize, dbCapacity, logins] = await Promise.all([
+    pool.query(
+      `SELECT s.id, s.name, s.tier, s.is_active, s.created_at, ${DUE_ON_SQL} AS due_on, ${SHOP_ACTIVITY_SQL}
+       FROM shops s`
+    ),
+    pool.query(`SELECT role, COUNT(*)::int AS n FROM users WHERE is_active AND role <> 'superadmin' GROUP BY role`),
+    pool.query(
+      `WITH days AS (
+         SELECT generate_series(date_trunc('day', NOW() AT TIME ZONE $1) - INTERVAL '29 days',
+                                date_trunc('day', NOW() AT TIME ZONE $1), INTERVAL '1 day') AS day
+       ),
+       money AS (
+         SELECT date_trunc('day', (event_time AT TIME ZONE 'UTC') AT TIME ZONE $1) AS day,
+                SUM(quantity * selling_price)::bigint AS revenue
+         FROM sales_ledger WHERE event_time > NOW() - INTERVAL '31 days' GROUP BY 1
+       ),
+       receipts AS (
+         SELECT date_trunc('day', (created_at AT TIME ZONE 'UTC') AT TIME ZONE $1) AS day, COUNT(*)::int AS transactions
+         FROM sale_transactions WHERE created_at > NOW() - INTERVAL '31 days' GROUP BY 1
+       )
+       SELECT to_char(d.day, 'YYYY-MM-DD') AS day, COALESCE(m.revenue, 0)::bigint AS revenue,
+              COALESCE(r.transactions, 0) AS transactions
+       FROM days d LEFT JOIN money m ON m.day = d.day LEFT JOIN receipts r ON r.day = d.day
+       ORDER BY d.day`,
+      [tz]
+    ),
+    pool.query(
+      `SELECT s.id, s.name, s.tier, SUM(l.quantity * l.selling_price)::bigint AS revenue
+       FROM sales_ledger l JOIN shops s ON s.id = l.shop_id
+       WHERE l.event_time > NOW() - INTERVAL '30 days'
+       GROUP BY s.id ORDER BY revenue DESC LIMIT 5`
+    ),
+    pool.query(`SELECT COUNT(*)::int AS n FROM password_reset_requests WHERE status = 'pending'`),
+    getActualDatabaseSizeBytes(),
+    getTotalDbCapacityBytes(),
+    loginSecuritySummary(),
+  ]);
+
+  const shops = shopRows.rows;
+  const byTier = Object.fromEntries(VALID_TIERS.map((tier) => [tier, 0]));
+  for (const shop of shops) byTier[shop.tier] = (byTier[shop.tier] || 0) + 1;
+  const dailyRows = daily.rows.map((r) => ({ day: r.day, revenue: Number(r.revenue), transactions: r.transactions }));
+  const totals = (rows) => ({
+    revenue: rows.reduce((sum, r) => sum + r.revenue, 0),
+    transactions: rows.reduce((sum, r) => sum + r.transactions, 0),
+  });
+
+  const attention = [];
+  const flag = (severity, kind, message, shop) =>
+    attention.push({ severity, kind, message, shopId: shop?.id ?? null, shopName: shop?.name ?? null });
+  const dormantCutoff = Date.now() - DORMANT_DAYS * DAY_MS;
+  for (const shop of shops.filter((s) => s.is_active)) {
+    const billing = subscriptionStatus(shop.due_on);
+    if (billing.status === "overdue") flag("critical", "billing", `Payment overdue by ${-billing.daysLeft} day(s)`, shop);
+    if (billing.status === "due_soon") {
+      flag("warning", "billing", billing.daysLeft === 0 ? "Payment due today" : `Payment due in ${billing.daysLeft} day(s)`, shop);
+    }
+    const lastSale = shop.last_sale_at ? new Date(shop.last_sale_at).getTime() : null;
+    if (new Date(shop.created_at).getTime() < dormantCutoff && (!lastSale || lastSale < dormantCutoff)) {
+      flag(
+        "warning",
+        "dormant",
+        lastSale ? `No sales for ${Math.floor((Date.now() - lastSale) / DAY_MS)} days` : "Has never made a sale",
+        shop
+      );
+    }
+  }
+  const resets = pendingResets.rows[0].n;
+  if (resets > 0) flag("warning", "password_reset", `${resets} password reset request(s) waiting for review`);
+  const locked = logins.topUsernames.filter((u) => u.lockedNow).map((u) => u.username);
+  if (locked.length) flag("critical", "security", `Locked after repeated wrong passwords: ${locked.join(", ")}`);
+  const serverErrors = monitoring.snapshot().lastHour.serverErrors;
+  if (serverErrors > 0) flag("critical", "errors", `${serverErrors} server error(s) in the last hour`);
+  const dbPercent = dbCapacity ? (dbSize / dbCapacity) * 100 : 0;
+  if (dbPercent >= 75) flag(dbPercent >= 90 ? "critical" : "warning", "storage", `Database is ${Math.round(dbPercent)}% full`);
+  attention.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "critical" ? -1 : 1));
+
+  return {
+    shops: {
+      total: shops.length,
+      active: shops.filter((s) => s.is_active).length,
+      newLast30Days: shops.filter((s) => new Date(s.created_at).getTime() > Date.now() - 30 * DAY_MS).length,
+      byTier,
+      onlineNow: monitoring.onlineShopIds().length,
+    },
+    users: Object.fromEntries(userRows.rows.map((r) => [r.role, r.n])),
+    sales: {
+      today: dailyRows[dailyRows.length - 1],
+      last7Days: totals(dailyRows.slice(-7)),
+      last30Days: totals(dailyRows),
+      daily: dailyRows,
+    },
+    topShops: topShops.rows.map((r) => ({ ...r, revenue: Number(r.revenue) })),
+    database: { sizeBytes: dbSize, capacityBytes: dbCapacity },
+    attention,
+  };
+};
+
+// Everything the admin needs about one shop on one screen: its users (with last sign-in),
+// recent trading, billing, sign-in history and the admin changes made to it.
+const getShopDetail = async (shopId) => {
+  const { rows } = await pool.query(
+    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users, s.storage_quota_percent,
+            ${DUE_ON_SQL} AS due_on, ${SHOP_ACTIVITY_SQL}
+     FROM shops s WHERE s.id = $1`,
+    [shopId]
+  );
+  if (!rows[0]) throw new ApiError(404, "Shop not found");
+  const shop = rows[0];
+  const tz = await getBusinessTimezone(shopId);
+
+  const [users, trading, counts, payments, logins, audit] = await Promise.all([
+    pool.query(
+      `SELECT u.id, u.username, u.display_name, u.role, u.is_active, u.created_at,
+              (SELECT MAX(e.created_at) FROM login_events e WHERE e.user_id = u.id AND e.outcome = 'success') AS last_login_at
+       FROM users u WHERE u.shop_id = $1
+       ORDER BY u.is_active DESC, CASE u.role WHEN 'owner' THEN 0 ELSE 1 END, u.display_name`,
+      [shopId]
+    ),
+    // "Today" on the shop's own clock; money from sales_ledger (refunds net off), receipts
+    // counted once each from sale_transactions.
+    pool.query(
+      `WITH money AS (
+         SELECT
+           COALESCE(SUM(quantity * selling_price) FILTER (
+             WHERE (event_time AT TIME ZONE 'UTC') AT TIME ZONE $2 >= date_trunc('day', NOW() AT TIME ZONE $2)), 0)::bigint AS today,
+           COALESCE(SUM(quantity * selling_price) FILTER (WHERE event_time > NOW() - INTERVAL '7 days'), 0)::bigint AS last7,
+           COALESCE(SUM(quantity * selling_price), 0)::bigint AS last30
+         FROM sales_ledger WHERE shop_id = $1 AND event_time > NOW() - INTERVAL '30 days'
+       ),
+       receipts AS (
+         SELECT
+           COUNT(*) FILTER (
+             WHERE (created_at AT TIME ZONE 'UTC') AT TIME ZONE $2 >= date_trunc('day', NOW() AT TIME ZONE $2))::int AS today,
+           COUNT(*) FILTER (WHERE created_at > NOW() - INTERVAL '7 days')::int AS last7,
+           COUNT(*)::int AS last30
+         FROM sale_transactions WHERE shop_id = $1 AND created_at > NOW() - INTERVAL '30 days'
+       )
+       SELECT money.today AS revenue_today, money.last7 AS revenue_7d, money.last30 AS revenue_30d,
+              receipts.today AS receipts_today, receipts.last7 AS receipts_7d, receipts.last30 AS receipts_30d
+       FROM money, receipts`,
+      [shopId, tz]
+    ),
+    pool.query(
+      `SELECT (SELECT COUNT(*) FROM products WHERE shop_id = $1)::int AS products,
+              (SELECT COUNT(*) FROM shifts WHERE shop_id = $1 AND status = 'open')::int AS open_shifts`,
+      [shopId]
+    ),
+    listPayments(shopId),
+    listLoginEvents({ shopId, pageSize: 15 }),
+    listAudit({ shopId, pageSize: 15 }),
+  ]);
+
+  const t = trading.rows[0];
+  return {
+    shop: {
+      ...normalizeShopRow(shop),
+      timezone: tz,
+      onlineNow: isOnline(shop.id),
+      lastSeenAt: monitoring.shopLastSeenAt(shop.id),
+    },
+    users: users.rows,
+    activity: {
+      today: { revenue: Number(t.revenue_today), receipts: t.receipts_today },
+      last7Days: { revenue: Number(t.revenue_7d), receipts: t.receipts_7d },
+      last30Days: { revenue: Number(t.revenue_30d), receipts: t.receipts_30d },
+      products: counts.rows[0].products,
+      openShifts: counts.rows[0].open_shifts,
+    },
+    subscription: { ...subscriptionStatus(shop.due_on), payments },
+    recentLogins: logins.rows,
+    recentAudit: audit.rows,
+  };
+};
+
+// The Health page: the server's own live numbers (monitoringService.js) plus the database's —
+// how fast it answers, how many connections are in use, how full it is — the shops online
+// right now, and the last day of sign-ins. A database that doesn't answer is reported as
+// such rather than failing the page: that's exactly when the admin needs to see it.
+const getPlatformHealth = async () => {
+  let database;
+  try {
+    // Timed on the second round trip, so opening a fresh connection isn't counted as latency.
+    await pool.query("SELECT 1");
+    const started = process.hrtime.bigint();
+    await pool.query("SELECT 1");
+    const pingMs = Math.round(Number(process.hrtime.bigint() - started) / 1e5) / 10;
+    const [connections, sizeBytes, capacityBytes] = await Promise.all([
+      pool.query(
+        `SELECT COUNT(*)::int AS connections, current_setting('max_connections')::int AS max_connections
+         FROM pg_stat_activity WHERE datname = current_database()`
+      ),
+      getActualDatabaseSizeBytes(),
+      getTotalDbCapacityBytes(),
+    ]);
+    database = {
+      ok: true,
+      pingMs,
+      connections: connections.rows[0].connections,
+      maxConnections: connections.rows[0].max_connections,
+      sizeBytes,
+      capacityBytes,
+    };
+  } catch (err) {
+    database = { ok: false, error: err.message };
+  }
+  database.pool = poolStats();
+
+  const online = monitoring.onlineShopIds();
+  const [names, logins] = await Promise.all([
+    database.ok && online.length
+      ? pool.query(`SELECT id, name FROM shops WHERE id = ANY($1::int[])`, [online.map((o) => o.shopId)])
+      : { rows: [] },
+    database.ok ? loginSecuritySummary() : null,
+  ]);
+  const nameById = new Map(names.rows.map((r) => [r.id, r.name]));
+
+  return {
+    ...monitoring.snapshot(),
+    database,
+    onlineShops: online
+      .map((o) => ({ ...o, name: nameById.get(o.shopId) || `Shop #${o.shopId}` }))
+      .sort((a, b) => b.lastSeenAt - a.lastSeenAt),
+    logins,
+  };
+};
+
+// Support actions on one of a shop's users. The user must belong to that shop — an id from
+// another shop is simply "not found". Reactivating doesn't check the seat limit, same as an
+// owner reactivating their own staff (usersService.js).
+const setShopUserActive = async (shopId, userId, isActive) => {
+  const { rows } = await pool.query(
+    `UPDATE users SET is_active = $3 WHERE id = $1 AND shop_id = $2
+     RETURNING id, username, display_name, role, is_active`,
+    [userId, shopId, !!isActive]
+  );
+  if (!rows[0]) throw new ApiError(404, "User not found in this shop");
+  return rows[0];
+};
+
+// A fresh temp password the admin reads out to the user; they must change it on sign-in.
+const resetShopUserPassword = async (shopId, userId) => {
+  const issued = await issueTempPassword(pool, userId, { shopId });
+  if (!issued) throw new ApiError(404, "User not found in this shop");
+  return issued;
+};
+
 module.exports = {
   VALID_TIERS,
+  getPlatformOverview,
+  getPlatformHealth,
+  getShopDetail,
+  setShopUserActive,
+  resetShopUserPassword,
   listShops,
   createShop,
   updateShopDetails,

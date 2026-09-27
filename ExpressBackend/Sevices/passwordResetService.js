@@ -22,6 +22,24 @@ const generateTempPassword = () => {
   return out;
 };
 
+// Gives the user a fresh temp password and forces a change on their next sign-in. The
+// plaintext is returned exactly once and never stored — only its bcrypt hash lands in the
+// DB, same as any other password. `db` is a pool or a transaction's client; `shopId`, when
+// given, refuses a user from any other shop. Returns null when there's no such user.
+// Shared by an approved forgot-password request (below) and the admin console's
+// "Reset password" on a shop's user (adminService.js).
+const issueTempPassword = async (db, userId, { shopId } = {}) => {
+  const tempPassword = generateTempPassword();
+  const passwordHash = await hashPassword(tempPassword);
+  const { rows } = await db.query(
+    `UPDATE users SET password_hash = $2, must_change_password = true
+     WHERE id = $1 AND ($3::int IS NULL OR shop_id = $3)
+     RETURNING username, display_name`,
+    [userId, passwordHash, shopId ?? null]
+  );
+  return rows[0] ? { tempPassword, username: rows[0].username, displayName: rows[0].display_name } : null;
+};
+
 // Public — no auth, this IS the "I can't log in" path. Looks up an active user by
 // username; if none matches, silently no-ops rather than throwing, so the caller
 // (Controller/authController.js's ForgotPassword) can always return the same neutral
@@ -106,9 +124,7 @@ const listRequests = async (status) => {
   }));
 };
 
-// Issues a real, working temp password and forces a change on next login. The plaintext
-// is returned exactly once here and never stored — only its bcrypt hash lands in the DB,
-// same as any other password.
+// Issues a real, working temp password (issueTempPassword above) for the request's user.
 const approveRequest = async (requestId, requestingSuperAdmin) => {
   const client = await pool.connect();
   try {
@@ -124,15 +140,8 @@ const approveRequest = async (requestId, requestingSuperAdmin) => {
       throw new ApiError(409, `This request was already ${request.status}`);
     }
 
-    const tempPassword = generateTempPassword();
-    const passwordHash = await hashPassword(tempPassword);
-
-    const { rows: userRows } = await client.query(
-      `UPDATE users SET password_hash = $2, must_change_password = true
-       WHERE id = $1 RETURNING username, display_name`,
-      [request.user_id, passwordHash]
-    );
-    if (!userRows[0]) throw new ApiError(404, "The account this request belongs to no longer exists");
+    const issued = await issueTempPassword(client, request.user_id);
+    if (!issued) throw new ApiError(404, "The account this request belongs to no longer exists");
 
     await client.query(
       `UPDATE password_reset_requests
@@ -142,7 +151,7 @@ const approveRequest = async (requestId, requestingSuperAdmin) => {
     );
 
     await client.query("COMMIT");
-    return { tempPassword, username: userRows[0].username, displayName: userRows[0].display_name };
+    return issued;
   } catch (err) {
     await client.query("ROLLBACK");
     throw err instanceof ApiError ? err : new ApiError(500, err.message);
@@ -182,4 +191,4 @@ const rejectRequest = async (requestId, requestingSuperAdmin, notes) => {
   }
 };
 
-module.exports = { createRequest, listRequests, approveRequest, rejectRequest };
+module.exports = { createRequest, listRequests, approveRequest, rejectRequest, issueTempPassword };

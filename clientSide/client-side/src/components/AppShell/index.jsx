@@ -8,6 +8,7 @@ import GlobalSearch from "components/GlobalSearch";
 import LowStockBell from "./LowStockBell";
 import PendingBankPaymentsBell from "./PendingBankPaymentsBell";
 import StorageWarningBadge from "./StorageWarningBadge";
+import ShopNotices from "./ShopNotices";
 import OfflineStatusBadge from "./OfflineStatusBadge";
 import UserMenu from "./UserMenu";
 import CartCheckout from "categoriesComponents/cartCheckout";
@@ -117,6 +118,8 @@ export default function AppShell({ title, actions, hideSearch, fullBleed = false
           )}
           {!fullBleed && !actions && <div className="pb-5" />}
         </div>
+
+        <ShopNotices />
 
         <main className={fullBleed ? "min-h-0 flex-1" : "flex-1 px-8 py-8 md:px-5 md:py-6 sm:px-4"}>{children}</main>
       </div>

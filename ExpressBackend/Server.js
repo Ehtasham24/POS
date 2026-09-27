@@ -28,6 +28,8 @@ const routesShopStatus = require("./Routes/API/shopStatusRoutes");
 const errorHandler = require("./Middleware/errorHandler");
 const { startShiftAutoCloseSweep } = require("./Sevices/shiftSweep");
 const { recordEgress } = require("./Sevices/egressService");
+const monitoring = require("./Sevices/monitoringService");
+const { startMaintenanceSweep } = require("./Sevices/maintenanceSweep");
 const cors = require("cors");
 
 const server = express();
@@ -69,16 +71,29 @@ const Server = async () => {
   // settings value) fits comfortably through the generic /api/settings endpoint.
   server.use(express.json({ limit: "2mb" }));
 
-  // Egress tracking (migration 024) — mounted before every route so it wraps the whole
-  // request, but it reads req.shop only inside the 'finish' listener, which fires after
-  // the full downstream chain (including whichever route's own requireAuth) has already
-  // run and set it. Deliberately fire-and-forget: recordEgress's own promise is never
-  // awaited or returned, so a slow/failed egress write can never delay or fail the actual
-  // response it's measuring, and .catch here is just so that failure doesn't become an
-  // unhandled rejection.
+  // Egress tracking (migration 024) and the Health page's request metrics
+  // (monitoringService.js) — mounted before every route so it wraps the whole request, but
+  // it reads req.shop and req.route only inside the 'finish' listener, which fires after the
+  // full downstream chain (including whichever route's own requireAuth) has already run and
+  // set them. Deliberately fire-and-forget: recordEgress's own promise is never awaited or
+  // returned, so a slow/failed egress write can never delay or fail the actual response
+  // it's measuring, and .catch here is just so that failure doesn't become an unhandled
+  // rejection.
   server.use((req, res, next) => {
+    const started = process.hrtime.bigint();
     res.on("finish", () => {
       const shopId = req.shop?.id;
+      // API routes only — static files and the SPA fallback ("*") aren't the API's health.
+      const route = req.route && req.route.path !== "*" ? `${req.baseUrl}${req.route.path}` : null;
+      if (route || (res.statusCode === 404 && req.path.startsWith("/api/"))) {
+        monitoring.recordRequest({
+          method: req.method,
+          route: route || "(no such route)",
+          status: res.statusCode,
+          durationMs: Number(process.hrtime.bigint() - started) / 1e6,
+          shopId,
+        });
+      }
       if (!shopId) return;
       const bytes = Number(res.getHeader("content-length")) || 0;
       recordEgress(shopId, bytes).catch((err) => console.error("Egress tracking failed:", err));
@@ -180,6 +195,7 @@ const Server = async () => {
   // Auto-closes an abandoned shift (crashed app, closed tab, forgotten to close) after 15
   // minutes of no activity — see Sevices/shiftSweep.js and migrations/019.
   startShiftAutoCloseSweep();
+  startMaintenanceSweep();
 };
 
 Server();

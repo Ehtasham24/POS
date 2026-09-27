@@ -17,6 +17,18 @@ const {
   ListPasswordResetRequests,
   ApprovePasswordResetRequest,
   RejectPasswordResetRequest,
+  GetOverview,
+  GetHealth,
+  GetShopDetail,
+  SetShopUserActive,
+  ResetShopUserPassword,
+  RecordShopPayment,
+  DeleteShopPayment,
+  ListAuditLog,
+  ListLoginEvents,
+  ListAnnouncements,
+  CreateAnnouncement,
+  EndAnnouncement,
 } = require("../../Controller/adminController");
 const requireAuth = require("../../Middleware/requireAuth");
 const requireSuperAdmin = require("../../Middleware/requireSuperAdmin");
@@ -67,5 +79,27 @@ routes.patch(
   requireSuperAdmin,
   RejectPasswordResetRequest
 );
+
+// Platform overview (the console's landing page) and live health.
+routes.get("/api/admin/overview", requireAuth, requireSuperAdmin, GetOverview);
+routes.get("/api/admin/health", requireAuth, requireSuperAdmin, GetHealth);
+
+// One shop in detail, and support actions on its users.
+routes.get("/api/admin/shops/:id/detail", requireAuth, requireSuperAdmin, GetShopDetail);
+routes.patch("/api/admin/shops/:id/users/:userId/active", requireAuth, requireSuperAdmin, SetShopUserActive);
+routes.post("/api/admin/shops/:id/users/:userId/reset-password", requireAuth, requireSuperAdmin, ResetShopUserPassword);
+
+// Subscription payments (Sevices/subscriptionService.js).
+routes.post("/api/admin/shops/:id/payments", requireAuth, requireSuperAdmin, RecordShopPayment);
+routes.delete("/api/admin/shops/:id/payments/:paymentId", requireAuth, requireSuperAdmin, DeleteShopPayment);
+
+// Audit trail and sign-in history.
+routes.get("/api/admin/audit-log", requireAuth, requireSuperAdmin, ListAuditLog);
+routes.get("/api/admin/login-events", requireAuth, requireSuperAdmin, ListLoginEvents);
+
+// Announcements to shops.
+routes.get("/api/admin/announcements", requireAuth, requireSuperAdmin, ListAnnouncements);
+routes.post("/api/admin/announcements", requireAuth, requireSuperAdmin, CreateAnnouncement);
+routes.patch("/api/admin/announcements/:id/end", requireAuth, requireSuperAdmin, EndAnnouncement);
 
 module.exports = routes;

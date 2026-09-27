@@ -1,11 +1,18 @@
 import React, { useEffect, useState } from "react";
-import { Helmet } from "react-helmet";
-import { HiOutlinePlus, HiOutlinePencil, HiOutlineCircleStack, HiOutlineUser } from "react-icons/hi2";
+import {
+  HiOutlinePlus,
+  HiOutlinePencil,
+  HiOutlineCircleStack,
+  HiOutlineUser,
+  HiOutlineArrowTopRightOnSquare,
+} from "react-icons/hi2";
 import { Modal, EmptyState, SkeletonRows } from "components";
 import { useToast } from "components/Toast/ToastContext";
+import useUrlFilterState from "hooks/useUrlFilterState";
 import { apiGet, apiPost, apiPatch } from "utils/api";
-import AdminHeader from "./AdminHeader";
-import { inputClass, labelClass, TIERS, TIER_CHIP_CLASS, formatBytes } from "./shared";
+import AdminPage from "./AdminPage";
+import ShopDetail from "./ShopDetail";
+import { inputClass, labelClass, TIERS, TIER_CHIP_CLASS, formatBytes, formatDay, timeAgo, SubscriptionChip } from "./shared";
 
 // Deliberately plain English, not routed through i18n/translations.js like the rest of the
 // app — this console's only ever audience is the platform operator (the POS provider
@@ -21,7 +28,7 @@ const emptyForm = {
   ownerPassword: "",
 };
 
-export default function AdminDashboard() {
+export default function AdminShops() {
   const toast = useToast();
 
   const [shops, setShops] = useState([]);
@@ -53,6 +60,10 @@ export default function AdminDashboard() {
   const [showPlatformSettings, setShowPlatformSettings] = useState(false);
   const [capacityForm, setCapacityForm] = useState({ mode: "preset", presetBytes: "", customGB: "" });
   const [savingCapacity, setSavingCapacity] = useState(false);
+
+  // The shop whose detail panel is open — in the URL, so the rest of the console can link
+  // straight to it (/admin/shops?shop=<id>).
+  const [detailShopId, setDetailShopId] = useUrlFilterState("shop", "");
 
   const loadShops = async () => {
     setLoading(true);
@@ -103,9 +114,7 @@ export default function AdminDashboard() {
       const notes = [];
       if (automations.shiftsClosed > 0) notes.push(`${automations.shiftsClosed} open shift(s) auto-closed`);
       if (automations.productsFlattened > 0) notes.push(`${automations.productsFlattened} batch product(s) flattened`);
-      toast.success(
-        `${shop.name}: ${shop.tier} → ${newTier}` + (notes.length ? ` (${notes.join(", ")})` : "")
-      );
+      toast.success(`${shop.name}: ${shop.tier} → ${newTier}` + (notes.length ? ` (${notes.join(", ")})` : ""));
       loadShops();
     } catch (err) {
       toast.error(err.message);
@@ -142,8 +151,7 @@ export default function AdminDashboard() {
     e.preventDefault();
     setEditSaving(true);
     try {
-      const storageQuotaPercent =
-        editForm.storageQuotaPercent === "" ? null : Number(editForm.storageQuotaPercent);
+      const storageQuotaPercent = editForm.storageQuotaPercent === "" ? null : Number(editForm.storageQuotaPercent);
       await apiPatch(`/api/admin/shops/${editTarget.id}`, {
         name: editForm.name,
         maxUsers: editForm.maxUsers,
@@ -204,7 +212,7 @@ export default function AdminDashboard() {
     setCapacityForm(
       matchesPreset
         ? { mode: "preset", presetBytes: String(matchesPreset.bytes), customGB: "" }
-        : { mode: "custom", presetBytes: "", customGB: current ? current / 1024 ** 3 : "" }
+        : { mode: "custom", presetBytes: "", customGB: current ? current / 1024 ** 3 : "" },
     );
     setShowPlatformSettings(true);
   };
@@ -214,9 +222,7 @@ export default function AdminDashboard() {
     setSavingCapacity(true);
     try {
       const totalDbCapacityBytes =
-        capacityForm.mode === "preset"
-          ? Number(capacityForm.presetBytes)
-          : Math.round(Number(capacityForm.customGB) * 1024 ** 3);
+        capacityForm.mode === "preset" ? Number(capacityForm.presetBytes) : Math.round(Number(capacityForm.customGB) * 1024 ** 3);
       await apiPatch("/api/admin/platform-settings", { totalDbCapacityBytes });
       toast.success("Total DB capacity updated — every shop's quota % now reflects it.");
       setShowPlatformSettings(false);
@@ -230,126 +236,142 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="min-h-screen bg-surface-subtle dark:bg-gray-900">
-      <Helmet>
-        <title>Platform Admin · POS System</title>
-      </Helmet>
-
-      <AdminHeader />
-
-      <main className="mx-auto max-w-5xl px-6 py-8">
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">Shops</h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              Every tenant on this database — create one, change its plan, or deactivate it.
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={openPlatformSettings}
-              className="flex items-center gap-1.5 rounded-lg border border-surface-border px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-surface-muted dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
-            >
-              <HiOutlineCircleStack />
-              {platformSettings ? `${formatBytes(platformSettings.totalDbCapacityBytes)} total` : "Platform Settings"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setShowCreate(true)}
-              className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white-A700 transition-colors hover:bg-primary-700"
-            >
-              <HiOutlinePlus />
-              New Shop
-            </button>
-          </div>
-        </div>
-
-        <div className="overflow-hidden rounded-xl2 border border-surface-border bg-white-A700 shadow-card dark:border-gray-700 dark:bg-gray-800">
-          {loading ? (
-            <SkeletonRows count={4} />
-          ) : shops.length === 0 ? (
-            <EmptyState title='No shops yet — click "New Shop" to onboard the first one.' />
-          ) : (
-            <table className="w-full border-collapse text-sm">
-              <thead className="bg-surface-subtle dark:bg-gray-900/40">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Shop</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Tier</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Status</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Users</th>
-                  <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Created</th>
-                  <th className="px-4 py-3" />
+    <AdminPage
+      title="Shops"
+      heading="Shops"
+      subtitle="Every tenant on this database — open one for its users, billing and activity."
+      actions={
+        <>
+          <button
+            type="button"
+            onClick={openPlatformSettings}
+            className="flex items-center gap-1.5 rounded-lg border border-surface-border px-4 py-2.5 text-sm font-medium text-gray-700 transition-colors hover:bg-surface-muted dark:border-gray-700 dark:text-gray-200 dark:hover:bg-gray-700"
+          >
+            <HiOutlineCircleStack />
+            {platformSettings ? `${formatBytes(platformSettings.totalDbCapacityBytes)} total` : "Platform Settings"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCreate(true)}
+            className="flex items-center gap-1.5 rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-medium text-white-A700 transition-colors hover:bg-primary-700"
+          >
+            <HiOutlinePlus />
+            New Shop
+          </button>
+        </>
+      }
+    >
+      <div className="overflow-x-auto rounded-xl2 border border-surface-border bg-white-A700 shadow-card dark:border-gray-700 dark:bg-gray-800">
+        {loading ? (
+          <SkeletonRows count={4} />
+        ) : shops.length === 0 ? (
+          <EmptyState title='No shops yet — click "New Shop" to onboard the first one.' />
+        ) : (
+          <table className="w-full min-w-[52rem] table-auto border-collapse text-sm">
+            <thead className="bg-surface-subtle dark:bg-gray-900/40">
+              <tr>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Shop</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Tier</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Status</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Users</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Billing</th>
+                <th className="px-4 py-3 text-left font-semibold text-gray-600 dark:text-gray-300">Last sale</th>
+                <th className="px-4 py-3" />
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-surface-border dark:divide-gray-700">
+              {shops.map((shop) => (
+                <tr key={shop.id} className={busyShopId === shop.id ? "opacity-50" : ""}>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      onClick={() => setDetailShopId(String(shop.id))}
+                      className="flex items-center gap-1.5 text-left font-medium text-gray-800 hover:text-primary-600 hover:underline dark:text-gray-100 dark:hover:text-primary-400"
+                    >
+                      {shop.onlineNow && <span className="h-2 w-2 shrink-0 rounded-full bg-success-500" title="Online now" />}
+                      {shop.name}
+                    </button>
+                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                      {shop.slug} · since {new Date(shop.created_at).toLocaleDateString()}
+                    </p>
+                  </td>
+                  <td className="px-4 py-3">
+                    <select
+                      value={shop.tier}
+                      disabled={busyShopId === shop.id}
+                      onChange={(e) => handleTierChange(shop, e.target.value)}
+                      className={`rounded-md border-0 py-1 pl-2 pr-7 text-xs font-semibold capitalize focus:ring-2 focus:ring-primary-500 ${TIER_CHIP_CLASS[shop.tier]}`}
+                    >
+                      {TIERS.map((t) => (
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="px-4 py-3">
+                    <button
+                      type="button"
+                      disabled={busyShopId === shop.id}
+                      onClick={() => handleActiveToggle(shop)}
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
+                        shop.is_active
+                          ? "bg-success-50 text-success-600 hover:bg-success-500/20 dark:bg-success-500/10 dark:text-success-500"
+                          : "bg-danger-50 text-danger-600 hover:bg-danger-500/20 dark:bg-danger-500/10 dark:text-danger-400"
+                      }`}
+                    >
+                      {shop.is_active ? "Active" : "Inactive"}
+                    </button>
+                  </td>
+                  <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
+                    {shop.user_count} / {shop.max_users}
+                  </td>
+                  <td className="px-4 py-3">
+                    <SubscriptionChip subscription={shop.subscription} />
+                    {shop.subscription.dueOn && (
+                      <p className="mt-0.5 text-xs text-gray-500 dark:text-gray-400">due {formatDay(shop.subscription.dueOn)}</p>
+                    )}
+                  </td>
+                  <td className="px-4 py-3 text-gray-500 dark:text-gray-400" title={shop.last_sale_at || ""}>
+                    {timeAgo(shop.last_sale_at)}
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-3 text-right">
+                    <button
+                      type="button"
+                      onClick={() => setDetailShopId(String(shop.id))}
+                      aria-label={`Details for ${shop.name}`}
+                      title="Users, billing and activity"
+                      className="mr-1 inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+                    >
+                      <HiOutlineArrowTopRightOnSquare className="text-base" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openOwnerProfile(shop)}
+                      aria-label={`Owner profile for ${shop.name}`}
+                      title="Owner profile"
+                      className="mr-1 inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+                    >
+                      <HiOutlineUser className="text-base" />
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => openEdit(shop)}
+                      aria-label={`Edit ${shop.name}`}
+                      title="Edit shop"
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+                    >
+                      <HiOutlinePencil className="text-base" />
+                    </button>
+                  </td>
                 </tr>
-              </thead>
-              <tbody className="divide-y divide-surface-border dark:divide-gray-700">
-                {shops.map((shop) => (
-                  <tr key={shop.id} className={busyShopId === shop.id ? "opacity-50" : ""}>
-                    <td className="px-4 py-3">
-                      <p className="font-medium text-gray-800 dark:text-gray-100">{shop.name}</p>
-                      <p className="text-xs text-gray-500 dark:text-gray-400">{shop.slug}</p>
-                    </td>
-                    <td className="px-4 py-3">
-                      <select
-                        value={shop.tier}
-                        disabled={busyShopId === shop.id}
-                        onChange={(e) => handleTierChange(shop, e.target.value)}
-                        className={`rounded-md border-0 py-1 pl-2 pr-7 text-xs font-semibold capitalize focus:ring-2 focus:ring-primary-500 ${TIER_CHIP_CLASS[shop.tier]}`}
-                      >
-                        {TIERS.map((t) => (
-                          <option key={t} value={t}>
-                            {t}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        disabled={busyShopId === shop.id}
-                        onClick={() => handleActiveToggle(shop)}
-                        className={`rounded-full px-2.5 py-1 text-xs font-semibold transition-colors ${
-                          shop.is_active
-                            ? "bg-success-50 text-success-600 hover:bg-success-500/20 dark:bg-success-500/10 dark:text-success-500"
-                            : "bg-danger-50 text-danger-600 hover:bg-danger-500/20 dark:bg-danger-500/10 dark:text-danger-400"
-                        }`}
-                      >
-                        {shop.is_active ? "Active" : "Inactive"}
-                      </button>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600 dark:text-gray-300">
-                      {shop.user_count} / {shop.max_users}
-                    </td>
-                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400">
-                      {new Date(shop.created_at).toLocaleDateString()}
-                    </td>
-                    <td className="px-4 py-3 text-right">
-                      <button
-                        type="button"
-                        onClick={() => openOwnerProfile(shop)}
-                        aria-label={`Owner profile for ${shop.name}`}
-                        title="Owner profile"
-                        className="mr-1 inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
-                      >
-                        <HiOutlineUser className="text-base" />
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => openEdit(shop)}
-                        aria-label={`Edit ${shop.name}`}
-                        title="Edit shop"
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
-                      >
-                        <HiOutlinePencil className="text-base" />
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </main>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+
+      <ShopDetail shopId={detailShopId ? Number(detailShopId) : null} onClose={() => setDetailShopId("")} onChanged={loadShops} />
 
       <Modal isOpen={showCreate} onClose={() => setShowCreate(false)} title="New Shop">
         <form className="space-y-4" onSubmit={handleCreate}>
@@ -390,8 +412,7 @@ export default function AdminDashboard() {
               className={inputClass}
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-              How many staff accounts this shop can have at once (only matters once its tier
-              includes multi-user — Smart and up).
+              How many staff accounts this shop can have at once (only matters once its tier includes multi-user — Smart and up).
             </p>
           </div>
           <div className="border-t border-surface-border pt-4 dark:border-gray-700">
@@ -433,8 +454,8 @@ export default function AdminDashboard() {
                   placeholder="At least 8 characters"
                 />
                 <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  Shown as plain text here only because you're the one setting it — pass it to
-                  the shop owner directly, it isn't stored or shown again after this.
+                  Shown as plain text here only because you're the one setting it — pass it to the shop owner directly, it isn't
+                  stored or shown again after this.
                 </p>
               </div>
             </div>
@@ -493,10 +514,9 @@ export default function AdminDashboard() {
             />
             <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
               A share of the platform's total DB capacity (currently{" "}
-              {platformSettings ? formatBytes(platformSettings.totalDbCapacityBytes) : "…"} — see the
-              Platform Settings button above), not a fixed number — upgrading the total capacity
-              later rescales this automatically. At 75% of its own allotment, the shop's dashboard
-              starts showing a glowing warning icon. See the Usage tab for exactly how close each
+              {platformSettings ? formatBytes(platformSettings.totalDbCapacityBytes) : "…"} — see the Platform Settings button
+              above), not a fixed number — upgrading the total capacity later rescales this automatically. At 75% of its own
+              allotment, the shop's dashboard starts showing a glowing warning icon. See the Usage tab for exactly how close each
               shop is.
             </p>
           </div>
@@ -529,9 +549,8 @@ export default function AdminDashboard() {
         ) : (
           <form className="space-y-4" onSubmit={handleOwnerSave}>
             <p className="text-xs text-gray-500 dark:text-gray-400">
-              This is what a forgot-password request gets checked against — see the key icon
-              in the header once an owner submits one. Username and password aren't editable
-              here; password resets go through that same request flow.
+              This is what a forgot-password request gets checked against — see the key icon in the header once an owner submits
+              one. Username and password aren't editable here; password resets go through that same request flow.
             </p>
             <div>
               <label className={labelClass}>Owner name</label>
@@ -600,11 +619,10 @@ export default function AdminDashboard() {
           <div>
             <p className={labelClass}>Total DB capacity</p>
             <p className="mb-3 text-xs text-gray-500 dark:text-gray-400">
-              How big your Supabase database is actually allowed to get, per your real plan.
-              Supabase doesn't expose this to a query run from inside the app — this is you
-              telling the system what your plan actually is. Every shop's quota is a
-              <strong> percentage</strong> of this number, so changing it here instantly
-              rescales every shop's effective quota, with nothing to update per-shop.
+              How big your Supabase database is actually allowed to get, per your real plan. Supabase doesn't expose this to a
+              query run from inside the app — this is you telling the system what your plan actually is. Every shop's quota is a
+              <strong> percentage</strong> of this number, so changing it here instantly rescales every shop's effective quota,
+              with nothing to update per-shop.
             </p>
             <div className="space-y-2">
               {platformSettings?.presets?.map((preset) => (
@@ -664,6 +682,6 @@ export default function AdminDashboard() {
           </button>
         </form>
       </Modal>
-    </div>
+    </AdminPage>
   );
 }

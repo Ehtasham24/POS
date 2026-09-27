@@ -1,6 +1,7 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { hashPassword, comparePassword, signToken } = require("../utils/auth");
+const { assertLoginAllowed, recordLoginEvent } = require("./loginSecurityService");
 
 // Shared by login (by username) and findUserById (by id — the app's single hottest
 // query, run on every authenticated request via requireAuth) so both ever build on top
@@ -36,16 +37,21 @@ const toPublicUser = (row) => ({
   shopMaxUsers: row.shop_max_users,
 });
 
-const login = async (username, password) => {
+// `client` ({ ip, userAgent }) is where the attempt came from — recorded in the sign-in
+// history and used for the lockout (Sevices/loginSecurityService.js).
+const login = async (username, password, client = {}) => {
   if (!username || !password) throw new ApiError(400, "Username and password are required");
+  await assertLoginAllowed(username, client);
 
   const { rows } = await pool.query(`${USER_SHOP_QUERY} WHERE u.username = $1`, [username]);
   const user = rows[0];
   // Same message for "no such user" and "wrong password" — distinguishing them lets an
   // attacker enumerate valid usernames.
   if (!user || !user.is_active || !(await comparePassword(password, user.password_hash))) {
+    await recordLoginEvent({ username, userId: user?.id, shopId: user?.shop_id, outcome: "failure", ...client });
     throw new ApiError(401, "Invalid username or password");
   }
+  await recordLoginEvent({ username, userId: user.id, shopId: user.shop_id, outcome: "success", ...client });
 
   const token = signToken({ id: user.id, role: user.role, displayName: user.display_name });
   return { token, user: toPublicUser(user) };

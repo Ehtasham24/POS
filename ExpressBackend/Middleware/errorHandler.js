@@ -8,6 +8,7 @@
 // database's answer to one shop referencing another shop's record, so it has to read as
 // "not found", never as a detailed explanation of what exists elsewhere.
 const FOREIGN_KEY_VIOLATION = "23503";
+const { recordServerError } = require("../Sevices/monitoringService");
 
 const errorHandler = (err, req, res, next) => {
   console.error(err);
@@ -21,7 +22,19 @@ const errorHandler = (err, req, res, next) => {
         : "Something this refers to wasn't found.",
     });
   }
-  res.status(err.status || 500).json({ message: err.message || "Internal server error" });
+  const status = err.status || 500;
+  // Every server-side failure also lands in the admin console's Health page (latest errors).
+  if (status >= 500) {
+    recordServerError({
+      method: req.method,
+      path: req.originalUrl.split("?")[0],
+      status,
+      message: err.message,
+      shopId: req.shop?.id,
+      userId: req.user?.id,
+    });
+  }
+  res.status(status).json({ message: err.message || "Internal server error" });
 };
 
 module.exports = errorHandler;
