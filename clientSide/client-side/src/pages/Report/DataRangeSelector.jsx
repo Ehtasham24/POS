@@ -56,20 +56,20 @@ const DateRangeSelector = ({
       </div>
       <div className="flex flex-row flex-wrap items-end gap-4 md:flex-col md:items-stretch">
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">Start Date:</label>
+          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t("salesHistory.startDate")}</label>
           <input type="datetime-local" value={startDate} onChange={onStartDateChange} className={inputClass} />
         </div>
         <div>
-          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">End Date:</label>
+          <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t("salesHistory.endDate")}</label>
           <input type="datetime-local" value={endDate} onChange={onEndDateChange} className={inputClass} />
         </div>
         <div>
           <label className="mb-1 block text-sm font-medium text-gray-700 dark:text-gray-300">{t("report.paymentMedium")}:</label>
           <select value={paymentMethod} onChange={onPaymentMethodChange} className={inputClass}>
             <option value="">{t("report.allPaymentMediums")}</option>
-            <option value="cash">Cash</option>
-            <option value="card">Card</option>
-            <option value="bank_transfer">Bank Transfer</option>
+            <option value="cash">{t("payment.cash")}</option>
+            <option value="card">{t("payment.card")}</option>
+            <option value="bank_transfer">{t("payment.bankTransfer")}</option>
           </select>
         </div>
       </div>

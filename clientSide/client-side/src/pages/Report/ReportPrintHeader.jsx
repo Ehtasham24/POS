@@ -8,7 +8,9 @@ import { useTimezone } from "timezone/TimezoneContext";
 // looks like it came from a real business, not a browser tab. Reuses the exact company
 // settings (logo/name/NTN/address/phone) already used for thermal receipts
 // (utils/printReceipt.js), so the two never disagree.
-export default function ReportPrintHeader({ startDate, endDate, filterType }) {
+const PAYMENT_LABEL_KEYS = { cash: "payment.cash", card: "payment.card", bank_transfer: "payment.bankTransfer" };
+
+export default function ReportPrintHeader({ startDate, endDate, filterType, paymentMethod }) {
   const { t } = useLanguage();
   const { formatDateTime } = useTimezone();
   const [company, setCompany] = useState({});
@@ -32,7 +34,8 @@ export default function ReportPrintHeader({ startDate, endDate, filterType }) {
   // string with no timezone info at all, parsed by JS as this browser's own local time) —
   // re-displaying them with an explicit business timeZone would silently double-convert
   // them rather than showing back what was actually typed.
-  const formatDisplay = (value) => (value ? new Date(value).toLocaleString() : "—");
+  const formatDisplay = (value) =>
+    value ? new Date(value).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" }) : "—";
 
   return (
     <div className="hidden print:block mb-6 border-b-2 border-gray-800 pb-4">
@@ -55,6 +58,11 @@ export default function ReportPrintHeader({ startDate, endDate, filterType }) {
           <p className="mt-1 text-xs text-gray-700">
             {t("report.period")}: {formatDisplay(startDate)} &ndash; {formatDisplay(endDate)}
           </p>
+          {PAYMENT_LABEL_KEYS[paymentMethod] && (
+            <p className="text-xs text-gray-700">
+              {t("report.paymentMedium")}: {t(PAYMENT_LABEL_KEYS[paymentMethod])}
+            </p>
+          )}
           <p className="text-xs text-gray-700">
             {t("report.filterLabel")}: {filterLabel}
           </p>

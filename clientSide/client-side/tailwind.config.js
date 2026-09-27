@@ -35,5 +35,12 @@ module.exports = {
       fontFamily: { poppins: "Poppins, 'Noto Nastaliq Urdu', sans-serif" },
     },
   },
-  plugins: [require("@tailwindcss/forms")],
+  plugins: [
+    require("@tailwindcss/forms"),
+    // `printing:` styles the Sales Report's printout. Report.jsx puts .is-printing on <html>
+    // before it calls window.print() and keeps it until afterprint, so these hold for the
+    // page it measures beforehand and for the paper alike — unlike md:/sm:, which would
+    // switch on the paper's own (narrow) width.
+    ({ addVariant }) => addVariant("printing", ".is-printing &"),
+  ],
 };

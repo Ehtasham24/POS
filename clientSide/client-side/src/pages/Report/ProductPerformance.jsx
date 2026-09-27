@@ -118,7 +118,7 @@ const ProductPerformance = forwardRef(function ProductPerformance(
       ? SortHeader
       : ({ children, align = "right" }) => (
           <th
-            className={`px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 ${align === "right" ? "text-right" : "text-left"}`}
+            className={`whitespace-nowrap px-4 py-2.5 text-xs font-semibold uppercase tracking-wide text-gray-500 ${align === "right" ? "text-right" : "text-left"}`}
           >
             {children}
           </th>
@@ -126,7 +126,7 @@ const ProductPerformance = forwardRef(function ProductPerformance(
     const totals = result.totals;
     const totalMargin = marginOf(totals.profit, totals.revenue);
     return (
-      <table className="w-full min-w-[56rem] table-auto">
+      <table className="w-full min-w-[56rem] table-auto printing:min-w-0">
         <thead className="bg-surface-subtle dark:bg-gray-800">
           <tr>
             <Header sortKey="name" align="left">

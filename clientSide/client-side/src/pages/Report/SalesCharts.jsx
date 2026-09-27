@@ -1,279 +1,203 @@
-import { forwardRef, useImperativeHandle, useMemo, useRef, useState } from "react";
-import { useTimezone } from "timezone/TimezoneContext";
 import {
   ResponsiveContainer,
-  LineChart,
+  ComposedChart,
+  BarChart,
+  Bar,
   Line,
   XAxis,
   YAxis,
   CartesianGrid,
   Tooltip,
   Legend,
-  BarChart,
-  Bar,
-  Cell,
+  ReferenceLine,
 } from "recharts";
+import { useLanguage } from "i18n/LanguageContext";
 import { formatPKR } from "utils/money";
+import ReportCard, { chipClass } from "./ReportCard";
 
 const GRID_COLOR = "#9ca3af33";
 const AXIS_COLOR = "#9ca3af";
-const TOOLTIP_STYLE = {
-  backgroundColor: "#1f2937",
-  border: "none",
-  borderRadius: 8,
-  color: "#f3f4f6",
-  fontSize: 12,
-};
-// Recharts' default tooltip label (the bold heading line, e.g. a product/day name) isn't
-// styled by contentStyle — it defaults to plain black text with no color override, which
-// is unreadable against TOOLTIP_STYLE's dark background in both light and dark app theme
-// (the tooltip itself is always dark, regardless of theme). Set explicitly rather than
-// relying on inheritance.
-const TOOLTIP_LABEL_STYLE = {
-  color: "#f3f4f6",
-  fontWeight: 600,
-  marginBottom: 4,
-};
-// Same problem for the item value line (e.g. "Profit : 29700"): recharts colors it from
-// the series' resolved stroke/fill, but the Bar here only sets fill per-point via <Cell>,
-// not on <Bar> itself, so recharts has nothing to resolve and falls back to its own
-// default — plain black, same unreadable-on-dark issue as the label.
-const TOOLTIP_ITEM_STYLE = { color: "#f3f4f6" };
+// Net sales is indigo on every chart here, profit green — the same colour always means the
+// same measure.
+const NET_SALES_COLOR = "#4f46e5";
+const PROFIT_COLOR = "#16a34a";
+// Every weekday shows up at least once from a week's range on — below that the weekday chart
+// is just the trend chart again with its days reordered. (00:00 Monday to 23:59 Sunday is
+// 6.999 days, hence the rounding where it's used.)
+const MIN_DAYS_FOR_WEEKDAYS = 7;
 
-// Revenue is indigo everywhere on this page (the trend line and both "when" charts), so the
-// same colour always means the same measure.
-const REVENUE_COLOR = "#4f46e5";
+// Axis ticks as "21M" / "450K" — full rupee amounts are too wide for the axis gutter; the
+// exact figure is in the tooltip.
+const compactAmount = (value) => new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 }).format(value);
 
-// SVG, not a CSS background-color swatch — browsers only print background colors when
-// "print background graphics" is on (often off by default), so a plain
-// <span style={{backgroundColor}}/> silently vanishes in a printed/PDF report while the
-// chart's own SVG-filled shapes (and recharts' built-in <Legend>, which is also SVG) print
-// fine. This is what was making the pie/bar legends unreadable on paper.
+const hourLabel = (hour) => `${hour % 12 || 12}${hour < 12 ? "am" : "pm"}`;
+
+// SVG, not a CSS background-color swatch — backgrounds only print when the browser's
+// "background graphics" option is on.
 const ColorDot = ({ color }) => (
   <svg width="10" height="10" viewBox="0 0 10 10" className="shrink-0">
     <circle cx="5" cy="5" r="5" fill={color} />
   </svg>
 );
 
-const ChartCard = ({ title, children }) => (
-  <div className="print-avoid-break rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-800 dark:bg-gray-900">
-    <h3 className="mb-4 font-poppins text-base font-bold text-gray-800 dark:text-gray-100">{title}</h3>
-    {children}
-  </div>
-);
-
-// Charts for the Sales Report: revenue/profit trend, top products by profit, and when sales
-// happen (by hour of day and by day of week, in the shop's own timezone). Revenue share by
-// category is a table with share bars in ReportBreakdowns instead of a pie — with a dozen+
-// categories a pie's slices are unreadable and its colours had to repeat.
-//
-// Keeps recharts' entrance animation (an arc/line/bar sweeping in over ~1.5s on mount) —
-// but exposes waitForAnimations() via ref for Report.jsx's Print button, because printing
-// *while* a chart is mid-animation can capture it in an unfinished state (most visibly a
-// pie chart frozen mid-sweep, looking like a slice is missing, different every time
-// depending on exactly when the print snapshot lands). waitForAnimations() forces every
-// chart to remount — via remountKey, rather than hoping the print layout's width change
-// happens to trigger one on its own — and resolves only once each chart's onAnimationEnd
-// has actually fired, so print always waits for the real, current animation to finish
-// instead of a guessed delay.
-// Axis ticks as "21M" / "450K" — full rupee amounts are too wide for the axis gutter and
-// get clipped; the exact figure is in the tooltip.
-const compactAmount = (value) =>
-  new Intl.NumberFormat("en-US", {
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(value);
-
-const hourLabel = (hour) => `${hour % 12 || 12}${hour < 12 ? "a" : "p"}`;
-
-const SalesCharts = forwardRef(function SalesCharts(
-  { timeSeriesData, topProducts = [], byHour = [], byWeekday = [], weekdayLabel },
-  ref,
-) {
-  const { formatDateTime } = useTimezone();
-  const [remountKey, setRemountKey] = useState(0);
-  const pendingRef = useRef(new Set());
-  const resolveRef = useRef(null);
-
-  // The "day" values themselves are already grouped in the business timezone server-side
-  // (see fetchSalesTimeSeries in salesService.js) — this just needs to display them in that
-  // same timezone rather than the viewer's own, so the axis label always agrees with which
-  // bucket a given point actually landed in.
-  const formatDay = (iso) => formatDateTime(iso, { month: "short", day: "numeric" });
-
-  const hasTrend = timeSeriesData && timeSeriesData.length > 0;
-  const hasWhen = byHour.some((h) => h.revenue !== 0);
-  const hourData = byHour.map((h) => ({ ...h, label: hourLabel(h.hour) }));
-  const weekdayData = byWeekday.map((d) => ({
-    ...d,
-    label: weekdayLabel ? weekdayLabel(d.weekday) : String(d.weekday),
-  }));
-  const whenTooltip = {
-    contentStyle: TOOLTIP_STYLE,
-    labelStyle: TOOLTIP_LABEL_STYLE,
-    itemStyle: TOOLTIP_ITEM_STYLE,
-    formatter: (value) => [formatPKR(value), "Revenue"],
-    labelFormatter: (label, payload) => {
-      const transactions = payload?.[0]?.payload?.transactions;
-      return transactions !== undefined ? `${label} · ${transactions} sales` : label;
-    },
-  };
-
-  // Every series recharts will animate on the next remount — used to know exactly what
-  // waitForAnimations() needs to wait for.
-  const animatedKeys = useMemo(() => {
-    const keys = [];
-    if (hasTrend) keys.push("line-revenue", "line-profit");
-    if (topProducts.length > 0) keys.push("bar");
-    if (hasWhen) keys.push("bar-weekday", "bar-hour");
-    return keys;
-  }, [hasTrend, topProducts.length, hasWhen]);
-
-  const markDone = (key) => () => {
-    pendingRef.current.delete(key);
-    if (pendingRef.current.size === 0 && resolveRef.current) {
-      resolveRef.current();
-      resolveRef.current = null;
-    }
-  };
-
-  useImperativeHandle(
-    ref,
-    () => ({
-      waitForAnimations: () =>
-        new Promise((resolve) => {
-          if (animatedKeys.length === 0) {
-            resolve();
-            return;
-          }
-          pendingRef.current = new Set(animatedKeys);
-          resolveRef.current = resolve;
-          // Force a fresh remount so there's always a real, current animation to wait for,
-          // instead of depending on whether the print layout's width change happens to
-          // trigger one on its own.
-          setRemountKey((k) => k + 1);
-          // Safety net — recharts should always fire onAnimationEnd, but a missed event
-          // must never hang the Print button forever.
-          setTimeout(() => {
-            if (resolveRef.current === resolve) {
-              resolveRef.current = null;
-              resolve();
-            }
-          }, 4000);
-        }),
-    }),
-    [animatedKeys],
-  );
-
-  if (!hasTrend && topProducts.length === 0 && !hasWhen) return null;
-
+const ChartTooltip = ({ active, payload, label, salesLabel }) => {
+  if (!active || !payload?.length) return null;
+  const { transactions } = payload[0].payload;
   return (
-    <div className="mb-6 flex flex-col gap-4">
-      {hasTrend && (
-        <ChartCard title="Revenue & Profit Trend">
-          <ResponsiveContainer key={remountKey} width="100%" height={260}>
-            <LineChart data={timeSeriesData} margin={{ left: 0, right: 12 }}>
-              <CartesianGrid stroke={GRID_COLOR} vertical={false} />
-              <XAxis dataKey="day" tickFormatter={formatDay} stroke={AXIS_COLOR} fontSize={12} />
-              <YAxis stroke={AXIS_COLOR} fontSize={12} tickFormatter={compactAmount} />
-              <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} labelFormatter={formatDay} />
-              <Legend wrapperStyle={{ fontSize: 12 }} />
-              <Line
-                type="monotone"
-                dataKey="revenue"
-                name="Revenue"
-                stroke={REVENUE_COLOR}
-                strokeWidth={2}
-                dot={false}
-                onAnimationEnd={markDone("line-revenue")}
-              />
-              <Line
-                type="monotone"
-                dataKey="profit"
-                name="Profit"
-                stroke="#16a34a"
-                strokeWidth={2}
-                dot={false}
-                onAnimationEnd={markDone("line-profit")}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </ChartCard>
-      )}
-
-      <div className="grid grid-cols-2 gap-4 md:grid-cols-1">
-        {topProducts.length > 0 && (
-          <ChartCard title="Top Products by Profit">
-            <ResponsiveContainer key={remountKey} width="100%" height={280}>
-              <BarChart data={topProducts} layout="vertical" margin={{ left: 12, right: 12 }}>
-                <CartesianGrid stroke={GRID_COLOR} horizontal={false} />
-                <XAxis type="number" stroke={AXIS_COLOR} fontSize={12} tickFormatter={compactAmount} />
-                <YAxis type="category" dataKey="name" width={100} stroke={AXIS_COLOR} fontSize={12} tick={{ fill: AXIS_COLOR }} />
-                <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} itemStyle={TOOLTIP_ITEM_STYLE} />
-                <Bar dataKey="profit" name="Profit" radius={[0, 4, 4, 0]} onAnimationEnd={markDone("bar")}>
-                  {topProducts.map((entry, index) => (
-                    <Cell key={index} fill={entry.profit >= 0 ? "#16a34a" : "#dc2626"} />
-                  ))}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-            <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
-              <span className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-                <ColorDot color="#16a34a" />
-                Profit
-              </span>
-              <span className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-                <ColorDot color="#dc2626" />
-                Loss
-              </span>
-            </div>
-          </ChartCard>
-        )}
-
-        {hasWhen && (
-          <ChartCard title="Sales by Day of Week">
-            <ResponsiveContainer key={remountKey} width="100%" height={280}>
-              <BarChart data={weekdayData} margin={{ left: 0, right: 12 }}>
-                <CartesianGrid stroke={GRID_COLOR} vertical={false} />
-                <XAxis dataKey="label" stroke={AXIS_COLOR} fontSize={12} />
-                <YAxis stroke={AXIS_COLOR} fontSize={12} tickFormatter={compactAmount} />
-                <Tooltip {...whenTooltip} cursor={{ fill: GRID_COLOR }} />
-                <Bar
-                  dataKey="revenue"
-                  name="Revenue"
-                  fill={REVENUE_COLOR}
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={36}
-                  onAnimationEnd={markDone("bar-weekday")}
-                />
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
-        )}
-      </div>
-
-      {hasWhen && (
-        <ChartCard title="Sales by Hour of Day">
-          <ResponsiveContainer key={remountKey} width="100%" height={240}>
-            <BarChart data={hourData} margin={{ left: 0, right: 12 }}>
-              <CartesianGrid stroke={GRID_COLOR} vertical={false} />
-              <XAxis dataKey="label" stroke={AXIS_COLOR} fontSize={11} interval="preserveStartEnd" />
-              <YAxis stroke={AXIS_COLOR} fontSize={12} tickFormatter={compactAmount} />
-              <Tooltip {...whenTooltip} cursor={{ fill: GRID_COLOR }} />
-              <Bar
-                dataKey="revenue"
-                name="Revenue"
-                fill={REVENUE_COLOR}
-                radius={[4, 4, 0, 0]}
-                maxBarSize={28}
-                onAnimationEnd={markDone("bar-hour")}
-              />
-            </BarChart>
-          </ResponsiveContainer>
-        </ChartCard>
+    <div className="rounded-lg bg-gray-800 px-3 py-2 text-xs text-white-A700 shadow-lg">
+      <p className="mb-1 font-semibold">{label}</p>
+      {payload.map((item) => (
+        <p key={item.dataKey} className="flex items-center gap-2">
+          <ColorDot color={item.color} />
+          {item.name}: <span className="font-semibold">{formatPKR(item.value)}</span>
+        </p>
+      ))}
+      {transactions !== undefined && (
+        <p className="mt-1 text-gray-300">
+          {transactions.toLocaleString("en-US")} {salesLabel}
+        </p>
       )}
     </div>
   );
-});
+};
 
-export default SalesCharts;
+const axisProps = { stroke: AXIS_COLOR, fontSize: 12, tickLine: false };
+const legendText = (value) => <span className="text-gray-600 dark:text-gray-300">{value}</span>;
+
+// Revenue for one slot of time (an hour of the day, a weekday) — the shape both "busiest"
+// charts share.
+const SlotChart = ({ data, name, salesLabel, height }) => (
+  <ResponsiveContainer width="100%" height={height}>
+    <BarChart data={data} margin={{ top: 8, left: 0, right: 12 }}>
+      <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+      <XAxis dataKey="label" {...axisProps} interval="preserveStartEnd" minTickGap={8} />
+      <YAxis {...axisProps} axisLine={false} width={52} tickFormatter={compactAmount} />
+      <Tooltip content={<ChartTooltip salesLabel={salesLabel} />} cursor={{ fill: GRID_COLOR }} />
+      <Bar dataKey="revenue" name={name} fill={NET_SALES_COLOR} radius={[4, 4, 0, 0]} maxBarSize={40} isAnimationActive={false} />
+    </BarChart>
+  </ResponsiveContainer>
+);
+
+// When the money came in, one view at a time (same tabs as the category/cashier breakdown):
+// net sales and profit over the period, the busiest hours of the day, and the busiest
+// weekdays. A view only appears when the range can actually show it — a single day has no
+// trend, a few days have no weekday pattern. On paper every view prints, one under another.
+//
+// Charts draw without animation: nothing to wait for before printing, and less work on a
+// slow machine.
+export default function SalesCharts({ trend, byHour, byWeekday, spanDays, view, onViewChange, printing }) {
+  const { t, language } = useLanguage();
+  const locale = language === "ur" ? "ur-PK" : "en-US";
+  if (!trend || !byHour) return <div className="mb-6 h-80 animate-pulse rounded-2xl bg-surface-muted dark:bg-gray-800" />;
+
+  const salesLabel = t("report.transactions").toLowerCase();
+  // "YYYY-MM-DD" is already the shop's own calendar day — formatted in UTC so the viewer's
+  // timezone can't move it to the day before.
+  const dateFormat = trend.unit === "month" ? { month: "short", year: "numeric" } : { month: "short", day: "numeric" };
+  const trendData = trend.rows.map((row) => ({
+    ...row,
+    label: new Date(`${row.day}T00:00:00Z`).toLocaleDateString(locale, { ...dateFormat, timeZone: "UTC" }),
+  }));
+  // Only the hours the shop actually trades — 24 bars with most of them empty just shrinks the ones that matter.
+  const activeHours = byHour.filter((h) => h.transactions > 0).map((h) => h.hour);
+  const hourData = byHour
+    .filter((h) => h.hour >= Math.min(...activeHours) && h.hour <= Math.max(...activeHours))
+    .map((h) => ({ ...h, label: hourLabel(h.hour) }));
+  const weekdayData = byWeekday.map((d) => ({
+    ...d,
+    // 2024-01-01 was a Monday, ISO weekday 1.
+    label: new Date(Date.UTC(2024, 0, d.weekday)).toLocaleDateString(locale, { weekday: "short", timeZone: "UTC" }),
+  }));
+
+  // Shorter on paper, so the charts share pages instead of taking one each.
+  const slotHeight = printing ? 170 : 260;
+  const views = [
+    trendData.length > 1 && {
+      key: "trend",
+      label: t("report.trendTab"),
+      title: t("report.salesTrend"),
+      hint: t(`report.trendHint_${trend.unit}`),
+      chart: (
+        <ResponsiveContainer width="100%" height={printing ? 200 : 300}>
+          <ComposedChart data={trendData} margin={{ top: 8, left: 0, right: 12 }}>
+            <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+            <XAxis dataKey="label" {...axisProps} minTickGap={16} />
+            <YAxis {...axisProps} axisLine={false} width={52} tickFormatter={compactAmount} />
+            <ReferenceLine y={0} stroke={AXIS_COLOR} />
+            <Tooltip content={<ChartTooltip />} cursor={{ fill: GRID_COLOR }} />
+            <Legend iconType="circle" iconSize={10} wrapperStyle={{ fontSize: 12 }} formatter={legendText} />
+            <Bar
+              dataKey="revenue"
+              name={t("report.netSales")}
+              fill={NET_SALES_COLOR}
+              radius={[4, 4, 0, 0]}
+              maxBarSize={32}
+              isAnimationActive={false}
+            />
+            <Line
+              dataKey="profit"
+              name={t("report.profit")}
+              stroke={PROFIT_COLOR}
+              strokeWidth={2}
+              dot={trendData.length <= 31 ? { r: 3, fill: PROFIT_COLOR } : false}
+              isAnimationActive={false}
+            />
+          </ComposedChart>
+        </ResponsiveContainer>
+      ),
+    },
+    hourData.length > 0 && {
+      key: "hours",
+      label: t("report.hoursTab"),
+      title: t("report.busiestHours"),
+      hint: t("report.busiestHoursHint"),
+      chart: <SlotChart data={hourData} name={t("report.netSales")} salesLabel={salesLabel} height={slotHeight} />,
+    },
+    Math.round(spanDays) >= MIN_DAYS_FOR_WEEKDAYS &&
+      hourData.length > 0 && {
+        key: "days",
+        label: t("report.daysTab"),
+        title: t("report.busiestDays"),
+        hint: t("report.busiestDaysHint"),
+        chart: <SlotChart data={weekdayData} name={t("report.netSales")} salesLabel={salesLabel} height={slotHeight} />,
+      },
+  ].filter(Boolean);
+  if (views.length === 0) return null;
+  const current = views.find((v) => v.key === view) || views[0];
+
+  return (
+    <ReportCard
+      title={current.title}
+      avoidBreak={false}
+      actions={
+        views.length > 1 && (
+          <div role="tablist" className="flex gap-2">
+            {views.map((v) => (
+              <button
+                key={v.key}
+                type="button"
+                role="tab"
+                aria-selected={v === current}
+                onClick={() => onViewChange(v.key)}
+                className={chipClass(v === current)}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+        )
+      }
+    >
+      {/* The views not picked on screen are only built for the printout, not kept hidden on screen. */}
+      {views
+        .filter((v) => v === current || printing)
+        .map((v) => (
+          <div key={v.key} className="print-avoid-break px-3 pb-4 printing:px-0">
+            {v !== current && <h4 className="px-2 pt-4 font-poppins text-base font-bold text-gray-800">{v.title}</h4>}
+            <p className="px-2 pb-3 pt-3 text-xs text-gray-500 dark:text-gray-400">{v.hint}</p>
+            {v.chart}
+          </div>
+        ))}
+    </ReportCard>
+  );
+}

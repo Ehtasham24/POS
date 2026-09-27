@@ -1,6 +1,7 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { dateRangeCondition } = require("../utils/dateRangeFilter");
+const { shopRangeToUtc } = require("./settingsService");
 const { applyStockDelta } = require("./lotService");
 
 // 'restock' is the only positive-quantity reason meant for routine use — a plain (non-batch-
@@ -127,6 +128,7 @@ const listAdjustments = async ({ productId, startDate, endDate, reasonCode, page
 // section, both overall and broken down by reason/product — this is what finally puts
 // shrinkage cost somewhere visible, instead of it silently vanishing from every report.
 const getShrinkageSummary = async (startDate, endDate, shopId) => {
+  [startDate, endDate] = await shopRangeToUtc(startDate, endDate, shopId);
   const { rows: totals } = await pool.query(
     `SELECT COALESCE(SUM(-quantity_change), 0) AS total_units_lost,
             COALESCE(SUM(-quantity_change * buying_price), 0) AS total_cost_impact

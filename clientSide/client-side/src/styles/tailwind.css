@@ -81,13 +81,13 @@
   }
 }
 
-/* Mirrors the @media print rules above exactly, but toggled by JS (Report.jsx's
-   handlePrint, via a class on <html>) *before* window.print() is called instead of only
-   implicitly once the browser applies @media print. This lets the resulting layout switch
-   — and the chart remount/re-animation it triggers, since ResponsiveContainer reacts to
-   the width change — happen and fully settle while script can still await it. By the time
-   window.print() actually runs, the page is already in this exact state, so nothing shifts
-   again mid-print. See SalesCharts.jsx's waitForAnimations(). */
+/* The same rules as @media print above plus the printout's own layout, toggled by JS
+   (Report.jsx's handlePrint, via a class on <html>) *before* window.print() is called
+   instead of only once the browser applies @media print. The layout switch — and the
+   charts redrawing at the paper's width, since ResponsiveContainer reacts to it — happens
+   and settles while script can still wait for it, and the class stays on until afterprint,
+   so by the time window.print() runs the page is already exactly what goes on paper.
+   The `printing:` Tailwind variant (tailwind.config.js) keys off the same class. */
 .is-printing body * {
   visibility: hidden !important;
 }
@@ -99,10 +99,52 @@
   position: absolute;
   left: 0;
   top: 0;
-  width: 100%;
+  /* The printable width of the @page below (A4 minus its margins), fixed rather than 100%:
+     the charts size themselves to this box before window.print(), and the screen is far
+     wider than the paper — at 100% they'd be drawn for the screen and cut off on paper. */
+  width: 186mm;
+  /* Colour that carries meaning (category share bars, profit/loss) prints even when the
+     browser's "background graphics" option is off. */
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
 }
 .is-printing .print-area .recharts-default-tooltip {
   visibility: hidden !important;
+}
+/* A long table runs across pages row by row: no row split in half, the column headings
+   repeat on every page (the <thead> default), and the totals row prints once at the end
+   rather than at the foot of every page. */
+.is-printing .print-area tr {
+  break-inside: avoid;
+}
+.is-printing .print-area tfoot {
+  display: table-row-group;
+}
+/* Eight columns of rupee amounts have to fit the paper's width without the browser
+   shrinking the whole page to make them fit. */
+.is-printing .print-area th,
+.is-printing .print-area td {
+  padding: 3px 6px;
+  line-height: 1.3;
+}
+.is-printing .print-area td {
+  font-size: 11px;
+}
+.is-printing .print-area td .text-xs {
+  font-size: 9.5px;
+}
+.is-printing .print-area th {
+  font-size: 10px;
+}
+
+@page {
+  size: A4;
+  margin: 12mm;
+  @bottom-right {
+    content: counter(page) " / " counter(pages);
+    font-size: 9px;
+    color: #6b7280;
+  }
 }
 
 /* Keeps one report "card" (a chart, a category's table, a summary card) from being split
@@ -110,9 +152,9 @@
    a card's heading could land at the bottom of one page while its actual content started
    fresh on the next. break-inside is the modern property; page-break-inside is kept
    alongside it for engines that only understand the older alias. Applied per-component
-   (SalesCharts.jsx's ChartCard, GroupedSalesData.jsx, PaymentMediumSummary/index.jsx,
-   Report/ShrinkageSummary.jsx) rather than to .print-area's children generically, since
-   not everything printed is a "card" worth protecting this way. */
+   (Report/ReportCard.jsx, each chart in Report/SalesCharts.jsx, the KPI tiles,
+   PaymentMediumSummary/index.jsx) rather than to .print-area's children generically:
+   a long table is better split across pages than pushed whole onto the next one. */
 .print-avoid-break {
   break-inside: avoid;
   page-break-inside: avoid;

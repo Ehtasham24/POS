@@ -22,7 +22,7 @@ const ProfitCell = ({ profit, revenue }) => {
 const Empty = ({ text }) => <p className="px-5 py-8 text-center text-sm text-gray-500 dark:text-gray-400">{text}</p>;
 
 const CategoryTable = ({ rows, shareBase, t }) => (
-  <table className="w-full min-w-[30rem] table-auto">
+  <table className="w-full min-w-[30rem] table-auto printing:min-w-0">
     <thead>
       <tr>
         <th className={th}>{t("report.category")}</th>
@@ -62,7 +62,7 @@ const CategoryTable = ({ rows, shareBase, t }) => (
 );
 
 const CashierTable = ({ rows, t }) => (
-  <table className="w-full min-w-[26rem] table-auto">
+  <table className="w-full min-w-[26rem] table-auto printing:min-w-0">
     <thead>
       <tr>
         <th className={th}>{t("report.cashier")}</th>
@@ -119,6 +119,7 @@ export default function ReportBreakdowns({ breakdowns, netSales, view, onViewCha
     <ReportCard
       title={current.title}
       className={className}
+      avoidBreak={false}
       actions={
         <div role="tablist" className="flex gap-2">
           {views.map((v) => (
@@ -139,7 +140,7 @@ export default function ReportBreakdowns({ breakdowns, netSales, view, onViewCha
       {views.map((v) => (
         <div key={v.key} className={v === current ? "overflow-x-auto" : "print-only"}>
           {/* On paper the card's own title only names the view picked on screen. */}
-          {v !== current && <h4 className="px-5 pb-1 pt-4 font-poppins text-base font-bold text-gray-800">{v.title}</h4>}
+          {v !== current && <h4 className="px-4 pb-1 pt-6 font-poppins text-base font-bold text-gray-800">{v.title}</h4>}
           {v.body || <Empty text={t("report.noSalesInPeriod")} />}
         </div>
       ))}

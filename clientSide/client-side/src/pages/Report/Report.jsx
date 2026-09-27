@@ -40,9 +40,12 @@ const endOfToday = () => {
 // the edits to settle before asking the server, instead of one request per keystroke.
 const FILTER_DEBOUNCE_MS = 400;
 
+// Two frames: on the first a chart measures its (new) box, on the second it has drawn at that size.
+const twoFrames = () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
 const SalesDataComponent = () => {
   const toast = useToast();
-  const { t, language } = useLanguage();
+  const { t } = useLanguage();
   // Charts (trend/when) are Smart+, shrinkage cost analysis is Advanced-only. The tiles,
   // breakdown tables, payment mediums and product table are on every tier.
   const hasSalesCharts = useFeature("salesCharts");
@@ -55,6 +58,7 @@ const SalesDataComponent = () => {
   const [startDate, setStartDate] = useUrlFilterState("startDate", startOfToday());
   const [endDate, setEndDate] = useUrlFilterState("endDate", endOfToday());
   const [breakdownView, setBreakdownView] = useUrlFilterState("breakdown", "category");
+  const [chartView, setChartView] = useUrlFilterState("chart", "trend");
   const [searchParams, setSearchParams] = useSearchParams();
 
   const queryStart = useDebounce(startDate, FILTER_DEBOUNCE_MS);
@@ -62,9 +66,8 @@ const SalesDataComponent = () => {
 
   const [summary, setSummary] = useState(null);
   const [breakdowns, setBreakdowns] = useState(null);
-  const [timeSeriesData, setTimeSeriesData] = useState([]);
-  const [topProducts, setTopProducts] = useState([]);
-  const chartsRef = useRef(null);
+  const [trend, setTrend] = useState(null);
+  const [printing, setPrinting] = useState(false);
   const productsRef = useRef(null);
   // Only the latest filter change may set state — an older, slower response for a filter
   // that's since moved on must never overwrite what's on screen.
@@ -89,17 +92,8 @@ const SalesDataComponent = () => {
       .catch((error) => isCurrent() && toast.error(error.message));
     if (hasSalesCharts) {
       reportPost("/api/Sales/timeseries", body)
-        .then((data) => isCurrent() && setTimeSeriesData(data))
+        .then((data) => isCurrent() && setTrend(data))
         .catch((error) => isCurrent() && toast.error(error.message));
-      reportPost("/api/Sales/products", {
-        ...body,
-        sort: "profit",
-        direction: "desc",
-        page: 1,
-        pageSize: 8,
-      })
-        .then((data) => isCurrent() && setTopProducts(data.rows.map((r) => ({ name: r.productname, profit: r.profit }))))
-        .catch(() => isCurrent() && setTopProducts([]));
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [queryStart, queryEnd, paymentMethod, hasSalesCharts]);
@@ -114,42 +108,55 @@ const SalesDataComponent = () => {
     setSearchParams(next, { replace: true });
   };
 
-  const weekdayLabel = (isoDay) =>
-    // 2024-01-01 was a Monday, ISO day 1.
-    new Date(Date.UTC(2024, 0, isoDay)).toLocaleDateString(language === "ur" ? "ur-PK" : "en-US", {
-      weekday: "short",
-      timeZone: "UTC",
-    });
+  const spanDays = (new Date(queryEnd) - new Date(queryStart)) / 86400000;
 
   // A printed page is always on white paper — force light mode for the print output even
   // if the app is currently in dark mode, otherwise dark: text/background colors would
   // print as white-on-white (or worse). afterprint (not code immediately following
   // window.print()) is what reliably fires once the print dialog is dismissed.
   //
-  // Before printing: switch to the print layout ("is-printing", same as @media print), load
-  // the FULL product list (the screen only holds one page of it), and wait for the charts
-  // to finish re-animating at the print width — so nothing is half-drawn or missing on paper.
+  // Before printing: switch to the print layout (.is-printing on <html>, which the
+  // `printing:` classes and styles/tailwind.css key off — it stays on until afterprint, so
+  // the page measured here is exactly the page on paper), build the views the screen keeps
+  // behind tabs, load the FULL product list (the screen only holds one page of it), and let
+  // the charts redraw at the paper's width.
   const handlePrint = async () => {
     const root = document.documentElement;
+    if (root.classList.contains("is-printing")) return;
     const wasDark = root.classList.contains("dark");
     if (wasDark) root.classList.remove("dark");
-    const restoreTheme = () => {
+    const restore = () => {
       root.classList.remove("is-printing");
       if (wasDark) root.classList.add("dark");
-      window.removeEventListener("afterprint", restoreTheme);
+      setPrinting(false);
+      window.removeEventListener("afterprint", restore);
     };
-    window.addEventListener("afterprint", restoreTheme);
+    window.addEventListener("afterprint", restore);
 
     root.classList.add("is-printing");
+    setPrinting(true);
     try {
       await productsRef.current?.loadAllForPrint();
     } catch (error) {
       toast.error(error.message);
     }
-    if (chartsRef.current) await chartsRef.current.waitForAnimations();
-
+    await twoFrames();
     window.print();
   };
+
+  // Ctrl+P on this page prints the report the same way the button does, not the raw screen.
+  const handlePrintRef = useRef(handlePrint);
+  handlePrintRef.current = handlePrint;
+  useEffect(() => {
+    const onKeyDown = (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
+        event.preventDefault();
+        handlePrintRef.current();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
 
   return (
     <AppShell title={t("report.title")}>
@@ -169,7 +176,7 @@ const SalesDataComponent = () => {
         {/* Everything the Print button should produce lives in here — see .print-area in
             styles/tailwind.css, which hides everything else automatically. */}
         <div className="print-area">
-          <ReportPrintHeader startDate={queryStart} endDate={queryEnd} filterType={filterType} />
+          <ReportPrintHeader startDate={queryStart} endDate={queryEnd} filterType={filterType} paymentMethod={paymentMethod} />
 
           <ReportKpis summary={summary} />
 
@@ -177,26 +184,27 @@ const SalesDataComponent = () => {
           <PaymentMediumSummary startDate={queryStart} endDate={queryEnd} />
 
           {hasSalesCharts && (
-            <Suspense fallback={<div className="mb-6 h-72 animate-pulse rounded-2xl bg-white-A700 dark:bg-gray-900" />}>
+            <Suspense fallback={<div className="mb-6 h-80 animate-pulse rounded-2xl bg-surface-muted dark:bg-gray-800" />}>
               <SalesCharts
-                ref={chartsRef}
-                timeSeriesData={timeSeriesData}
-                topProducts={topProducts}
+                trend={trend}
                 byHour={breakdowns?.byHour}
                 byWeekday={breakdowns?.byWeekday}
-                weekdayLabel={weekdayLabel}
+                spanDays={spanDays}
+                view={chartView}
+                onViewChange={setChartView}
+                printing={printing}
               />
             </Suspense>
           )}
 
           {/* Where the sales came from, beside what was lost to shrinkage (when the tier has it). */}
-          <div className="mb-6 grid grid-cols-3 items-start gap-4 md:grid-cols-1">
+          <div className="mb-6 grid grid-cols-3 items-start gap-4 md:grid-cols-1 printing:block">
             <ReportBreakdowns
               breakdowns={breakdowns}
               netSales={summary?.current.netSales ?? 0}
               view={breakdownView}
               onViewChange={setBreakdownView}
-              className={hasShrinkageReport ? "col-span-2 md:col-span-1" : "col-span-3 md:col-span-1"}
+              className={`mb-0 printing:mb-6 ${hasShrinkageReport ? "col-span-2 md:col-span-1" : "col-span-3 md:col-span-1"}`}
             />
             {hasShrinkageReport && <ShrinkageSummary startDate={queryStart} endDate={queryEnd} />}
           </div>

@@ -1,5 +1,6 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
+const { shopTimeToUtc } = require("../utils/shopTime");
 const { withCache, invalidate } = require("../utils/cache");
 
 // This machine's own OS timezone — the sensible zero-configuration default ("by default use
@@ -41,6 +42,17 @@ const getBusinessTimezone = async (shopId) => {
   return isValidTimezone(settings.timezone) ? settings.timezone : DEFAULT_TIMEZONE;
 };
 
+// A date filter's two ends, typed on the shop's own clock, as the UTC times the sale/stock
+// columns hold — see utils/shopTime.js for why comparing them directly was wrong.
+const shopRangeToUtc = async (startDate, endDate, shopId) => {
+  const timeZone = await getBusinessTimezone(shopId);
+  const range = [startDate, endDate].map((value) => (value ? shopTimeToUtc(value, timeZone) : null));
+  if (range.includes(null)) {
+    throw new ApiError(400, "Invalid date inputs. Please provide valid start and end dates.");
+  }
+  return range;
+};
+
 const updateSetting = async (key, value, shopId) => {
   // Empty string is a valid value here — it means "clear the override, go back to auto" —
   // only a genuinely non-empty, unrecognized value is rejected. The Settings UI only ever
@@ -61,4 +73,4 @@ const updateSetting = async (key, value, shopId) => {
   return result.rows[0];
 };
 
-module.exports = { getSettings, updateSetting, getBusinessTimezone, isValidTimezone, DEFAULT_TIMEZONE };
+module.exports = { getSettings, updateSetting, getBusinessTimezone, shopRangeToUtc, isValidTimezone, DEFAULT_TIMEZONE };

@@ -1,5 +1,5 @@
 const { pool } = require("../Db");
-const { getSettings, getBusinessTimezone } = require("./settingsService");
+const { getSettings, getBusinessTimezone, shopRangeToUtc } = require("./settingsService");
 const storeCreditService = require("./storeCreditService");
 const { applyStockDelta } = require("./lotService");
 const { getOpenShift, touchActivity } = require("./shiftService");
@@ -335,7 +335,7 @@ const fetchBilledHistory = async (
     const conditions = ["s.shop_id = $1"];
     const params = [shopId];
     if (hasDateFilter) {
-      params.push(startDate, endDate);
+      params.push(...(await shopRangeToUtc(startDate, endDate, shopId)));
       conditions.push(`s.sale_time BETWEEN $${params.length - 1} AND $${params.length}`);
     }
     if (hasCategoryFilter) {
@@ -809,6 +809,7 @@ const reportKpis = async (startDate, endDate, paymentMethod, shopId) => {
 // before it, so every tile can show its change.
 const fetchReportSummary = async (startDate, endDate, paymentMethod, shopId) => {
   assertReportRange(startDate, endDate);
+  [startDate, endDate] = await shopRangeToUtc(startDate, endDate, shopId);
   const previous = previousWindow(startDate, endDate);
   const [current, before] = await Promise.all([
     reportKpis(startDate, endDate, paymentMethod, shopId),
@@ -838,6 +839,7 @@ const fetchReportProducts = async (
   shopId
 ) => {
   assertReportRange(startDate, endDate);
+  [startDate, endDate] = await shopRangeToUtc(startDate, endDate, shopId);
   const orderExpr = PRODUCT_SORTS[sort] || PRODUCT_SORTS.revenue;
   const orderDir = direction === "asc" ? "ASC" : "DESC";
   const size = Math.min(Math.max(parseInt(pageSize, 10) || 25, 1), MAX_PRODUCT_PAGE_SIZE);
@@ -938,6 +940,7 @@ const fetchReportProducts = async (
 // (same as the trend chart), so "7 PM" means 7 PM on the shop's own clock.
 const fetchReportBreakdowns = async (startDate, endDate, paymentMethod, shopId) => {
   assertReportRange(startDate, endDate);
+  [startDate, endDate] = await shopRangeToUtc(startDate, endDate, shopId);
   const method = paymentFilter(paymentMethod);
   const businessTimezone = await getBusinessTimezone(shopId);
   const base = `FROM sales_ledger s
@@ -1019,33 +1022,49 @@ const fetchReportBreakdowns = async (startDate, endDate, paymentMethod, shopId) 
 
 // Daily revenue/profit/units within a date range — powers the Sales Report trend chart.
 const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null, shopId) => {
-  if (!startDate || !endDate || !isValidDate(startDate) || !isValidDate(endDate)) {
-    throw new Error("Invalid date inputs. Please provide valid start and end dates.");
-  }
+  assertReportRange(startDate, endDate);
+  [startDate, endDate] = await shopRangeToUtc(startDate, endDate, shopId);
 
   // Sources from sales_ledger, same reasoning as the Sales Report queries above — a refund lands on its
   // OWN day here (negative units/revenue/profit that day), not retroactively on the day of
   // the original sale. Grouped by day in the business timezone (not Postgres's UTC session
   // timezone) so the chart's day buckets agree with what a human looking at the shop's clock
   // would call "today" — same AT TIME ZONE reasoning as fetchBilledHistory's cashier filter.
+  //
+  // Every bucket in the range comes back, a quiet day as a zero — a chart that skips the days
+  // with no sales draws a line straight across them and hides the gap. Longer ranges use
+  // coarser buckets so the chart stays readable: a bar per day up to two months, per week
+  // up to half a year, per month beyond that. `day` is the bucket's first day on the shop's
+  // own calendar, as plain "YYYY-MM-DD" text so no timezone can shift it on the way.
+  const spanDays = (new Date(endDate) - new Date(startDate)) / 86400000;
+  const unit = spanDays <= 62 ? "day" : spanDays <= 186 ? "week" : "month";
   const businessTimezone = await getBusinessTimezone(shopId);
+  const localDay = (time) => `date_trunc($6, (${time} AT TIME ZONE 'UTC') AT TIME ZONE $3)`;
   const response = await pool.query(
-    `SELECT
-       date_trunc('day', (s.event_time AT TIME ZONE 'UTC') AT TIME ZONE $3) AS day,
-       SUM(s.quantity * s.selling_price)::BIGINT AS revenue,
-       SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit,
-       SUM(s.quantity)::BIGINT AS units
-     FROM sales_ledger s
-     LEFT JOIN sale_transactions st ON st.id = s.transaction_id
-     WHERE s.event_time BETWEEN $1 AND $2
-       AND s.shop_id = $5
-       AND ($4::text IS NULL OR st.payment_method = $4)
-     GROUP BY day
-     ORDER BY day`,
-    [startDate, endDate, businessTimezone, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null, shopId]
+    `WITH totals AS (
+       SELECT ${localDay("s.event_time")} AS bucket,
+              SUM(s.quantity * s.selling_price)::BIGINT AS revenue,
+              SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit
+       FROM sales_ledger s
+       LEFT JOIN sale_transactions st ON st.id = s.transaction_id
+       WHERE s.event_time BETWEEN $1 AND $2
+         AND s.shop_id = $5
+         AND ($4::text IS NULL OR st.payment_method = $4)
+       GROUP BY bucket
+     )
+     SELECT to_char(b.bucket, 'YYYY-MM-DD') AS day,
+            COALESCE(t.revenue, 0)::BIGINT AS revenue,
+            COALESCE(t.profit, 0)::BIGINT AS profit
+     FROM generate_series(${localDay("$1::timestamp")}, ${localDay("$2::timestamp")}, ('1 ' || $6)::interval) AS b(bucket)
+     LEFT JOIN totals t ON t.bucket = b.bucket
+     ORDER BY b.bucket`,
+    [startDate, endDate, businessTimezone, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null, shopId, unit]
   );
 
-  return response.rows;
+  return {
+    unit,
+    rows: response.rows.map((r) => ({ day: r.day, revenue: Number(r.revenue), profit: Number(r.profit) })),
+  };
 };
 
 // Cash/card/bank-transfer totals for a date range — powers both the Sales Report's summary
@@ -1053,9 +1072,8 @@ const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null, sh
 // (quantity * selling_price), not profit — a payment-medium breakdown is about how money
 // came in, which the report's per-product profit view doesn't answer.
 const fetchPaymentMediumTotals = async (startDate, endDate, shopId) => {
-  if (!startDate || !endDate || !isValidDate(startDate) || !isValidDate(endDate)) {
-    throw new Error("Invalid date inputs. Please provide valid start and end dates.");
-  }
+  assertReportRange(startDate, endDate);
+  [startDate, endDate] = await shopRangeToUtc(startDate, endDate, shopId);
   const response = await pool.query(
     `SELECT COALESCE(st.payment_method, 'unknown') AS payment_method,
             SUM(s.quantity * s.selling_price)::BIGINT AS total
