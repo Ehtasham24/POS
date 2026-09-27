@@ -33,10 +33,12 @@ import { enqueueOfflineSale } from "offline/syncManager";
 import { decrementLocalStock } from "offline/cache";
 import useOfflineStatus from "hooks/useOfflineStatus";
 import { useFeature } from "auth/useFeature";
+import useShiftStatus from "hooks/useShiftStatus";
 import { formatPKR } from "utils/money";
 import { rememberPrices, loadHeldSales, saveHeldSales, MAX_HELD_SALES } from "utils/posMemory";
 import ReceiptPreviewModal from "./ReceiptPreviewModal";
 import BankTransferQrModal from "./BankTransferQrModal";
+import OpenShiftModal from "./OpenShiftModal";
 
 // Cash amounts customers commonly hand over — used to build one-tap tender suggestions.
 const CASH_DENOMINATIONS = [50, 100, 500, 1000, 5000];
@@ -110,6 +112,10 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
   const { online } = useOfflineStatus();
   const hasBankTransfer = useFeature("bankTransfer");
   const hasStoreCredit = useFeature("storeCredit");
+  // No open shift: warned here and on the payment screen too, not only when checkout fails —
+  // non-blocking (the server is the actual gate), with a one-tap way to open one.
+  const { needsShift, refresh: refreshShift } = useShiftStatus();
+  const [showOpenShift, setShowOpenShift] = useState(false);
 
   const [showPayment, setShowPayment] = useState(false);
   const [paymentMethod, setPaymentMethod] = useState("cash");
@@ -327,6 +333,7 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
       // supposed to appear. Deferred to the modal's own onClose instead (below).
     } catch (error) {
       toast.error(error.message);
+      refreshShift();
     } finally {
       setIsProcessing(false);
     }
@@ -407,6 +414,20 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
     if (cart.length > 0 && window.confirm(t("register.clearConfirm"))) dispatch(clearCart());
   };
 
+  const shiftWarning = needsShift && (
+    <div className="flex items-center gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+      <HiOutlineClock className="shrink-0 text-base" />
+      <p className="flex-1 font-semibold">{t("register.noShiftWarning")}</p>
+      <button
+        type="button"
+        onClick={() => setShowOpenShift(true)}
+        className="shrink-0 rounded-lg bg-amber-600 px-2.5 py-1.5 font-semibold text-white-A700 transition-colors hover:bg-amber-700"
+      >
+        {t("shifts.openShift")}
+      </button>
+    </div>
+  );
+
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between gap-2 border-b border-surface-border px-4 py-3 dark:border-gray-700">
@@ -463,6 +484,8 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
           )}
         </div>
       </div>
+
+      {shiftWarning && <div className="px-4 pt-3">{shiftWarning}</div>}
 
       <div className="flex-1 overflow-y-auto px-4 py-2">
         {cart.length === 0 ? (
@@ -577,6 +600,7 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
             if (canConfirm && !paymentBusy) confirmPayment();
           }}
         >
+          {shiftWarning && <div className="mb-5">{shiftWarning}</div>}
           <div className="grid grid-cols-2 gap-6 sm:grid-cols-1">
             <div className="flex flex-col gap-4">
               <div className="rounded-2xl bg-surface-subtle px-5 py-4 dark:bg-gray-900/40">
@@ -753,7 +777,9 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
             </div>
           </div>
 
-          <div className="mt-6 flex gap-3">
+          {/* Pinned to the bottom of the modal's scroll area so Complete sale is never below the
+              fold on a short screen. -mx/-mb cancel the Modal body's own padding. */}
+          <div className="sticky bottom-0 -mx-6 -mb-5 mt-6 flex gap-3 border-t border-surface-border bg-white-A700 px-6 py-4 dark:border-gray-700 dark:bg-gray-800">
             <button
               type="button"
               onClick={() => setShowPayment(false)}
@@ -814,6 +840,15 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
           </ul>
         )}
       </Modal>
+
+      <OpenShiftModal
+        isOpen={showOpenShift}
+        onClose={() => setShowOpenShift(false)}
+        onOpened={() => {
+          setShowOpenShift(false);
+          refreshShift();
+        }}
+      />
 
       <BankTransferQrModal
         isOpen={showBankQr}

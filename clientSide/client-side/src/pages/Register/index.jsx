@@ -25,10 +25,10 @@ import OpenShiftModal from "categoriesComponents/OpenShiftModal";
 import { addCart } from "cartRedux/cartSlice";
 import { useLanguage } from "i18n/LanguageContext";
 import { useAuth } from "auth/AuthContext";
-import { useFeature } from "auth/useFeature";
 import { useToast } from "components/Toast/ToastContext";
 import useDebounce from "hooks/useDebounce";
 import useMediaQuery from "hooks/useMediaQuery";
+import useShiftStatus from "hooks/useShiftStatus";
 import { apiGet } from "utils/api";
 import * as offlineCache from "offline/cache";
 import { formatPKR } from "utils/money";
@@ -80,7 +80,8 @@ export default function RegisterPage() {
   const { prodNum } = useParams();
   const { user } = useAuth();
   const isOwner = user?.role === "owner";
-  const hasShifts = useFeature("shifts");
+  // Refreshed on every visit — the shift may have been opened/closed on the Shifts page.
+  const { shift: currentShift, refresh: refreshShift } = useShiftStatus({ refreshOnMount: true });
   const isSplit = useMediaQuery(SPLIT_QUERY);
   const cart = useSelector((state) => state.cart.carts);
 
@@ -98,9 +99,6 @@ export default function RegisterPage() {
   const [sheetOpen, setSheetOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [modal, setModal] = useState(null); // "addProduct" | "addCategory" | "editProducts" | "openShift"
-  // null = still loading; false = no shift open; an object = the open shift. Advisory only —
-  // the real gate is server-side in checkoutSale/createIntent.
-  const [currentShift, setCurrentShift] = useState(null);
   const searchRef = useRef(null);
   const manageRef = useRef(null);
 
@@ -125,17 +123,9 @@ export default function RegisterPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const fetchCurrentShift = useCallback(() => {
-    if (!hasShifts) return;
-    apiGet("/api/shifts/current")
-      .then((shift) => setCurrentShift(shift || false))
-      .catch(() => setCurrentShift(false));
-  }, [hasShifts]);
-
   useEffect(() => {
     fetchCatalog();
-    fetchCurrentShift();
-  }, [fetchCatalog, fetchCurrentShift]);
+  }, [fetchCatalog]);
 
   // Lot codes are the one thing the catalog on screen can't match by itself (they live on
   // lots, not products) — a scanned/typed code is looked up on the server (or the offline
@@ -290,7 +280,7 @@ export default function RegisterPage() {
   const cartTotal = cart.reduce((sum, line) => sum + line.sellingPrice * line.sellingQuantity, 0);
 
   const shiftPill =
-    hasShifts && currentShift !== null ? (
+    currentShift !== null ? (
       currentShift ? (
         <Link
           to="/shifts"
@@ -576,7 +566,7 @@ export default function RegisterPage() {
         onClose={() => setModal(null)}
         onOpened={() => {
           setModal(null);
-          fetchCurrentShift();
+          refreshShift();
         }}
       />
     </>
