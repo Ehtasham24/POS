@@ -2,26 +2,39 @@ import { useState, useEffect } from "react";
 import { useDispatch, useSelector } from "react-redux";
 import {
   HiOutlineShoppingBag,
-  HiOutlineCube,
   HiOutlineBanknotes,
   HiOutlineCreditCard,
   HiOutlineQrCode,
+  HiOutlineTrash,
+  HiOutlinePause,
+  HiOutlineClock,
+  HiOutlineMinus,
+  HiOutlinePlus,
+  HiOutlineXMark,
+  HiChevronDown,
 } from "react-icons/hi2";
 import { useToast } from "components/Toast/ToastContext";
 import { Modal } from "components";
+import Numpad from "components/Numpad";
 import { useLanguage } from "i18n/LanguageContext";
+import { useAuth } from "auth/AuthContext";
+import { useTimezone } from "timezone/TimezoneContext";
 import {
   removeCart,
   increaseQuantity,
   decreaseQuantity,
   setQuantity,
+  setPrice,
   clearCart,
+  replaceCart,
 } from "cartRedux/cartSlice";
 import { apiGet, apiPost } from "utils/api";
 import { enqueueOfflineSale } from "offline/syncManager";
 import { decrementLocalStock } from "offline/cache";
 import useOfflineStatus from "hooks/useOfflineStatus";
 import { useFeature } from "auth/useFeature";
+import { formatPKR } from "utils/money";
+import { rememberPrices, loadHeldSales, saveHeldSales, MAX_HELD_SALES } from "utils/posMemory";
 import ReceiptPreviewModal from "./ReceiptPreviewModal";
 import BankTransferQrModal from "./BankTransferQrModal";
 
@@ -37,47 +50,63 @@ const tenderSuggestions = (subtotal) => {
   return [...new Set(candidates)].sort((a, b) => a - b).slice(0, 5);
 };
 
-// Lets the quantity be typed directly instead of only stepped via +/-. Keeps its own
-// draft text while focused (so clearing/retyping digits works) and commits — clamped
-// to [1, max stock] by the setQuantity reducer — on blur or Enter.
-function QuantityInput({ item, onCommit }) {
-  const [value, setValue] = useState(String(item.sellingQuantity));
+const lineTotal = (item) => item.sellingPrice * item.sellingQuantity;
+
+// A number typed straight into a line (quantity, or unit price). Keeps its own draft while
+// focused so clearing/retyping digits works, and commits on blur or Enter — the reducer
+// does the clamping/validation.
+function InlineNumber({ value, onCommit, className, ariaLabel, min = 1 }) {
+  const [draft, setDraft] = useState(String(value));
 
   useEffect(() => {
-    setValue(String(item.sellingQuantity));
-  }, [item.sellingQuantity]);
+    setDraft(String(value));
+  }, [value]);
 
   const commit = () => {
-    const parsed = parseInt(value, 10);
-    if (Number.isNaN(parsed)) {
-      setValue(String(item.sellingQuantity));
-    } else {
-      onCommit(parsed);
-    }
+    const parsed = parseInt(draft, 10);
+    if (Number.isNaN(parsed) || parsed < min) setDraft(String(value));
+    else onCommit(parsed);
   };
 
   return (
     <input
       type="number"
-      min={1}
-      max={item.quantity}
-      value={value}
-      onChange={(e) => setValue(e.target.value)}
+      inputMode="numeric"
+      aria-label={ariaLabel}
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onFocus={(e) => e.target.select()}
       onBlur={commit}
       onKeyDown={(e) => e.key === "Enter" && e.currentTarget.blur()}
-      className="h-7 w-14 rounded-md border border-surface-border bg-white-A700 text-center text-sm text-gray-800 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-100"
+      className={`no-spin ${className}`}
     />
   );
 }
 
-// The actual cart contents + checkout action. Rendered as an always-visible panel on
-// desktop (POS terminal layout) and inside a bottom sheet on mobile — no modal/overlay
-// chrome of its own, so it can be dropped into either container.
-export default function CartPanel({ onCheckedOut }) {
+const stepButtonClass =
+  "flex h-8 w-8 items-center justify-center rounded-lg bg-surface-muted text-gray-800 transition-colors hover:bg-surface-border active:scale-95 dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600";
+
+const methodTileClass = (active) =>
+  `flex h-16 flex-col items-center justify-center gap-1 rounded-xl border-2 text-sm font-semibold transition-colors ${
+    active
+      ? "border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400"
+      : "border-surface-border text-gray-600 hover:bg-surface-subtle dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
+  }`;
+
+// The current sale + checkout. Rendered as the register's order panel (beside the product
+// grid, or in a bottom sheet on phones) and inside the floating cart on every other page —
+// no modal/overlay chrome of its own, so it drops into either container.
+//
+// `hotkeys` (the register only): F4 opens payment. `onSold` fires as soon as a sale is saved
+// (online or queued offline) so the register can refresh stock. `onClose` adds a collapse
+// button to the header, for when this panel lives in a sheet.
+export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = false }) {
   const cart = useSelector((state) => state.cart.carts);
   const dispatch = useDispatch();
   const toast = useToast();
   const { t } = useLanguage();
+  const { user } = useAuth();
+  const { formatDateTime } = useTimezone();
   const { online } = useOfflineStatus();
   const hasBankTransfer = useFeature("bankTransfer");
   const hasStoreCredit = useFeature("storeCredit");
@@ -116,11 +145,17 @@ export default function CartPanel({ onCheckedOut }) {
   const [loadingBalance, setLoadingBalance] = useState(false);
   const [voucherError, setVoucherError] = useState(false);
   const [storeCreditAmount, setStoreCreditAmount] = useState("");
+  // Held (parked) sales — a customer steps away to fetch something, the next one is served
+  // meanwhile. Per user and per device (utils/posMemory.js).
+  const [heldSales, setHeldSales] = useState(() => loadHeldSales(user?.id));
+  const [showHeld, setShowHeld] = useState(false);
 
-  const calculateSubtotal = () =>
-    cart.reduce((total, item) => total + item.sellingPrice * item.sellingQuantity, 0);
+  useEffect(() => {
+    setHeldSales(loadHeldSales(user?.id));
+  }, [user?.id]);
 
-  const subtotal = calculateSubtotal();
+  const subtotal = cart.reduce((total, item) => total + lineTotal(item), 0);
+  const itemCount = cart.reduce((sum, item) => sum + item.sellingQuantity, 0);
 
   // Debounced — this is a free-text field the cashier types into, unlike the old contact
   // dropdown (which only ever fired on a discrete selection), so looking up on every
@@ -172,6 +207,7 @@ export default function CartPanel({ onCheckedOut }) {
   }, [online, paymentMethod]);
 
   const openPayment = () => {
+    if (cart.length === 0) return;
     setPaymentMethod("cash");
     setAmountTendered("");
     setShowStoreCredit(false);
@@ -179,6 +215,19 @@ export default function CartPanel({ onCheckedOut }) {
     setStoreCreditAmount("");
     setShowPayment(true);
   };
+
+  useEffect(() => {
+    if (!hotkeys) return;
+    const onKey = (e) => {
+      if (e.key === "F4") {
+        e.preventDefault();
+        openPayment();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hotkeys, cart.length]);
 
   const handleCheckout = async () => {
     setIsProcessing(true);
@@ -237,16 +286,18 @@ export default function CartPanel({ onCheckedOut }) {
         }
       }
 
+      rememberPrices(cart);
       dispatch(clearCart());
       setShowPayment(false);
+      onSold?.();
       toast.success(
         wentOffline
-          ? `Saved offline — will sync automatically once connection is back. Total: PKR ${subtotal}.`
+          ? `Saved offline — will sync automatically once connection is back. Total: ${formatPKR(subtotal)}.`
           : paymentMethod === "cash" && changeDue > 0
-          ? `Sold for PKR ${subtotal}. Change due: PKR ${changeDue.toFixed(0)}.`
+          ? `Sold for ${formatPKR(subtotal)}. Change due: ${formatPKR(changeDue)}.`
           : creditToApply > 0
-          ? `Sold for PKR ${subtotal} — PKR ${creditToApply.toFixed(0)} paid via store credit.`
-          : `Sold for PKR ${subtotal}. Products sold successfully!`
+          ? `Sold for ${formatPKR(subtotal)} — ${formatPKR(creditToApply)} paid via store credit.`
+          : `Sold for ${formatPKR(subtotal)}.`
       );
 
       // The sale is already saved at this point (online or offline-queued) — the receipt
@@ -270,13 +321,10 @@ export default function CartPanel({ onCheckedOut }) {
       // staying null until sync.
       setReceiptCreditApplied(wentOffline ? 0 : creditToApply);
 
-      // NOT called here — onCheckedOut collapses the mobile bottom sheet / floating cart
-      // panel this component is rendered inside of (CartDock.jsx / cartCheckout.jsx), and
-      // since ReceiptPreviewModal isn't a portal, it lives in that same render tree: firing
-      // this immediately unmounted the receipt modal in the same instant it was supposed
-      // to appear, so it never showed at all. Deferred to the modal's own onClose instead
-      // (below), so the cart UI only collapses once the cashier is actually done with the
-      // receipt, not the moment the sale itself finishes.
+      // onCheckedOut is NOT called here — it collapses the mobile bottom sheet / floating
+      // cart this component is rendered inside of, and since ReceiptPreviewModal isn't a
+      // portal, firing it now would unmount the receipt modal in the same instant it was
+      // supposed to appear. Deferred to the modal's own onClose instead (below).
     } catch (error) {
       toast.error(error.message);
     } finally {
@@ -307,6 +355,7 @@ export default function CartPanel({ onCheckedOut }) {
         storeCreditRedeemed: creditToApply > 0 ? creditToApply : undefined,
       });
 
+      rememberPrices(cart);
       dispatch(clearCart());
       setShowPayment(false);
       setBankIntent(intent);
@@ -318,280 +367,452 @@ export default function CartPanel({ onCheckedOut }) {
     }
   };
 
-  const handleRemove = (id) => dispatch(removeCart(id));
-  const handleDecrease = (id) => dispatch(decreaseQuantity({ id }));
-  const handleIncrease = (item) => dispatch(increaseQuantity(item));
+  const confirmPayment = paymentMethod === "bank_transfer" ? handleBankTransferCheckout : handleCheckout;
+  const paymentBusy = isProcessing || isCreatingBankIntent;
+
+  // --- Hold / resume / clear ------------------------------------------------------------
+  const persistHeld = (next) => {
+    setHeldSales(next);
+    saveHeldSales(user?.id, next);
+  };
+
+  const holdCurrent = (existing = heldSales) => {
+    if (cart.length === 0) return existing;
+    if (existing.length >= MAX_HELD_SALES) {
+      toast.warning(t("register.heldFull", { n: MAX_HELD_SALES }));
+      return null;
+    }
+    const next = [...existing, { id: Date.now(), heldAt: new Date().toISOString(), lines: cart }];
+    persistHeld(next);
+    dispatch(clearCart());
+    return next;
+  };
+
+  const handleHold = () => {
+    if (holdCurrent()) toast.success(t("register.heldSaved"));
+  };
+
+  const handleResume = (sale) => {
+    // Whatever's on screen now gets parked first rather than silently lost.
+    const afterHold = holdCurrent();
+    if (!afterHold) return;
+    persistHeld(afterHold.filter((s) => s.id !== sale.id));
+    dispatch(replaceCart(sale.lines));
+    setShowHeld(false);
+  };
+
+  const handleDiscardHeld = (sale) => persistHeld(heldSales.filter((s) => s.id !== sale.id));
+
+  const handleClear = () => {
+    if (cart.length > 0 && window.confirm(t("register.clearConfirm"))) dispatch(clearCart());
+  };
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex-1 overflow-y-auto px-4 py-4">
+      <div className="flex items-center justify-between gap-2 border-b border-surface-border px-4 py-3 dark:border-gray-700">
+        <div className="min-w-0">
+          <p className="font-poppins font-bold text-gray-800 dark:text-gray-100">{t("register.currentSale")}</p>
+          <p className="text-xs text-gray-500 dark:text-gray-400">
+            {itemCount === 1 ? t("register.oneItem") : t("register.itemsCount", { n: itemCount })}
+          </p>
+        </div>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={() => setShowHeld(true)}
+            title={t("register.heldTitle")}
+            className="relative flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-surface-muted dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            <HiOutlineClock className="text-base" />
+            {t("register.held")}
+            {heldSales.length > 0 && (
+              <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-bold text-white-A700">
+                {heldSales.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
+            onClick={handleHold}
+            disabled={cart.length === 0}
+            title={t("register.hold")}
+            className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-gray-600 transition-colors hover:bg-surface-muted disabled:opacity-40 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            <HiOutlinePause className="text-base" />
+            {t("register.hold")}
+          </button>
+          <button
+            type="button"
+            onClick={handleClear}
+            disabled={cart.length === 0}
+            title={t("register.clearSale")}
+            aria-label={t("register.clearSale")}
+            className="flex h-9 w-9 items-center justify-center rounded-lg text-danger-600 transition-colors hover:bg-danger-50 disabled:opacity-40 dark:hover:bg-danger-500/10"
+          >
+            <HiOutlineTrash className="text-base" />
+          </button>
+          {onClose && (
+            <button
+              type="button"
+              onClick={onClose}
+              aria-label="Close cart"
+              className="flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+            >
+              <HiChevronDown className="text-lg" />
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div className="flex-1 overflow-y-auto px-4 py-2">
         {cart.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-16 text-center">
-            <HiOutlineShoppingBag className="text-5xl text-gray-400" />
-            <p className="text-gray-500 dark:text-gray-400">{t("cart.empty")}</p>
-            <p className="text-sm text-gray-400 dark:text-gray-500">{t("cart.emptyHint")}</p>
+          <div className="flex h-full flex-col items-center justify-center gap-3 py-12 text-center">
+            <HiOutlineShoppingBag className="text-5xl text-gray-300 dark:text-gray-600" />
+            <p className="font-medium text-gray-500 dark:text-gray-400">{t("cart.empty")}</p>
+            <p className="max-w-[16rem] text-sm text-gray-400 dark:text-gray-500">{t("cart.emptyHint")}</p>
           </div>
         ) : (
           <ul className="divide-y divide-surface-border dark:divide-gray-700">
-            {cart.map((item) => (
-              <li key={item.id} className="flex gap-3 py-4 first:pt-0">
-                <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-surface-muted dark:bg-gray-700">
-                  <HiOutlineCube className="text-2xl text-gray-400" />
-                </div>
-                <div className="flex flex-1 flex-col min-w-0">
-                  <div className="flex justify-between gap-2 text-sm font-medium text-gray-800 dark:text-gray-100">
-                    <span className="truncate">{item.productname}</span>
-                    <span className="shrink-0">PKR {item.sellingPrice}</span>
-                  </div>
-                  {item.lotCode && (
-                    <span className="mt-0.5 inline-flex w-fit rounded-full bg-primary-50 px-2 py-0.5 text-xs font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
-                      {item.lotCode}
-                    </span>
-                  )}
-                  <div className="mt-2 flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-3">
-                      <button
-                        onClick={() => handleDecrease(item.id)}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-muted text-gray-800 hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
-                      >
-                        -
-                      </button>
-                      <QuantityInput
-                        item={item}
-                        onCommit={(qty) => dispatch(setQuantity({ id: item.id, quantity: qty }))}
-                      />
-                      <button
-                        onClick={() => handleIncrease(item)}
-                        className="flex h-7 w-7 items-center justify-center rounded-full bg-surface-muted text-gray-800 hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
-                      >
-                        +
-                      </button>
+            {cart.map((item) => {
+              const belowCost = item.costPrice > 0 && item.sellingPrice < item.costPrice;
+              return (
+                <li key={item.id} className="py-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="clamp-2 text-sm font-semibold leading-snug text-gray-800 dark:text-gray-100">
+                        {item.productname}
+                      </p>
+                      <div className="mt-1 flex flex-wrap gap-1">
+                        {item.lotCode && (
+                          <span className="rounded-full bg-primary-50 px-2 py-0.5 text-[11px] font-semibold text-primary-700 dark:bg-primary-500/10 dark:text-primary-400">
+                            {item.lotCode}
+                          </span>
+                        )}
+                        {belowCost && (
+                          <span className="rounded-full bg-danger-50 px-2 py-0.5 text-[11px] font-semibold text-danger-600 dark:bg-danger-500/10 dark:text-danger-500">
+                            {t("register.belowCost")}
+                          </span>
+                        )}
+                      </div>
                     </div>
                     <button
                       type="button"
-                      onClick={() => handleRemove(item.id)}
-                      className="font-medium text-danger-600 hover:text-danger-700"
+                      onClick={() => dispatch(removeCart(item.id))}
+                      aria-label={t("cart.remove")}
+                      className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-danger-50 hover:text-danger-600 dark:hover:bg-danger-500/10"
                     >
-                      {t("cart.remove")}
+                      <HiOutlineXMark />
                     </button>
                   </div>
-                </div>
-              </li>
-            ))}
+                  <div className="mt-2 flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => dispatch(decreaseQuantity({ id: item.id }))}
+                        aria-label="Decrease quantity"
+                        className={stepButtonClass}
+                      >
+                        <HiOutlineMinus className="text-sm" />
+                      </button>
+                      <InlineNumber
+                        value={item.sellingQuantity}
+                        ariaLabel={t("sell.quantity")}
+                        onCommit={(qty) => dispatch(setQuantity({ id: item.id, quantity: qty }))}
+                        className="h-8 w-12 rounded-lg border border-surface-border bg-white-A700 text-center text-sm font-semibold text-gray-800 focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => dispatch(increaseQuantity(item))}
+                        aria-label="Increase quantity"
+                        className={stepButtonClass}
+                      >
+                        <HiOutlinePlus className="text-sm" />
+                      </button>
+                      <span className="mx-0.5 text-xs text-gray-400">×</span>
+                      <InlineNumber
+                        value={item.sellingPrice}
+                        ariaLabel={t("register.editPrice")}
+                        onCommit={(price) => dispatch(setPrice({ id: item.id, price }))}
+                        className={`h-8 w-20 rounded-lg border bg-white-A700 px-1.5 text-right text-sm font-semibold focus:border-primary-500 focus:outline-none focus:ring-1 focus:ring-primary-500 dark:bg-gray-900 ${
+                          belowCost
+                            ? "border-danger-500 text-danger-600"
+                            : "border-surface-border text-gray-800 dark:border-gray-600 dark:text-gray-100"
+                        }`}
+                      />
+                    </div>
+                    <span className="shrink-0 font-poppins text-sm font-bold text-gray-800 dark:text-gray-100">
+                      {formatPKR(lineTotal(item))}
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
           </ul>
         )}
       </div>
 
       <div className="border-t border-surface-border px-4 py-4 dark:border-gray-700">
-        <div className="flex justify-between text-base font-semibold text-gray-800 dark:text-gray-100">
-          <span>{t("cart.subtotal")}</span>
-          <span>PKR {subtotal}</span>
+        <div className="mb-3 flex items-baseline justify-between">
+          <span className="text-sm text-gray-500 dark:text-gray-400">{t("cart.subtotal")}</span>
+          <span className="font-poppins text-2xl font-bold text-gray-800 dark:text-gray-100">{formatPKR(subtotal)}</span>
         </div>
         <button
+          type="button"
           onClick={openPayment}
           disabled={cart.length === 0}
-          className="mt-3 flex w-full items-center justify-center rounded-lg bg-primary-600 py-3 font-medium text-white-A700 shadow-sm transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-14 w-full items-center justify-between rounded-xl bg-primary-600 px-5 font-poppins text-lg font-bold text-white-A700 shadow-md shadow-primary-900/20 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
         >
-          {t("cart.checkout")}
+          <span>
+            {t("register.pay")}
+            {hotkeys && <span className="ml-2 rounded bg-white-A700/20 px-1.5 py-0.5 text-xs font-semibold">F4</span>}
+          </span>
+          <span>{formatPKR(subtotal)}</span>
         </button>
       </div>
 
-      <Modal isOpen={showPayment} onClose={() => setShowPayment(false)} title={t("payment.title")}>
-        <div className="mb-4 rounded-lg bg-surface-subtle px-4 py-3 dark:bg-gray-900/40">
-          {/* Subtotal + the deduction shown ABOVE the final Amount due (not below it) —
-              shown below it read as "5650 due, and ALSO minus 150 more", leaving the
-              cashier unsure whether the voucher was already applied to the number they're
-              about to collect. Only shown once a voucher is actually in play; the common
-              no-voucher case stays exactly as it was (just "Amount due"). */}
-          {creditToApply > 0 && (
-            <>
-              <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
-                <span>{t("cart.subtotal")}</span>
-                <span>PKR {subtotal.toFixed(0)}</span>
-              </div>
-              <div className="mt-1 flex items-center justify-between text-xs text-primary-600 dark:text-primary-400">
-                <span>{t("payment.storeCreditApplied")}</span>
-                <span>- PKR {creditToApply.toFixed(0)}</span>
-              </div>
-              <div className="my-2 border-t border-dashed border-surface-border dark:border-gray-700" />
-            </>
-          )}
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-gray-600 dark:text-gray-300">{t("payment.amountDue")}</span>
-            <span className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">
-              PKR {amountDue.toFixed(0)}
-            </span>
-          </div>
-        </div>
-
-        {/* Smart-tier+ (`storeCredit`) — a Basic shop has never issued a voucher, so there's
-            nothing a code here could ever redeem. */}
-        {hasStoreCredit && (
-          <button
-            type="button"
-            onClick={() => setShowStoreCredit((v) => !v)}
-            className="mb-4 text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400"
-          >
-            {showStoreCredit ? t("payment.hideStoreCredit") : t("payment.haveVoucherCode")}
-          </button>
-        )}
-
-        {hasStoreCredit && showStoreCredit && (
-          <div className="mb-4 rounded-lg border border-dashed border-surface-border p-3 dark:border-gray-700">
-            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
-              {t("payment.voucherCode")}
-            </label>
-            <input
-              type="text"
-              value={storeCreditCode}
-              onChange={(e) => setStoreCreditCode(e.target.value)}
-              placeholder="REF-000123"
-              className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            />
-            {storeCreditCode.trim() && (
-              <div className="mt-2">
-                {loadingBalance ? (
-                  <p className="text-xs text-gray-500 dark:text-gray-400">{t("payment.loadingBalance")}</p>
-                ) : voucherError ? (
-                  <p className="text-xs text-danger-600 dark:text-danger-400">{t("payment.invalidVoucherCode")}</p>
-                ) : (
+      <Modal isOpen={showPayment} onClose={() => setShowPayment(false)} title={t("payment.title")} maxWidth="max-w-2xl">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (canConfirm && !paymentBusy) confirmPayment();
+          }}
+        >
+          <div className="grid grid-cols-2 gap-6 sm:grid-cols-1">
+            <div className="flex flex-col gap-4">
+              <div className="rounded-2xl bg-surface-subtle px-5 py-4 dark:bg-gray-900/40">
+                {creditToApply > 0 && (
                   <>
-                    <p className="text-xs text-gray-600 dark:text-gray-300">
-                      {t("payment.availableCredit")}: PKR {Number(storeCreditBalance || 0).toFixed(0)}
-                    </p>
-                    <label className="mb-1 mt-2 block text-xs font-semibold text-gray-500 dark:text-gray-400">
-                      {t("payment.amountToRedeem")}
-                    </label>
-                    <input
-                      type="number"
-                      min={0}
-                      max={Math.min(storeCreditBalance || 0, subtotal)}
-                      value={storeCreditAmount}
-                      onChange={(e) => setStoreCreditAmount(e.target.value)}
-                      placeholder="0"
-                      className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-                    />
+                    <div className="flex items-center justify-between text-sm text-gray-600 dark:text-gray-300">
+                      <span>{t("cart.subtotal")}</span>
+                      <span>{formatPKR(subtotal)}</span>
+                    </div>
+                    <div className="mt-1 flex items-center justify-between text-xs text-primary-600 dark:text-primary-400">
+                      <span>{t("payment.storeCreditApplied")}</span>
+                      <span>- {formatPKR(creditToApply)}</span>
+                    </div>
+                    <div className="my-2 border-t border-dashed border-surface-border dark:border-gray-700" />
                   </>
                 )}
+                <p className="text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                  {t("payment.amountDue")}
+                </p>
+                <p className="font-poppins text-4xl font-bold text-gray-800 dark:text-gray-100">{formatPKR(amountDue)}</p>
               </div>
-            )}
-          </div>
-        )}
 
-        <div className="mb-4 grid grid-cols-3 gap-2 sm:grid-cols-2">
-          <button
-            type="button"
-            onClick={() => setPaymentMethod("cash")}
-            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${
-              paymentMethod === "cash"
-                ? "border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400"
-                : "border-surface-border text-gray-600 hover:bg-surface-subtle dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-            }`}
-          >
-            <HiOutlineBanknotes className="text-lg" />
-            {t("payment.cash")}
-          </button>
-          <button
-            type="button"
-            onClick={() => setPaymentMethod("card")}
-            className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${
-              paymentMethod === "card"
-                ? "border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400"
-                : "border-surface-border text-gray-600 hover:bg-surface-subtle dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-            }`}
-          >
-            <HiOutlineCreditCard className="text-lg" />
-            {t("payment.card")}
-          </button>
-          {/* Hidden while offline — a QR needs a live server round-trip to generate and be
-              checkable, unlike cash/card which queue through the offline outbox. Also
-              hidden below Smart tier (`bankTransfer`) — a Basic shop has no way to receive
-              a bank transfer set up, so offering the option would just lead to a 403. */}
-          {online && hasBankTransfer && (
+              <div className={`grid gap-2 ${online && hasBankTransfer ? "grid-cols-3" : "grid-cols-2"}`}>
+                <button type="button" onClick={() => setPaymentMethod("cash")} className={methodTileClass(paymentMethod === "cash")}>
+                  <HiOutlineBanknotes className="text-xl" />
+                  {t("payment.cash")}
+                </button>
+                <button type="button" onClick={() => setPaymentMethod("card")} className={methodTileClass(paymentMethod === "card")}>
+                  <HiOutlineCreditCard className="text-xl" />
+                  {t("payment.card")}
+                </button>
+                {/* Hidden while offline — a QR needs a live server round-trip to generate and be
+                    checkable, unlike cash/card which queue through the offline outbox. Also
+                    hidden below Smart tier (`bankTransfer`) — a Basic shop has no way to receive
+                    a bank transfer set up, so offering the option would just lead to a 403. */}
+                {online && hasBankTransfer && (
+                  <button
+                    type="button"
+                    onClick={() => setPaymentMethod("bank_transfer")}
+                    className={methodTileClass(paymentMethod === "bank_transfer")}
+                  >
+                    <HiOutlineQrCode className="text-xl" />
+                    {t("payment.bankTransfer")}
+                  </button>
+                )}
+              </div>
+              {!online && hasBankTransfer && (
+                <p className="-mt-2 text-xs text-gray-500 dark:text-gray-400">{t("payment.bankTransferUnavailableOffline")}</p>
+              )}
+
+              {/* Smart-tier+ (`storeCredit`) — a Basic shop has never issued a voucher, so there's
+                  nothing a code here could ever redeem. */}
+              {hasStoreCredit && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setShowStoreCredit((v) => !v)}
+                    className="text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400"
+                  >
+                    {showStoreCredit ? t("payment.hideStoreCredit") : t("payment.haveVoucherCode")}
+                  </button>
+                  {showStoreCredit && (
+                    <div className="mt-2 rounded-xl border border-dashed border-surface-border p-3 dark:border-gray-700">
+                      <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+                        {t("payment.voucherCode")}
+                      </label>
+                      <input
+                        type="text"
+                        value={storeCreditCode}
+                        onChange={(e) => setStoreCreditCode(e.target.value)}
+                        placeholder="REF-000123"
+                        className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                      />
+                      {storeCreditCode.trim() && (
+                        <div className="mt-2">
+                          {loadingBalance ? (
+                            <p className="text-xs text-gray-500 dark:text-gray-400">{t("payment.loadingBalance")}</p>
+                          ) : voucherError ? (
+                            <p className="text-xs text-danger-600 dark:text-danger-400">{t("payment.invalidVoucherCode")}</p>
+                          ) : (
+                            <>
+                              <p className="text-xs text-gray-600 dark:text-gray-300">
+                                {t("payment.availableCredit")}: {formatPKR(storeCreditBalance)}
+                              </p>
+                              <label className="mb-1 mt-2 block text-xs font-semibold text-gray-500 dark:text-gray-400">
+                                {t("payment.amountToRedeem")}
+                              </label>
+                              <input
+                                type="number"
+                                min={0}
+                                max={Math.min(storeCreditBalance || 0, subtotal)}
+                                value={storeCreditAmount}
+                                onChange={(e) => setStoreCreditAmount(e.target.value)}
+                                placeholder="0"
+                                className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                              />
+                            </>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {amountDue <= 0 && (
+                <div className="rounded-xl bg-success-50 px-4 py-3 text-sm font-semibold text-success-700 dark:bg-success-500/10 dark:text-success-500">
+                  {t("payment.fullyCoveredByCredit")}
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {paymentMethod === "cash" && amountDue > 0 ? (
+                <>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-gray-500 dark:text-gray-400">
+                      {t("payment.amountReceived")}
+                    </label>
+                    <div className="relative">
+                      <span className="pointer-events-none absolute inset-y-0 left-3 flex items-center text-sm font-semibold text-gray-400">
+                        PKR
+                      </span>
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        value={amountTendered}
+                        onChange={(e) => setAmountTendered(e.target.value.replace(/[^\d]/g, ""))}
+                        placeholder={t("payment.amountReceivedPlaceholder")}
+                        autoFocus
+                        className="no-spin h-14 w-full rounded-xl border border-surface-border bg-white-A700 pl-12 pr-3 text-right font-poppins text-2xl font-bold text-gray-900 placeholder:text-sm placeholder:font-normal focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
+                      />
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {tenderSuggestions(amountDue).map((amount, i) => (
+                      <button
+                        key={amount}
+                        type="button"
+                        onClick={() => setAmountTendered(String(amount))}
+                        className="rounded-full bg-surface-muted px-3 py-1.5 text-xs font-semibold text-gray-700 hover:bg-surface-border dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
+                      >
+                        {i === 0 ? `${t("register.exact")} · ` : ""}
+                        {formatPKR(amount)}
+                      </button>
+                    ))}
+                  </div>
+                  <Numpad value={amountTendered} onChange={setAmountTendered} />
+                  <div
+                    className={`flex items-center justify-between rounded-xl px-4 py-3 font-semibold ${
+                      amountTendered === ""
+                        ? "bg-surface-muted text-gray-500 dark:bg-gray-700 dark:text-gray-400"
+                        : changeDue >= 0
+                        ? "bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-500"
+                        : "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-400"
+                    }`}
+                  >
+                    <span className="text-sm">{changeDue >= 0 ? t("payment.changeDue") : t("payment.amountShort")}</span>
+                    <span className="font-poppins text-2xl">{formatPKR(Math.abs(amountTendered === "" ? 0 : changeDue))}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-2xl border border-dashed border-surface-border p-6 text-center dark:border-gray-700">
+                  {paymentMethod === "card" ? (
+                    <HiOutlineCreditCard className="text-4xl text-gray-400" />
+                  ) : paymentMethod === "bank_transfer" ? (
+                    <HiOutlineQrCode className="text-4xl text-gray-400" />
+                  ) : (
+                    <HiOutlineBanknotes className="text-4xl text-gray-400" />
+                  )}
+                  <p className="font-poppins text-2xl font-bold text-gray-800 dark:text-gray-100">{formatPKR(amountDue)}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="mt-6 flex gap-3">
             <button
               type="button"
-              onClick={() => setPaymentMethod("bank_transfer")}
-              className={`flex items-center justify-center gap-2 rounded-lg border px-3 py-2.5 text-sm font-semibold transition-colors ${
-                paymentMethod === "bank_transfer"
-                  ? "border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-500/10 dark:text-primary-400"
-                  : "border-surface-border text-gray-600 hover:bg-surface-subtle dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-700"
-              }`}
+              onClick={() => setShowPayment(false)}
+              className="h-14 flex-1 rounded-xl bg-surface-muted font-semibold text-gray-800 transition-colors hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
             >
-              <HiOutlineQrCode className="text-lg" />
-              {t("payment.bankTransfer")}
+              {t("payment.cancel")}
             </button>
-          )}
-        </div>
-
-        {!online && (
-          <p className="mb-4 text-xs text-gray-500 dark:text-gray-400">
-            {t("payment.bankTransferUnavailableOffline")}
-          </p>
-        )}
-
-        {amountDue <= 0 && (
-          <div className="mb-4 rounded-lg bg-success-50 px-4 py-3 text-sm font-semibold text-success-700 dark:bg-success-500/10 dark:text-success-500">
-            {t("payment.fullyCoveredByCredit")}
-          </div>
-        )}
-
-        {paymentMethod === "cash" && amountDue > 0 && (
-          <>
-            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">
-              {t("payment.amountReceived")}
-            </label>
-            <input
-              type="number"
-              value={amountTendered}
-              onChange={(e) => setAmountTendered(e.target.value)}
-              placeholder={t("payment.amountReceivedPlaceholder")}
-              autoFocus
-              className="mb-2 block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-700 dark:bg-gray-900 dark:text-gray-100"
-            />
-
-            <div className="mb-3 flex flex-wrap gap-2">
-              {tenderSuggestions(amountDue).map((amount) => (
-                <button
-                  key={amount}
-                  type="button"
-                  onClick={() => setAmountTendered(String(amount))}
-                  className="rounded-full bg-surface-muted px-3 py-1 text-xs font-semibold text-gray-700 hover:bg-surface-border dark:bg-gray-700 dark:text-gray-200 dark:hover:bg-gray-600"
-                >
-                  PKR {amount}
-                </button>
-              ))}
-            </div>
-
-            <div
-              className={`mb-4 flex items-center justify-between rounded-lg px-4 py-3 text-sm font-semibold ${
-                amountTendered === ""
-                  ? "bg-surface-muted text-gray-500 dark:bg-gray-700 dark:text-gray-400"
-                  : changeDue >= 0
-                  ? "bg-success-50 text-success-700 dark:bg-success-500/10 dark:text-success-500"
-                  : "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-400"
-              }`}
+            <button
+              type="submit"
+              disabled={!canConfirm || paymentBusy}
+              className="h-14 flex-[2] rounded-xl bg-primary-600 font-poppins text-lg font-bold text-white-A700 shadow-md shadow-primary-900/20 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50 disabled:shadow-none"
             >
-              <span>{changeDue >= 0 ? t("payment.changeDue") : t("payment.amountShort")}</span>
-              <span>PKR {Math.abs(amountTendered === "" ? 0 : changeDue).toFixed(0)}</span>
-            </div>
-          </>
-        )}
+              {paymentBusy ? t("payment.processing") : `${t("register.completeSale")} · ${formatPKR(amountDue)}`}
+            </button>
+          </div>
+        </form>
+      </Modal>
 
-        <div className="flex justify-end gap-3">
-          <button
-            onClick={() => setShowPayment(false)}
-            className="rounded-lg bg-surface-muted px-4 py-2 text-gray-800 transition-colors hover:bg-surface-border dark:bg-gray-700 dark:text-gray-100 dark:hover:bg-gray-600"
-          >
-            {t("payment.cancel")}
-          </button>
-          <button
-            onClick={paymentMethod === "bank_transfer" ? handleBankTransferCheckout : handleCheckout}
-            disabled={!canConfirm || isProcessing || isCreatingBankIntent}
-            className="rounded-lg bg-primary-600 px-4 py-2 text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isProcessing || isCreatingBankIntent ? t("payment.processing") : t("payment.confirmSale")}
-          </button>
-        </div>
+      <Modal isOpen={showHeld} onClose={() => setShowHeld(false)} title={t("register.heldTitle")}>
+        {heldSales.length === 0 ? (
+          <p className="py-6 text-center text-sm text-gray-500 dark:text-gray-400">{t("register.heldEmpty")}</p>
+        ) : (
+          <ul className="flex flex-col gap-2">
+            {[...heldSales].reverse().map((sale) => {
+              const count = sale.lines.reduce((sum, line) => sum + line.sellingQuantity, 0);
+              const total = sale.lines.reduce((sum, line) => sum + lineTotal(line), 0);
+              return (
+                <li
+                  key={sale.id}
+                  className="flex items-center justify-between gap-3 rounded-xl border border-surface-border px-4 py-3 dark:border-gray-700"
+                >
+                  <div className="min-w-0">
+                    <p className="font-semibold text-gray-800 dark:text-gray-100">{formatPKR(total)}</p>
+                    <p className="truncate text-xs text-gray-500 dark:text-gray-400">
+                      {count === 1 ? t("register.oneItem") : t("register.itemsCount", { n: count })} ·{" "}
+                      {formatDateTime(sale.heldAt, { timeStyle: "short" })} · {sale.lines.map((l) => l.productname).join(", ")}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleDiscardHeld(sale)}
+                      className="rounded-lg px-3 py-2 text-xs font-semibold text-danger-600 hover:bg-danger-50 dark:hover:bg-danger-500/10"
+                    >
+                      {t("register.discard")}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleResume(sale)}
+                      className="rounded-lg bg-primary-600 px-3 py-2 text-xs font-semibold text-white-A700 hover:bg-primary-700"
+                    >
+                      {t("register.resume")}
+                    </button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </Modal>
 
       <BankTransferQrModal

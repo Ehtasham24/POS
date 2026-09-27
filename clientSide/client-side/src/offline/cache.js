@@ -16,15 +16,9 @@ export const withFallback = async (networkCall, cacheCall) => {
 
 export const getCategories = () => query("SELECT id, category_name FROM categories ORDER BY category_name");
 
-export const getProductsForCategory = (categoryId) =>
-  query(
-    `SELECT p.*, COUNT(l.id) AS lot_count
-     FROM products p
-     LEFT JOIN lots l ON l.product_id = p.id AND l.qty_remaining > 0
-     WHERE p.category_id = ?
-     GROUP BY p.id`,
-    [categoryId]
-  );
+// Same rows as GET /products — the register loads the whole catalog once and filters by
+// category on the device, so switching tabs is instant and works offline.
+export const getProducts = () => query("SELECT * FROM products ORDER BY id");
 
 export const getProductLots = (productId) =>
   query("SELECT * FROM lots WHERE product_id = ? ORDER BY id", [productId]);

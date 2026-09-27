@@ -80,3 +80,44 @@ table {
     transform: translateY(0);
   }
 }
+
+/* Register: product names wrap to at most two lines, then ellipsis — keeps every tile the
+   same height however long the name is. */
+.clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Register: brief pulse on a tile when it lands in the sale, so a one-tap add is
+   visibly confirmed without a toast for every item. */
+@keyframes tile-pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.96); }
+  100% { transform: scale(1); }
+}
+.animate-tile-pop {
+  animation: tile-pop 220ms ease-out;
+}
+
+/* Register: the category tab row scrolls sideways by swipe/shift-wheel; a visible scrollbar
+   under it just reads as a stray grey line. */
+.no-scrollbar {
+  scrollbar-width: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* Register: number fields that sit next to steppers / a numpad — the browser's own spin
+   arrows are redundant there and overlap the value. */
+.no-spin {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+.no-spin::-webkit-outer-spin-button,
+.no-spin::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

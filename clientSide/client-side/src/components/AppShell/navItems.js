@@ -18,7 +18,15 @@ import {
 // guards in App.jsx (a matching "roles" list here just keeps a Cashier from ever *seeing*
 // a link to a page they'd be redirected away from anyway).
 export const navItems = [
-  { to: "/", label: "Categories", labelKey: "nav.categories", icon: HiOutlineSquares2X2, end: true },
+  // alsoActiveOn: the register's older category deep links open the same screen.
+  {
+    to: "/",
+    label: "Register",
+    labelKey: "nav.register",
+    icon: HiOutlineSquares2X2,
+    end: true,
+    alsoActiveOn: ["/categories/", "/productlist/"],
+  },
   {
     to: "/inventory",
     label: "Inventory",

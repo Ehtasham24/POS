@@ -12,11 +12,15 @@ import OfflineStatusBadge from "./OfflineStatusBadge";
 import UserMenu from "./UserMenu";
 import CartCheckout from "categoriesComponents/cartCheckout";
 
-export default function AppShell({ title, actions, hideSearch, children }) {
+// `fullBleed` (the Register): the page gets exactly the viewport below the top bar, with no
+// padding and no page-level scroll — it lays out and scrolls its own regions (product grid
+// on one side, order panel on the other). Its title and actions share one compact row, so
+// the selling surface starts as high up the screen as possible.
+export default function AppShell({ title, actions, hideSearch, fullBleed = false, children }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-surface-subtle dark:bg-gray-900">
+    <div className={`${fullBleed ? "h-screen overflow-hidden" : "min-h-screen"} bg-surface-subtle dark:bg-gray-900`}>
       <Helmet>
         <title>{title ? `${title} · POS System` : "POS System"}</title>
         <meta name="description" content="Web site created using create-react-app" />
@@ -48,7 +52,7 @@ export default function AppShell({ title, actions, hideSearch, children }) {
         </div>
       )}
 
-      <div className="md:pl-0 pl-64 flex min-h-screen flex-col">
+      <div className={`md:pl-0 pl-64 flex flex-col ${fullBleed ? "h-full" : "min-h-screen"}`}>
         {/* Mobile top bar */}
         <header className="hidden md:flex sticky top-0 z-30 items-center justify-between gap-3 border-b border-surface-border bg-white-A700 px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
           <div className="flex items-center gap-2.5">
@@ -78,10 +82,17 @@ export default function AppShell({ title, actions, hideSearch, children }) {
 
         {/* Page top bar */}
         <div className="sticky top-0 md:static z-20 border-b border-surface-border bg-white-A700/80 backdrop-blur dark:border-gray-800 dark:bg-gray-900/80">
-          <div className="flex flex-wrap items-center justify-between gap-3 px-8 pt-5 md:px-5 sm:px-4">
-            <h1 className="font-poppins text-2xl font-bold text-gray-800 dark:text-gray-100 sm:text-xl">
-              {title}
-            </h1>
+          <div
+            className={`flex flex-wrap items-center justify-between gap-3 ${
+              fullBleed ? "px-6 py-3 md:px-4 sm:px-3 sm:py-2" : "px-8 pt-5 md:px-5 sm:px-4"
+            }`}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-3">
+              <h1 className="font-poppins text-2xl font-bold text-gray-800 dark:text-gray-100 sm:text-xl">
+                {title}
+              </h1>
+              {fullBleed && actions}
+            </div>
             <div className="flex items-center gap-2">
               {!hideSearch && <GlobalSearch />}
               {/* The "Mobile top bar" header above already shows this exact icon cluster
@@ -99,15 +110,15 @@ export default function AppShell({ title, actions, hideSearch, children }) {
               </div>
             </div>
           </div>
-          {actions && (
+          {!fullBleed && actions && (
             <div className="flex flex-wrap items-center gap-2 px-8 pb-5 pt-3 md:px-5 sm:px-4">
               {actions}
             </div>
           )}
-          {!actions && <div className="pb-5" />}
+          {!fullBleed && !actions && <div className="pb-5" />}
         </div>
 
-        <main className="flex-1 px-8 py-8 md:px-5 md:py-6 sm:px-4">{children}</main>
+        <main className={fullBleed ? "min-h-0 flex-1" : "flex-1 px-8 py-8 md:px-5 md:py-6 sm:px-4"}>{children}</main>
       </div>
 
       <CartCheckout />

@@ -1,6 +1,6 @@
 import React, { useEffect } from "react";
-import CategorieswithSidebar from "pages/CategorieswithSidebar";
-import ProductList from "pages/ProductList";
+import Register from "pages/Register";
+import CartPersistence from "components/CartPersistence";
 import SalesDataComponent from "pages/Report/Report";
 import SalesHistory from "pages/SalesHistory";
 import CreditDebit from "pages/CreditDebit";
@@ -45,6 +45,7 @@ function App() {
       <ToastProvider>
         <TimezoneProvider>
           <AuthProvider>
+            <CartPersistence />
             <Router>
               <Routes>
                 <Route path="/login" element={<LoginPage />} />
@@ -91,30 +92,20 @@ function App() {
                     </ProtectedRoute>
                   }
                 />
-                <Route
-                  path="/"
-                  element={
-                    <ProtectedRoute>
-                      <CategorieswithSidebar />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/categories/:prodNum"
-                  element={
-                    <ProtectedRoute>
-                      <ProductList />
-                    </ProtectedRoute>
-                  }
-                />
-                <Route
-                  path="/productlist/:prodNum"
-                  element={
-                    <ProtectedRoute>
-                      <ProductList />
-                    </ProtectedRoute>
-                  }
-                />
+                {/* The register. "/categories/:id" and "/productlist/:id" are older deep links
+                    (Global Search still navigates to the first) — they open the same screen
+                    with that category's tab selected. */}
+                {["/", "/categories/:prodNum", "/productlist/:prodNum"].map((path) => (
+                  <Route
+                    key={path}
+                    path={path}
+                    element={
+                      <ProtectedRoute>
+                        <Register />
+                      </ProtectedRoute>
+                    }
+                  />
+                ))}
                 <Route
                   path="/report"
                   element={

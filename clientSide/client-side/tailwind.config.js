@@ -6,11 +6,10 @@ module.exports = {
     screens: {
       md: { max: "1050px" },
       sm: { max: "550px" },
-      // 1280px, not something lower — the persistent left nav (w-64, 256px) plus this
-      // panel (w-96, 384px) is 640px of fixed chrome; below ~1280px there isn't enough
-      // room left for the page's own content (category grid/tables) to render without
-      // being squeezed into an uncomfortably narrow column.
-      cartDock: { min: "1280px" },
+      // The register's order panel sits beside the product grid from here up (tablet
+      // landscape and wider). It's narrower than the old cart dock and the left nav is
+      // already a drawer below 1050px, so this leaves room for at least a 3-column grid.
+      posSplit: { min: "860px" },
     },
     extend: {
       colors: {

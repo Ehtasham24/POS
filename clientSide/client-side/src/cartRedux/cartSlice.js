@@ -36,7 +36,6 @@ export const CartSlice = createSlice({
       state.carts = state.carts.filter((item) => item.id !== action.payload);
     },
     increaseQuantity(state, action) {
-      console.log(action.payload);
       const { id } = action.payload;
       const item = state.carts.find((item) => item.id === id);
 
@@ -63,6 +62,22 @@ export const CartSlice = createSlice({
         item.sellingQuantity = Math.min(Math.max(quantity, 1), item.quantity);
       }
     },
+    // Per-line price edit on the register — prices here are negotiated per sale (products
+    // carry no fixed selling price), so correcting one shouldn't mean removing and re-adding
+    // the line. Non-positive/NaN input is ignored rather than zeroing the line.
+    setPrice(state, action) {
+      const { id, price } = action.payload;
+      const item = state.carts.find((item) => item.id === id);
+      const value = Math.round(Number(price));
+      if (item && Number.isFinite(value) && value > 0) {
+        item.sellingPrice = value;
+      }
+    },
+    // Swaps the whole cart — resuming a held sale, or restoring the saved cart after a
+    // reload (see components/CartPersistence).
+    replaceCart(state, action) {
+      state.carts = Array.isArray(action.payload) ? action.payload : [];
+    },
   },
 });
 
@@ -73,6 +88,8 @@ export const {
   increaseQuantity,
   decreaseQuantity,
   setQuantity,
+  setPrice,
+  replaceCart,
 } = CartSlice.actions;
 
 export default CartSlice.reducer;

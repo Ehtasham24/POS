@@ -1,16 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useSelector } from "react-redux";
 import { useLocation } from "react-router-dom";
-import { HiOutlineShoppingCart, HiChevronDown } from "react-icons/hi2";
-import { useLanguage } from "i18n/LanguageContext";
+import { HiOutlineShoppingCart } from "react-icons/hi2";
 import CartPanel from "./CartPanel";
 
 // Floating cart icon + item-count badge, rendered globally (AppShell) so the cart is
-// reachable from every page. Categories (the POS terminal, "/") and Product List
-// ("/categories/:id") — the only two pages where items actually get added to the cart —
-// instead render the always-visible CartDock, so this component steps aside there
-// entirely to avoid a redundant duplicate cart affordance. Every other page has no such
-// alternative, so it always shows.
+// reachable from every page. The Register ("/", and its "/categories/:id" /
+// "/productlist/:id" deep links) — the only place items actually get added — has its own
+// always-visible order panel, so this component steps aside there to avoid a duplicate
+// cart. Every other page has no such alternative, so it always shows.
 
 const POSITION_STORAGE_KEY = "cartFabPosition";
 const DRAG_THRESHOLD = 8; // px of pointer movement before a press counts as a drag, not a tap
@@ -39,8 +37,8 @@ function CartCheckout() {
   const cart = useSelector((state) => state.cart.carts);
   const itemCount = cart.reduce((sum, item) => sum + item.sellingQuantity, 0);
   const pathname = useLocation().pathname;
-  const isSellingPage = pathname === "/" || pathname.startsWith("/categories/");
-  const { t } = useLanguage();
+  const isSellingPage =
+    pathname === "/" || pathname.startsWith("/categories/") || pathname.startsWith("/productlist/");
 
   // Draggable on any pointer device (touch/mouse/pen) so it can be pulled out of the way
   // when it happens to sit on top of other floating/fixed UI — e.g. Credit/Debit's legend
@@ -143,19 +141,8 @@ function CartCheckout() {
               persistent desktop sidebar (visible above the "md" breakpoint, >1050px),
               which otherwise painted over the left edge of this sheet. */}
           <div className="fixed left-64 right-0 bottom-0 z-50 flex h-[min(75vh,38rem)] flex-col rounded-t-2xl bg-white-A700 shadow-modal dark:bg-gray-800 md:left-0">
-            <div className="flex shrink-0 items-center justify-between border-b border-surface-border px-4 py-4 dark:border-gray-700">
-              <span className="font-poppins font-bold text-gray-800 dark:text-gray-100">{t("cart.title")}</span>
-              <button
-                type="button"
-                onClick={() => setExpanded(false)}
-                aria-label="Close cart"
-                className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-500 hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
-              >
-                <HiChevronDown className="text-lg" />
-              </button>
-            </div>
             <div className="min-h-0 flex-1">
-              <CartPanel onCheckedOut={() => setExpanded(false)} />
+              <CartPanel onCheckedOut={() => setExpanded(false)} onClose={() => setExpanded(false)} />
             </div>
           </div>
         </>

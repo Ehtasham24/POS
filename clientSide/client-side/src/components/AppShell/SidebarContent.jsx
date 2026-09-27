@@ -1,5 +1,5 @@
 import React from "react";
-import { NavLink, Link } from "react-router-dom";
+import { NavLink, Link, useLocation } from "react-router-dom";
 import { HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import useTheme from "hooks/useTheme";
 import { useLanguage } from "i18n/LanguageContext";
@@ -11,6 +11,7 @@ export default function SidebarContent({ onNavigate = () => {} }) {
   const [theme, toggleTheme] = useTheme();
   const { t } = useLanguage();
   const { user } = useAuth();
+  const { pathname } = useLocation();
   // Items with no `roles` are visible to anyone logged in; otherwise the current role
   // must be listed — this is what keeps a Cashier from ever seeing a link to a page
   // they'd just get redirected away from (App.jsx's ProtectedRoute enforces the same
@@ -34,7 +35,7 @@ export default function SidebarContent({ onNavigate = () => {} }) {
       </Link>
 
       <nav className="flex-1 space-y-1 px-3 py-2">
-        {visibleItems.map(({ to, labelKey, icon: Icon, end }) => (
+        {visibleItems.map(({ to, labelKey, icon: Icon, end, alsoActiveOn }) => (
           <NavLink
             key={to}
             to={to}
@@ -42,7 +43,7 @@ export default function SidebarContent({ onNavigate = () => {} }) {
             onClick={onNavigate}
             className={({ isActive }) =>
               `group flex items-center gap-3 rounded-xl px-3.5 py-2.5 text-sm font-medium transition-colors ${
-                isActive
+                isActive || alsoActiveOn?.some((prefix) => pathname.startsWith(prefix))
                   ? "bg-primary-600 text-white-A700 shadow-md shadow-primary-900/30"
                   : "text-gray-400 hover:bg-white-A700/5 hover:text-white-A700"
               }`
