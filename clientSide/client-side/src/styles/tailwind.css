@@ -117,3 +117,25 @@
   break-inside: avoid;
   page-break-inside: avoid;
 }
+
+/* Content that exists only on paper (e.g. the Sales Report's full product list, where the
+   screen shows one page at a time) and screen-only controls (search boxes, pagination)
+   that mean nothing in print. Toggled both by @media print and by the .is-printing class
+   Report.jsx sets before calling window.print(), same as the rules above. */
+.print-only {
+  display: none;
+}
+@media print {
+  .print-only {
+    display: block;
+  }
+  .screen-only {
+    display: none !important;
+  }
+}
+.is-printing .print-only {
+  display: block;
+}
+.is-printing .screen-only {
+  display: none !important;
+}

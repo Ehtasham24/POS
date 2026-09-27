@@ -2,8 +2,9 @@ const express = require("express");
 const routes = express.Router();
 const {
   CheckoutSales,
-  getSales,
-  getSalesByProfitLoss,
+  getReportSummary,
+  getReportProducts,
+  getReportBreakdowns,
   getSalesTimeSeries,
   getPaymentMediumTotals,
   getRecentSale,
@@ -34,8 +35,10 @@ routes.get("/api/BilledHistory", requireAuth, getBilledHistory);
 routes.post("/api/sales/checkout", requireAuth, CheckoutSales);
 routes.patch("/api/sales/:id/void", requireAuth, requireFeature("voidRefund"), voidSaleController);
 routes.post("/api/sales/:id/refunds", requireAuth, requireFeature("voidRefund"), refundSaleController);
-routes.post("/api/Sales", requireAuth, requireOwner, getSales);
-routes.post("/api/Sales/filter", requireAuth, requireOwner, getSalesByProfitLoss);
+// Sales Report (Owner). POST like the report's other endpoints — the filters travel in the body.
+routes.post("/api/Sales/summary", requireAuth, requireOwner, getReportSummary);
+routes.post("/api/Sales/products", requireAuth, requireOwner, getReportProducts);
+routes.post("/api/Sales/breakdowns", requireAuth, requireOwner, getReportBreakdowns);
 routes.post("/api/Sales/timeseries", requireAuth, requireOwner, requireFeature("salesCharts"), getSalesTimeSeries);
 // Any staff, not Owner-only — unlike the profit/COGS-revealing endpoints above, this is
 // just revenue-by-medium (no buying_price/profit anywhere in it), and the Payment Mediums

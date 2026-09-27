@@ -1,138 +1,134 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { Suspense, lazy, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import DateRangeSelector from "./DataRangeSelector";
 import PrintButton from "./PrintBtn";
-import GroupedSalesData from "./GroupedSalesData";
-import SalesCharts from "./SalesCharts";
 import ReportPrintHeader from "./ReportPrintHeader";
 import ShrinkageSummary from "./ShrinkageSummary";
+import ReportKpis from "./ReportKpis";
+import ReportBreakdowns from "./ReportBreakdowns";
+import ProductPerformance from "./ProductPerformance";
 import AppShell from "components/AppShell";
 import { PaymentMediumSummary } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { useFeature } from "auth/useFeature";
-import { apiPost } from "utils/api";
 import useUrlFilterState from "hooks/useUrlFilterState";
+import useDebounce from "hooks/useDebounce";
+import { reportPost } from "./reportApi";
+
+// Recharts is the heaviest thing on this page — loaded as its own chunk, so the numbers
+// (tiles, tables) show up first on a slow connection and the charts follow.
+const SalesCharts = lazy(() => import("./SalesCharts"));
 
 // Local (not UTC) "YYYY-MM-DDTHH:mm" — the format <input type="datetime-local"> expects.
 const formatLocal = (date) => {
   const pad = (n) => String(n).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours()
-  )}:${pad(date.getMinutes())}`;
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 };
-
 const startOfToday = () => {
   const d = new Date();
   d.setHours(0, 0, 0, 0);
   return formatLocal(d);
 };
-
 const endOfToday = () => {
   const d = new Date();
   d.setHours(23, 59, 0, 0);
   return formatLocal(d);
 };
 
+// A datetime-local input fires onChange per edited segment (day, month, hour...) — wait for
+// the edits to settle before asking the server, instead of one request per keystroke.
+const FILTER_DEBOUNCE_MS = 400;
+
 const SalesDataComponent = () => {
   const toast = useToast();
-  const { t } = useLanguage();
-  // Charts (trend graph) are Smart+, shrinkage cost analysis is Advanced-only — this page
-  // predates the tier system and used to call/render both unconditionally, which 403'd on
-  // a downgraded shop (the trend fetch surfaced as a visible toast; ShrinkageSummary failed
-  // silently but stayed stuck on its loading skeleton forever). Total Profit/Loss and the
-  // payment-medium breakdown stay on every tier — only these two are gated.
+  const { t, language } = useLanguage();
+  // Charts (trend/when) are Smart+, shrinkage cost analysis is Advanced-only. The tiles,
+  // breakdown tables, payment mediums and product table are on every tier.
   const hasSalesCharts = useFeature("salesCharts");
   const hasShrinkageReport = useFeature("shrinkageReport");
-  const [salesData, setSalesData] = useState([]);
-  const [timeSeriesData, setTimeSeriesData] = useState([]);
-  const [totalProfitLoss, setTotalProfitLoss] = useState(0);
-  // URL-backed (hooks/useUrlFilterState), not plain useState — a bare useState here reset
-  // to defaults on every remount, which is exactly what happens navigating away (e.g.
-  // ShrinkageSummary's "View Detail" -> Stock Adjustments) and back; this survives that.
+
+  // URL-backed (hooks/useUrlFilterState), so the filters survive navigating away and back
+  // (e.g. Shrinkage's "View Detail" -> Stock Adjustments -> Back).
   const [filterType, setFilterType] = useUrlFilterState("filterType", "all");
   const [paymentMethod, setPaymentMethod] = useUrlFilterState("paymentMethod", "");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  // Called directly, not passed as a bare reference — unlike useState, this hook has no
-  // special lazy-initializer case for a function value, so `startOfToday` (the function
-  // itself) would otherwise become the stored value verbatim, only ever actually invoked
-  // when something coerces it to a string (a template literal, a query param) later on,
-  // producing that function's own SOURCE CODE text instead of a date. Confirmed live —
-  // this was the exact bug caught during this fix's own browser verification.
   const [startDate, setStartDate] = useUrlFilterState("startDate", startOfToday());
   const [endDate, setEndDate] = useUrlFilterState("endDate", endOfToday());
+  const [breakdownView, setBreakdownView] = useUrlFilterState("breakdown", "category");
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const queryStart = useDebounce(startDate, FILTER_DEBOUNCE_MS);
+  const queryEnd = useDebounce(endDate, FILTER_DEBOUNCE_MS);
+
+  const [summary, setSummary] = useState(null);
+  const [breakdowns, setBreakdowns] = useState(null);
+  const [timeSeriesData, setTimeSeriesData] = useState([]);
+  const [topProducts, setTopProducts] = useState([]);
   const chartsRef = useRef(null);
-  // Guards against the classic out-of-order-response race: adjusting a datetime-local
-  // input fires onChange per field segment, so several fetches can be in flight at once —
-  // without this, whichever RESPONSE happens to resolve last wins, not whichever request
-  // was actually issued last, so an older/slower response for a since-abandoned date range
-  // could silently overwrite the charts with stale data even though the filter on screen
-  // has already moved on. ShrinkageSummary/PaymentMediumSummary on this same page already
-  // guard their own single fetch this same way with a `cancelled` boolean; this is the
-  // equivalent for fetchSalesData/fetchTimeSeries, which chain two fetches per filter change.
+  const productsRef = useRef(null);
+  // Only the latest filter change may set state — an older, slower response for a filter
+  // that's since moved on must never overwrite what's on screen.
   const requestIdRef = useRef(0);
 
-  const fetchTimeSeries = async (requestId) => {
-    try {
-      const data = await apiPost("/api/Sales/timeseries", {
-        startDate,
-        endDate,
-        paymentMethod: paymentMethod || undefined,
-      });
-      if (requestId !== requestIdRef.current) return; // a newer filter change has since started
-      setTimeSeriesData(data);
-    } catch (err) {
-      if (requestId !== requestIdRef.current) return;
-      console.error("Error fetching sales trend:", err);
-      toast.error("Couldn't load the sales trend chart — check your connection and try again.");
-    }
-  };
-
-  const fetchSalesData = async (type) => {
-    const requestId = ++requestIdRef.current;
-    setLoading(true);
-    setError(null);
-    let url = "/api/Sales";
-    let payload = { startDate, endDate, paymentMethod: paymentMethod || undefined };
-
-    if (type !== "all") {
-      url = "/api/Sales/filter";
-      payload = { ...payload, type };
-    }
-
-    try {
-      const data = await apiPost(url, payload);
-      if (requestId !== requestIdRef.current) return; // superseded by a newer filter change
-      setSalesData(data.salesData);
-      setTotalProfitLoss(data.totalProfitLoss);
-    } catch (err) {
-      if (requestId !== requestIdRef.current) return;
-      setError(err.message);
-    } finally {
-      if (requestId === requestIdRef.current) setLoading(false);
-    }
-    if (hasSalesCharts && requestId === requestIdRef.current) fetchTimeSeries(requestId);
-  };
-
   useEffect(() => {
-    fetchSalesData(filterType);
+    const requestId = ++requestIdRef.current;
+    const body = {
+      startDate: queryStart,
+      endDate: queryEnd,
+      paymentMethod: paymentMethod || undefined,
+    };
+    const isCurrent = () => requestId === requestIdRef.current;
+    setSummary(null);
+
+    // Independent of each other, so they all go at once rather than one after another.
+    reportPost("/api/Sales/summary", body)
+      .then((data) => isCurrent() && setSummary(data))
+      .catch((error) => isCurrent() && toast.error(error.message));
+    reportPost("/api/Sales/breakdowns", body)
+      .then((data) => isCurrent() && setBreakdowns(data))
+      .catch((error) => isCurrent() && toast.error(error.message));
+    if (hasSalesCharts) {
+      reportPost("/api/Sales/timeseries", body)
+        .then((data) => isCurrent() && setTimeSeriesData(data))
+        .catch((error) => isCurrent() && toast.error(error.message));
+      reportPost("/api/Sales/products", {
+        ...body,
+        sort: "profit",
+        direction: "desc",
+        page: 1,
+        pageSize: 8,
+      })
+        .then((data) => isCurrent() && setTopProducts(data.rows.map((r) => ({ name: r.productname, profit: r.profit }))))
+        .catch(() => isCurrent() && setTopProducts([]));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filterType, startDate, endDate, paymentMethod]);
+  }, [queryStart, queryEnd, paymentMethod, hasSalesCharts]);
+
+  // Both ends in ONE URL update: two separate setters in the same tick would each start from
+  // the same snapshot and the second would undo the first (this app's react-router-dom has
+  // no functional-updater form for setSearchParams).
+  const setRange = (start, end) => {
+    const next = new URLSearchParams(searchParams);
+    next.set("startDate", start);
+    next.set("endDate", end);
+    setSearchParams(next, { replace: true });
+  };
+
+  const weekdayLabel = (isoDay) =>
+    // 2024-01-01 was a Monday, ISO day 1.
+    new Date(Date.UTC(2024, 0, isoDay)).toLocaleDateString(language === "ur" ? "ur-PK" : "en-US", {
+      weekday: "short",
+      timeZone: "UTC",
+    });
 
   // A printed page is always on white paper — force light mode for the print output even
   // if the app is currently in dark mode, otherwise dark: text/background colors would
-  // print as white-on-white (or worse) instead of respecting .print-area's fixed
-  // black/gray palette. afterprint (not code immediately following window.print()) is
-  // what reliably fires once the print dialog is dismissed, in every major browser.
+  // print as white-on-white (or worse). afterprint (not code immediately following
+  // window.print()) is what reliably fires once the print dialog is dismissed.
   //
-  // The charts keep their entrance animation (SalesCharts.jsx), so before printing we:
-  // 1. Add "is-printing" — the same layout switch @media print applies (see tailwind.css)
-  //    — right now, while script can still wait on it, instead of only implicitly inside
-  //    the blocking window.print() call.
-  // 2. Await waitForAnimations(), which forces the charts to remount at that print layout
-  //    and resolves once they've actually finished animating.
-  // 3. Only then call window.print() — the page is already sized/settled for print, so
-  //    nothing changes again mid-print to restart an animation and get caught unfinished.
+  // Before printing: switch to the print layout ("is-printing", same as @media print), load
+  // the FULL product list (the screen only holds one page of it), and wait for the charts
+  // to finish re-animating at the print width — so nothing is half-drawn or missing on paper.
   const handlePrint = async () => {
     const root = document.documentElement;
     const wasDark = root.classList.contains("dark");
@@ -145,22 +141,15 @@ const SalesDataComponent = () => {
     window.addEventListener("afterprint", restoreTheme);
 
     root.classList.add("is-printing");
-    if (chartsRef.current) {
-      await chartsRef.current.waitForAnimations();
+    try {
+      await productsRef.current?.loadAllForPrint();
+    } catch (error) {
+      toast.error(error.message);
     }
+    if (chartsRef.current) await chartsRef.current.waitForAnimations();
 
     window.print();
   };
-
-  const groupByCategory = (data) => {
-    return data.reduce((acc, item) => {
-      if (!acc[item.category_id]) acc[item.category_id] = [];
-      acc[item.category_id].push(item);
-      return acc;
-    }, {});
-  };
-
-  const groupedData = groupByCategory(salesData);
 
   return (
     <AppShell title={t("report.title")}>
@@ -168,52 +157,60 @@ const SalesDataComponent = () => {
         <DateRangeSelector
           startDate={startDate}
           endDate={endDate}
-          filterType={filterType}
           paymentMethod={paymentMethod}
           onStartDateChange={(e) => setStartDate(e.target.value)}
           onEndDateChange={(e) => setEndDate(e.target.value)}
-          onFilterChange={(e) => setFilterType(e.target.value)}
+          onRangeChange={setRange}
           onPaymentMethodChange={(e) => setPaymentMethod(e.target.value)}
         />
 
         <PrintButton handlePrint={handlePrint} />
 
-        {loading ? (
-          <p className="text-primary-600">{t("report.loading")}</p>
-        ) : error ? (
-          <p className="text-danger-600">{error}</p>
-        ) : (
-          // Everything the Print button should produce lives in here — see .print-area
-          // in styles/tailwind.css, which hides everything else (sidebar, filters, the
-          // button itself) automatically rather than needing each one marked individually.
-          <div className="print-area">
-            <ReportPrintHeader startDate={startDate} endDate={endDate} filterType={filterType} />
+        {/* Everything the Print button should produce lives in here — see .print-area in
+            styles/tailwind.css, which hides everything else automatically. */}
+        <div className="print-area">
+          <ReportPrintHeader startDate={queryStart} endDate={queryEnd} filterType={filterType} />
 
-            <div className="mb-4 inline-flex items-center gap-2 rounded-xl border border-surface-border bg-white-A700 px-4 py-3 dark:border-gray-800 dark:bg-gray-900">
-              <span className="text-sm text-gray-500 dark:text-gray-400">{t("report.totalProfitLoss")}</span>
-              <span
-                className={`font-poppins text-lg font-bold ${
-                  totalProfitLoss >= 0 ? "text-success-600" : "text-danger-600"
-                }`}
-              >
-                {totalProfitLoss}
-              </span>
-            </div>
+          <ReportKpis summary={summary} />
 
-            <p className="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400">
-              {t("report.paymentMediumBreakdown")}
-            </p>
-            <PaymentMediumSummary startDate={startDate} endDate={endDate} />
+          <p className="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400">{t("report.paymentMediumBreakdown")}</p>
+          <PaymentMediumSummary startDate={queryStart} endDate={queryEnd} />
 
-            {hasShrinkageReport && <ShrinkageSummary startDate={startDate} endDate={endDate} />}
+          {hasSalesCharts && (
+            <Suspense fallback={<div className="mb-6 h-72 animate-pulse rounded-2xl bg-white-A700 dark:bg-gray-900" />}>
+              <SalesCharts
+                ref={chartsRef}
+                timeSeriesData={timeSeriesData}
+                topProducts={topProducts}
+                byHour={breakdowns?.byHour}
+                byWeekday={breakdowns?.byWeekday}
+                weekdayLabel={weekdayLabel}
+              />
+            </Suspense>
+          )}
 
-            {hasSalesCharts && (
-              <SalesCharts ref={chartsRef} salesData={salesData} timeSeriesData={timeSeriesData} />
-            )}
-
-            <GroupedSalesData groupedData={groupedData} />
+          {/* Where the sales came from, beside what was lost to shrinkage (when the tier has it). */}
+          <div className="mb-6 grid grid-cols-3 items-start gap-4 md:grid-cols-1">
+            <ReportBreakdowns
+              breakdowns={breakdowns}
+              netSales={summary?.current.netSales ?? 0}
+              view={breakdownView}
+              onViewChange={setBreakdownView}
+              className={hasShrinkageReport ? "col-span-2 md:col-span-1" : "col-span-3 md:col-span-1"}
+            />
+            {hasShrinkageReport && <ShrinkageSummary startDate={queryStart} endDate={queryEnd} />}
           </div>
-        )}
+
+          <ProductPerformance
+            ref={productsRef}
+            startDate={queryStart}
+            endDate={queryEnd}
+            paymentMethod={paymentMethod}
+            filterType={filterType}
+            onFilterTypeChange={setFilterType}
+            categories={breakdowns?.byCategory.filter((c) => c.category_id) ?? []}
+          />
+        </div>
       </div>
     </AppShell>
   );

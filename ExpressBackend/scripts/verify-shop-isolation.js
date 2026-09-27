@@ -274,11 +274,11 @@ async function main() {
        VALUES (50, 1, $1, NOW(), 10, $2)`,
       [prodRows[0].id, created.shopId]
     );
-    const reportAsShop2 = await api(shop2Token, "POST", "/api/Sales", { startDate: startD, endDate: endD });
-    const pepsiRowsInShop2Report = reportAsShop2.body.salesData.filter((r) => r.productname === "Pepsi");
+    const reportAsShop2 = await api(shop2Token, "POST", "/api/Sales/products", { startDate: startD, endDate: endD, search: "Pepsi" });
+    const pepsiRowsInShop2Report = reportAsShop2.body.rows.filter((r) => r.productname === "Pepsi");
     check(
       "Shop 2's sales report shows its own Pepsi sale at its own price (50), not merged with any other shop's",
-      pepsiRowsInShop2Report.length === 1 && Number(pepsiRowsInShop2Report[0].avg_selling_price) === 50,
+      pepsiRowsInShop2Report.length === 1 && Number(pepsiRowsInShop2Report[0].avgPrice) === 50,
       pepsiRowsInShop2Report
     );
 

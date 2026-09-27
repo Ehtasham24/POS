@@ -1,8 +1,9 @@
 const {
   getRecentSales,
   checkoutSale,
-  fetchSales,
-  fetchSalesByProfitLoss,
+  fetchReportSummary,
+  fetchReportProducts,
+  fetchReportBreakdowns,
   fetchSalesTimeSeries,
   fetchPaymentMediumTotals,
   fetchBilledHistory,
@@ -73,23 +74,19 @@ const refundSaleController = asyncHandler(async (req, res) => {
   res.status(200).send(result);
 });
 
-const getSales = asyncHandler(async (req, res) => {
+// Sales Report — see the report section of Sevices/salesService.js.
+const getReportSummary = asyncHandler(async (req, res) => {
   const { startDate, endDate, paymentMethod } = req.body;
-  const response = await fetchSales(startDate, endDate, paymentMethod, req.user.shopId);
-  res.status(200).send(response);
+  res.send(await fetchReportSummary(startDate, endDate, paymentMethod, req.user.shopId));
 });
 
-const getSalesByProfitLoss = asyncHandler(async (req, res) => {
-  const { startDate, endDate, type, paymentMethod } = req.body;
+const getReportProducts = asyncHandler(async (req, res) => {
+  res.send(await fetchReportProducts(req.body, req.user.shopId));
+});
 
-  if (!type || (type !== "profit" && type !== "loss")) {
-    return res
-      .status(400)
-      .send({ error: 'Invalid type. Use "profit" or "loss".' });
-  }
-
-  const response = await fetchSalesByProfitLoss(startDate, endDate, type, paymentMethod, req.user.shopId);
-  res.status(200).send(response);
+const getReportBreakdowns = asyncHandler(async (req, res) => {
+  const { startDate, endDate, paymentMethod } = req.body;
+  res.send(await fetchReportBreakdowns(startDate, endDate, paymentMethod, req.user.shopId));
 });
 
 const getSalesTimeSeries = asyncHandler(async (req, res) => {
@@ -106,8 +103,9 @@ const getPaymentMediumTotals = asyncHandler(async (req, res) => {
 
 module.exports = {
   CheckoutSales,
-  getSales,
-  getSalesByProfitLoss,
+  getReportSummary,
+  getReportProducts,
+  getReportBreakdowns,
   getSalesTimeSeries,
   getPaymentMediumTotals,
   getRecentSale,

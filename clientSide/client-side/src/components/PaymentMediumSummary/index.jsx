@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { HiOutlineBanknotes, HiOutlineCreditCard, HiOutlineQrCode } from "react-icons/hi2";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiPost } from "utils/api";
+import { formatPKR } from "utils/money";
 
 const MEDIUM_META = {
   cash: {
@@ -64,8 +65,8 @@ export default function PaymentMediumSummary({ startDate, endDate, onMediumClick
             key={medium}
             type={onMediumClick ? "button" : undefined}
             onClick={onMediumClick ? () => onMediumClick(medium) : undefined}
-            className={`print-avoid-break flex items-center gap-4 rounded-2xl border border-surface-border bg-white-A700 p-5 text-left shadow-card dark:border-gray-700 dark:bg-gray-800 ${
-              onMediumClick ? "transition-colors hover:bg-surface-subtle dark:hover:bg-gray-800/60" : ""
+            className={`print-avoid-break flex items-center gap-4 rounded-2xl border border-surface-border bg-white-A700 p-5 text-left shadow-card dark:border-gray-800 dark:bg-gray-900 ${
+              onMediumClick ? "transition-colors hover:bg-surface-subtle dark:hover:bg-gray-800" : ""
             }`}
           >
             <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${classes}`}>
@@ -74,7 +75,7 @@ export default function PaymentMediumSummary({ startDate, endDate, onMediumClick
             <div>
               <p className="text-sm text-gray-500 dark:text-gray-400">{t(labelKey)}</p>
               <p className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">
-                Rs.{Number(totals[medium] || 0).toFixed(0)}
+                {formatPKR(totals[medium])}
               </p>
             </div>
           </Wrapper>
@@ -93,7 +94,7 @@ export default function PaymentMediumSummary({ startDate, endDate, onMediumClick
           <div>
             <p className="text-sm text-gray-500 dark:text-gray-400">{t("report.unrecordedMedium")}</p>
             <p className="font-poppins text-lg font-bold text-gray-600 dark:text-gray-300">
-              Rs.{Number(totals.unknown).toFixed(0)}
+              {formatPKR(totals.unknown)}
             </p>
           </div>
         </div>

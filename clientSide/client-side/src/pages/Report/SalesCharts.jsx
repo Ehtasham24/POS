@@ -12,9 +12,8 @@ import {
   BarChart,
   Bar,
   Cell,
-  PieChart,
-  Pie,
 } from "recharts";
+import { formatPKR } from "utils/money";
 
 const GRID_COLOR = "#9ca3af33";
 const AXIS_COLOR = "#9ca3af";
@@ -30,14 +29,20 @@ const TOOLTIP_STYLE = {
 // is unreadable against TOOLTIP_STYLE's dark background in both light and dark app theme
 // (the tooltip itself is always dark, regardless of theme). Set explicitly rather than
 // relying on inheritance.
-const TOOLTIP_LABEL_STYLE = { color: "#f3f4f6", fontWeight: 600, marginBottom: 4 };
+const TOOLTIP_LABEL_STYLE = {
+  color: "#f3f4f6",
+  fontWeight: 600,
+  marginBottom: 4,
+};
 // Same problem for the item value line (e.g. "Profit : 29700"): recharts colors it from
 // the series' resolved stroke/fill, but the Bar here only sets fill per-point via <Cell>,
 // not on <Bar> itself, so recharts has nothing to resolve and falls back to its own
 // default — plain black, same unreadable-on-dark issue as the label.
 const TOOLTIP_ITEM_STYLE = { color: "#f3f4f6" };
 
-const PIE_COLORS = ["#4f46e5", "#0ea5e9", "#16a34a", "#f59e0b", "#e11d48", "#8b5cf6", "#14b8a6"];
+// Revenue is indigo everywhere on this page (the trend line and both "when" charts), so the
+// same colour always means the same measure.
+const REVENUE_COLOR = "#4f46e5";
 
 // SVG, not a CSS background-color swatch — browsers only print background colors when
 // "print background graphics" is on (often off by default), so a plain
@@ -52,16 +57,15 @@ const ColorDot = ({ color }) => (
 
 const ChartCard = ({ title, children }) => (
   <div className="print-avoid-break rounded-2xl border border-surface-border bg-white-A700 p-5 shadow-card dark:border-gray-800 dark:bg-gray-900">
-    <h3 className="mb-4 font-poppins text-base font-bold text-gray-800 dark:text-gray-100">
-      {title}
-    </h3>
+    <h3 className="mb-4 font-poppins text-base font-bold text-gray-800 dark:text-gray-100">{title}</h3>
     {children}
   </div>
 );
 
-// Advanced view for the Sales Report: revenue/profit trend over time, top products
-// by profit contribution, and revenue share by category — all derived from the same
-// salesData/timeSeriesData the plain table already uses, no extra round-trips.
+// Charts for the Sales Report: revenue/profit trend, top products by profit, and when sales
+// happen (by hour of day and by day of week, in the shop's own timezone). Revenue share by
+// category is a table with share bars in ReportBreakdowns instead of a pie — with a dozen+
+// categories a pie's slices are unreadable and its colours had to repeat.
 //
 // Keeps recharts' entrance animation (an arc/line/bar sweeping in over ~1.5s on mount) —
 // but exposes waitForAnimations() via ref for Report.jsx's Print button, because printing
@@ -72,7 +76,20 @@ const ChartCard = ({ title, children }) => (
 // happens to trigger one on its own — and resolves only once each chart's onAnimationEnd
 // has actually fired, so print always waits for the real, current animation to finish
 // instead of a guessed delay.
-const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData }, ref) {
+// Axis ticks as "21M" / "450K" — full rupee amounts are too wide for the axis gutter and
+// get clipped; the exact figure is in the tooltip.
+const compactAmount = (value) =>
+  new Intl.NumberFormat("en-US", {
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+
+const hourLabel = (hour) => `${hour % 12 || 12}${hour < 12 ? "a" : "p"}`;
+
+const SalesCharts = forwardRef(function SalesCharts(
+  { timeSeriesData, topProducts = [], byHour = [], byWeekday = [], weekdayLabel },
+  ref,
+) {
   const { formatDateTime } = useTimezone();
   const [remountKey, setRemountKey] = useState(0);
   const pendingRef = useRef(new Set());
@@ -85,29 +102,22 @@ const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData 
   const formatDay = (iso) => formatDateTime(iso, { month: "short", day: "numeric" });
 
   const hasTrend = timeSeriesData && timeSeriesData.length > 0;
-  const hasSales = salesData && salesData.length > 0;
-
-  const topProducts = hasSales
-    ? [...salesData]
-        .sort((a, b) => Number(b.overall_profit_loss) - Number(a.overall_profit_loss))
-        .slice(0, 8)
-        .map((item) => ({
-          name: item.productname,
-          profit: Number(item.overall_profit_loss),
-        }))
-    : [];
-
-  const categoryShare = hasSales
-    ? Object.values(
-        salesData.reduce((acc, item) => {
-          const key = item.category_name || "Uncategorized";
-          const revenue = Number(item.total_quantity_sold) * Number(item.avg_selling_price);
-          if (!acc[key]) acc[key] = { name: key, revenue: 0 };
-          acc[key].revenue += revenue;
-          return acc;
-        }, {})
-      )
-    : [];
+  const hasWhen = byHour.some((h) => h.revenue !== 0);
+  const hourData = byHour.map((h) => ({ ...h, label: hourLabel(h.hour) }));
+  const weekdayData = byWeekday.map((d) => ({
+    ...d,
+    label: weekdayLabel ? weekdayLabel(d.weekday) : String(d.weekday),
+  }));
+  const whenTooltip = {
+    contentStyle: TOOLTIP_STYLE,
+    labelStyle: TOOLTIP_LABEL_STYLE,
+    itemStyle: TOOLTIP_ITEM_STYLE,
+    formatter: (value) => [formatPKR(value), "Revenue"],
+    labelFormatter: (label, payload) => {
+      const transactions = payload?.[0]?.payload?.transactions;
+      return transactions !== undefined ? `${label} · ${transactions} sales` : label;
+    },
+  };
 
   // Every series recharts will animate on the next remount — used to know exactly what
   // waitForAnimations() needs to wait for.
@@ -115,9 +125,9 @@ const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData 
     const keys = [];
     if (hasTrend) keys.push("line-revenue", "line-profit");
     if (topProducts.length > 0) keys.push("bar");
-    if (categoryShare.length > 0) keys.push("pie");
+    if (hasWhen) keys.push("bar-weekday", "bar-hour");
     return keys;
-  }, [hasTrend, topProducts.length, categoryShare.length]);
+  }, [hasTrend, topProducts.length, hasWhen]);
 
   const markDone = (key) => () => {
     pendingRef.current.delete(key);
@@ -152,10 +162,10 @@ const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData 
           }, 4000);
         }),
     }),
-    [animatedKeys]
+    [animatedKeys],
   );
 
-  if (!hasTrend && !hasSales) return null;
+  if (!hasTrend && topProducts.length === 0 && !hasWhen) return null;
 
   return (
     <div className="mb-6 flex flex-col gap-4">
@@ -165,14 +175,14 @@ const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData 
             <LineChart data={timeSeriesData} margin={{ left: 0, right: 12 }}>
               <CartesianGrid stroke={GRID_COLOR} vertical={false} />
               <XAxis dataKey="day" tickFormatter={formatDay} stroke={AXIS_COLOR} fontSize={12} />
-              <YAxis stroke={AXIS_COLOR} fontSize={12} />
+              <YAxis stroke={AXIS_COLOR} fontSize={12} tickFormatter={compactAmount} />
               <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} labelFormatter={formatDay} />
               <Legend wrapperStyle={{ fontSize: 12 }} />
               <Line
                 type="monotone"
                 dataKey="revenue"
                 name="Revenue"
-                stroke="#4f46e5"
+                stroke={REVENUE_COLOR}
                 strokeWidth={2}
                 dot={false}
                 onAnimationEnd={markDone("line-revenue")}
@@ -197,20 +207,9 @@ const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData 
             <ResponsiveContainer key={remountKey} width="100%" height={280}>
               <BarChart data={topProducts} layout="vertical" margin={{ left: 12, right: 12 }}>
                 <CartesianGrid stroke={GRID_COLOR} horizontal={false} />
-                <XAxis type="number" stroke={AXIS_COLOR} fontSize={12} />
-                <YAxis
-                  type="category"
-                  dataKey="name"
-                  width={100}
-                  stroke={AXIS_COLOR}
-                  fontSize={12}
-                  tick={{ fill: AXIS_COLOR }}
-                />
-                <Tooltip
-                  contentStyle={TOOLTIP_STYLE}
-                  labelStyle={TOOLTIP_LABEL_STYLE}
-                  itemStyle={TOOLTIP_ITEM_STYLE}
-                />
+                <XAxis type="number" stroke={AXIS_COLOR} fontSize={12} tickFormatter={compactAmount} />
+                <YAxis type="category" dataKey="name" width={100} stroke={AXIS_COLOR} fontSize={12} tick={{ fill: AXIS_COLOR }} />
+                <Tooltip contentStyle={TOOLTIP_STYLE} labelStyle={TOOLTIP_LABEL_STYLE} itemStyle={TOOLTIP_ITEM_STYLE} />
                 <Bar dataKey="profit" name="Profit" radius={[0, 4, 4, 0]} onAnimationEnd={markDone("bar")}>
                   {topProducts.map((entry, index) => (
                     <Cell key={index} fill={entry.profit >= 0 ? "#16a34a" : "#dc2626"} />
@@ -231,54 +230,48 @@ const SalesCharts = forwardRef(function SalesCharts({ salesData, timeSeriesData 
           </ChartCard>
         )}
 
-        {categoryShare.length > 0 && (
-          <ChartCard title="Revenue Share by Category">
-            {/* Custom legend below, not recharts' built-in <Legend> — that shares the
-                ResponsiveContainer's height budget with the pie itself, and on this card's
-                fixed height it was shrinking the circle's usable radius unevenly and
-                clipping it into a half-moon. A plain HTML legend keeps the full height
-                free for the pie.
-
-                Fixed-size <PieChart>, deliberately NOT wrapped in <ResponsiveContainer> —
-                confirmed live via a real Page.printToPDF render: when this card gets
-                relocated to the next page (print-avoid-break, see tailwind.css), recharts'
-                width/height measurement can get captured mid-relocation and cached wrong,
-                re-clipping the exact same "half-moon" this fixed layout was already once
-                fixed for, on print specifically. The circle's own outerRadius is a fixed
-                pixel value regardless of container width anyway, so this chart never
-                actually benefited from ResponsiveContainer's dynamic width measurement —
-                removing it removes the one thing that measurement could get wrong. */}
-            <div className="flex justify-center">
-              <PieChart key={remountKey} width={280} height={240}>
-                <Tooltip
-                  contentStyle={TOOLTIP_STYLE}
-                  labelStyle={TOOLTIP_LABEL_STYLE}
-                  itemStyle={TOOLTIP_ITEM_STYLE}
-                />
-                <Pie
-                  data={categoryShare}
+        {hasWhen && (
+          <ChartCard title="Sales by Day of Week">
+            <ResponsiveContainer key={remountKey} width="100%" height={280}>
+              <BarChart data={weekdayData} margin={{ left: 0, right: 12 }}>
+                <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+                <XAxis dataKey="label" stroke={AXIS_COLOR} fontSize={12} />
+                <YAxis stroke={AXIS_COLOR} fontSize={12} tickFormatter={compactAmount} />
+                <Tooltip {...whenTooltip} cursor={{ fill: GRID_COLOR }} />
+                <Bar
                   dataKey="revenue"
-                  nameKey="name"
-                  outerRadius={90}
-                  onAnimationEnd={markDone("pie")}
-                >
-                  {categoryShare.map((entry, index) => (
-                    <Cell key={index} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-              </PieChart>
-            </div>
-            <div className="mt-2 flex flex-wrap justify-center gap-x-4 gap-y-1">
-              {categoryShare.map((entry, index) => (
-                <span key={entry.name} className="flex items-center gap-1.5 text-xs text-gray-600 dark:text-gray-300">
-                  <ColorDot color={PIE_COLORS[index % PIE_COLORS.length]} />
-                  {entry.name}
-                </span>
-              ))}
-            </div>
+                  name="Revenue"
+                  fill={REVENUE_COLOR}
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={36}
+                  onAnimationEnd={markDone("bar-weekday")}
+                />
+              </BarChart>
+            </ResponsiveContainer>
           </ChartCard>
         )}
       </div>
+
+      {hasWhen && (
+        <ChartCard title="Sales by Hour of Day">
+          <ResponsiveContainer key={remountKey} width="100%" height={240}>
+            <BarChart data={hourData} margin={{ left: 0, right: 12 }}>
+              <CartesianGrid stroke={GRID_COLOR} vertical={false} />
+              <XAxis dataKey="label" stroke={AXIS_COLOR} fontSize={11} interval="preserveStartEnd" />
+              <YAxis stroke={AXIS_COLOR} fontSize={12} tickFormatter={compactAmount} />
+              <Tooltip {...whenTooltip} cursor={{ fill: GRID_COLOR }} />
+              <Bar
+                dataKey="revenue"
+                name="Revenue"
+                fill={REVENUE_COLOR}
+                radius={[4, 4, 0, 0]}
+                maxBarSize={28}
+                onAnimationEnd={markDone("bar-hour")}
+              />
+            </BarChart>
+          </ResponsiveContainer>
+        </ChartCard>
+      )}
     </div>
   );
 });

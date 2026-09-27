@@ -713,170 +713,308 @@ const refundSale = async (
 
 const PAYMENT_METHODS = ["cash", "card", "bank_transfer"];
 
-const fetchSales = async (startDate, endDate, paymentMethod = null, shopId) => {
-  try {
-    // Validate date inputs
-    if (
-      !startDate ||
-      !endDate ||
-      !isValidDate(startDate) ||
-      !isValidDate(endDate)
-    ) {
-      throw new Error(
-        "Invalid date inputs. Please provide valid start and end dates."
-      );
-    }
+// ---------------------------------------------------------------------------------------
+// Sales Report
+//
+// Every figure below reads sales_ledger (migrations/009_refunds.sql): voided sales are
+// already excluded, and each refund is a negative-quantity row dated on its OWN
+// event_time, so a refund reduces the day it happens rather than rewriting the original
+// sale's day. Costs are sales.buying_price, the cost snapshotted at the moment of each
+// sale, so past profit never moves when a product's price changes later. The payment-
+// medium filter LEFT JOINs sale_transactions; legacy sales with no transaction simply never
+// match a specific medium.
+// ---------------------------------------------------------------------------------------
 
-    // Query to fetch product sales, calculate profit/loss, include buying price, and category.
-    // Costs are sourced from sales.buying_price — the price snapshotted at the moment each
-    // sale happened — not the product's current price, so past profit never shifts when a
-    // product's/lot's price changes later.
-    //
-    // Sources from sales_ledger (migrations/009_refunds.sql), not the raw sales table: it
-    // already excludes voided sales (same as before) AND folds in every refund as a negative-
-    // quantity row dated on its OWN event_time — a refund reduces revenue/profit on the day
-    // it actually happens, not retroactively on the original sale's day. quantity/selling_
-    // price/buying_price mean the same thing on both branches of the view, so every SUM/AVG
-    // below keeps working unchanged; a refund's negative quantity does the subtraction for
-    // free. LEFT JOINs sale_transactions (migrations/015) to optionally filter by payment
-    // medium — legacy sales with no transaction_id simply never match a specific medium.
-    //
-    // GROUP BY includes p.shop_id alongside the WHERE filter, not just productname/category —
-    // a deliberate safety net (not just belt-and-suspenders): two shops could each have a
-    // product with the exact same name (migration 021 made that legal), and productname/
-    // category_id/category_name alone can't tell those apart. If the WHERE filter were ever
-    // missing on some future code path, GROUP BY still keeps their totals from merging into
-    // one row — it fails safe instead of silently combining two shops' revenue.
-    const response = await pool.query(
-      `SELECT
-         p.productname,
-         p.category_id,
-         c.category_name,  -- Fetch category name from the categories table
-         -- Quantity-weighted, same reasoning as profit_loss below — a product whose cost
-         -- changed over time (different lots) otherwise gets its buying/selling price
-         -- averaged one distinct-row-at-a-time, which can land on the wrong side of each
-         -- other (avg selling price appearing BELOW avg buying price) even when the real,
-         -- volume-weighted numbers show a healthy profit. Weighting both the same way
-         -- profit_loss is means (selling - buying) here always equals profit_loss exactly.
-         CAST(SUM(s.quantity * s.buying_price) / NULLIF(SUM(s.quantity), 0) AS INT) AS buyingprice,
-         SUM(s.quantity) AS total_quantity_sold,
-         CAST(SUM(s.quantity * s.selling_price) / NULLIF(SUM(s.quantity), 0) AS INT) AS avg_selling_price,
-         -- Quantity-weighted (total profit / total units), not a plain AVG across rows —
-         -- a plain average gives every sale EVENT equal weight regardless of quantity, so
-         -- a couple of low-quantity, deeply-discounted/clearance sales could pull this
-         -- negative even while the bulk of real volume sold at a healthy margin, making it
-         -- contradict the (correctly weighted) overall_profit_loss's sign right next to it.
-         CAST(SUM(s.quantity * (s.selling_price - s.buying_price)) / NULLIF(SUM(s.quantity), 0) AS INT) AS profit_loss,
-         SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
-       FROM sales_ledger s
-       INNER JOIN Products p ON s.product_id = p.id
-       INNER JOIN Categories c ON p.category_id = c.id  -- Join with Categories table to get category name
-       LEFT JOIN sale_transactions st ON st.id = s.transaction_id
-       WHERE s.event_time BETWEEN $1 AND $2
-         AND s.shop_id = $4
-         AND ($3::text IS NULL OR st.payment_method = $3)
-       GROUP BY p.productname, p.category_id, c.category_name, p.shop_id  -- Group by necessary columns including category name
-       ORDER BY profit_loss DESC, p.productname  -- tiebreaker: equal margins keep a stable order`,
-      [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null, shopId]
-    );
-
-    // Extract sales data rows
-    const salesData = response.rows;
-
-    // Calculate the overall total profit/loss for all products
-    const totalProfitLoss = salesData.reduce((acc, item) => {
-      return acc + parseFloat(item.overall_profit_loss); // Convert overall_profit_loss to a number
-    }, 0);
-
-    // Return both sales data and total profit/loss
-    return {
-      salesData, // Product-wise profit/loss with category, buying price, and overall profit
-      totalProfitLoss, // Total profit/loss for the specified timeframe
-    };
-  } catch (err) {
-    console.log(err);
-    throw err; // Ensure to throw the error to be caught in your controller
+const assertReportRange = (startDate, endDate) => {
+  if (!startDate || !endDate || !isValidDate(startDate) || !isValidDate(endDate)) {
+    throw new ApiError(400, "Invalid date inputs. Please provide valid start and end dates.");
   }
 };
 
-const fetchSalesByProfitLoss = async (startDate, endDate, type, paymentMethod = null, shopId) => {
-  try {
-    // Validate date inputs
-    if (
-      !startDate ||
-      !endDate ||
-      !isValidDate(startDate) ||
-      !isValidDate(endDate)
-    ) {
-      throw new Error(
-        "Invalid date inputs. Please provide valid start and end dates."
-      );
-    }
+const paymentFilter = (paymentMethod) => (PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null);
 
-    // Determine the profit condition based on the type
-    let profitCondition;
-    if (type === "profit") {
-      profitCondition = "SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT > 0"; // Show only positive overall profit
-    } else if (type === "loss") {
-      profitCondition = "SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT < 0"; // Show only negative overall profit
-    } else {
-      throw new Error("Invalid type. Must be 'profit' or 'loss'.");
-    }
+// The window of the same length immediately before [start, end] — "vs previous period".
+// Ranges are minute-precise with an inclusive end (00:00-23:59), so the length is end-start
+// plus that last minute: today compares with yesterday 00:00-23:59, August with July.
+// Done on the naive date-time strings themselves (parsed and re-printed as if UTC) so the
+// previous window is interpreted by the database exactly the way the current one is.
+const previousWindow = (startDate, endDate) => {
+  const asUtc = (value) => new Date(`${String(value).replace(" ", "T").replace(/Z$/, "")}Z`).getTime();
+  const start = asUtc(startDate);
+  const end = asUtc(endDate);
+  const length = end - start + 60 * 1000;
+  const print = (ms) => new Date(ms).toISOString().slice(0, 19);
+  return { startDate: print(start - length), endDate: print(end - length) };
+};
 
-    // Sources from sales_ledger, same reasoning as fetchSales above — voided sales already
-    // excluded, refunds folded in as negative-quantity rows dated on their own event_time.
-    // GROUP BY includes p.shop_id — same safety-net reasoning as fetchSales above.
-    const response = await pool.query(
+const reportKpis = async (startDate, endDate, paymentMethod, shopId) => {
+  const method = paymentFilter(paymentMethod);
+  const [{ rows: ledger }, { rows: voids }] = await Promise.all([
+    pool.query(
       `SELECT
-         p.productname,
-         p.category_id,
-         c.category_name,
-         -- Quantity-weighted, same reasoning as profit_loss below — a product whose cost
-         -- changed over time (different lots) otherwise gets its buying/selling price
-         -- averaged one distinct-row-at-a-time, which can land on the wrong side of each
-         -- other (avg selling price appearing BELOW avg buying price) even when the real,
-         -- volume-weighted numbers show a healthy profit. Weighting both the same way
-         -- profit_loss is means (selling - buying) here always equals profit_loss exactly.
-         CAST(SUM(s.quantity * s.buying_price) / NULLIF(SUM(s.quantity), 0) AS INT) AS buyingprice,
-         SUM(s.quantity) AS total_quantity_sold,
-         CAST(SUM(s.quantity * s.selling_price) / NULLIF(SUM(s.quantity), 0) AS INT) AS avg_selling_price,
-         -- Quantity-weighted (total profit / total units), not a plain AVG across rows —
-         -- a plain average gives every sale EVENT equal weight regardless of quantity, so
-         -- a couple of low-quantity, deeply-discounted/clearance sales could pull this
-         -- negative even while the bulk of real volume sold at a healthy margin, making it
-         -- contradict the (correctly weighted) overall_profit_loss's sign right next to it.
-         CAST(SUM(s.quantity * (s.selling_price - s.buying_price)) / NULLIF(SUM(s.quantity), 0) AS INT) AS profit_loss,
-         SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS overall_profit_loss  -- Total profit as BIGINT
+         COALESCE(SUM(s.quantity * s.selling_price) FILTER (WHERE s.quantity > 0), 0)::BIGINT AS gross_sales,
+         COALESCE(-SUM(s.quantity * s.selling_price) FILTER (WHERE s.quantity < 0), 0)::BIGINT AS refunds,
+         COALESCE(SUM(s.quantity * s.buying_price), 0)::BIGINT AS cost,
+         COALESCE(SUM(s.quantity * (s.selling_price - s.buying_price)), 0)::BIGINT AS profit,
+         COALESCE(SUM(s.quantity) FILTER (WHERE s.quantity > 0), 0)::BIGINT AS items_sold,
+         COALESCE(-SUM(s.quantity) FILTER (WHERE s.quantity < 0), 0)::BIGINT AS items_refunded,
+         COUNT(*) FILTER (WHERE s.quantity < 0)::INT AS refund_count,
+         -- One receipt per checkout; a legacy sale with no receipt counts on its own.
+         COUNT(DISTINCT COALESCE('t' || s.transaction_id, 's' || s.sale_id)) FILTER (WHERE s.quantity > 0)::INT AS transactions
        FROM sales_ledger s
-       INNER JOIN Products p ON s.product_id = p.id
-       INNER JOIN Categories c ON p.category_id = c.id
        LEFT JOIN sale_transactions st ON st.id = s.transaction_id
        WHERE s.event_time BETWEEN $1 AND $2
-         AND s.shop_id = $4
-         AND ($3::text IS NULL OR st.payment_method = $3)
-       GROUP BY p.productname, p.category_id, c.category_name, p.shop_id  -- Group by product name and category
-       HAVING ${profitCondition} -- Apply the profit condition for profit-only items
-       ORDER BY overall_profit_loss DESC, p.productname  -- tiebreaker: stable order among equals`,
-      [startDate, endDate, PAYMENT_METHODS.includes(paymentMethod) ? paymentMethod : null, shopId]
-    );
+         AND s.shop_id = $3
+         AND ($4::text IS NULL OR st.payment_method = $4)`,
+      [startDate, endDate, shopId, method]
+    ),
+    // Voids never reach sales_ledger at all — counted from sales directly, on the day the
+    // void happened.
+    pool.query(
+      `SELECT COUNT(*)::INT AS void_count,
+              COALESCE(SUM(s.quantity * s.selling_price), 0)::BIGINT AS void_value
+       FROM sales s
+       LEFT JOIN sale_transactions st ON st.id = s.transaction_id
+       WHERE s.is_voided AND s.voided_at BETWEEN $1 AND $2
+         AND s.shop_id = $3
+         AND ($4::text IS NULL OR st.payment_method = $4)`,
+      [startDate, endDate, shopId, method]
+    ),
+  ]);
+  const row = ledger[0];
+  const num = (value) => Number(value) || 0;
+  const grossSales = num(row.gross_sales);
+  const refunds = num(row.refunds);
+  const netSales = grossSales - refunds;
+  const profit = num(row.profit);
+  const transactions = num(row.transactions);
+  return {
+    grossSales,
+    refunds,
+    netSales,
+    cost: num(row.cost),
+    profit,
+    marginPercent: netSales ? Math.round((profit / netSales) * 1000) / 10 : null,
+    transactions,
+    averageSale: transactions ? Math.round(grossSales / transactions) : 0,
+    itemsSold: num(row.items_sold),
+    itemsRefunded: num(row.items_refunded),
+    refundCount: num(row.refund_count),
+    voidCount: num(voids[0].void_count),
+    voidValue: num(voids[0].void_value),
+  };
+};
 
-    // Extract sales data rows
-    const salesData = response.rows;
+// Headline figures for the range, plus the same figures for the equal-length window just
+// before it, so every tile can show its change.
+const fetchReportSummary = async (startDate, endDate, paymentMethod, shopId) => {
+  assertReportRange(startDate, endDate);
+  const previous = previousWindow(startDate, endDate);
+  const [current, before] = await Promise.all([
+    reportKpis(startDate, endDate, paymentMethod, shopId),
+    reportKpis(previous.startDate, previous.endDate, paymentMethod, shopId),
+  ]);
+  return { current, previous: before, previousRange: previous };
+};
 
-    // Calculate the overall total profit/loss for the filtered products
-    const totalProfitLoss = salesData.reduce((acc, item) => {
-      return acc + parseFloat(item.overall_profit_loss); // Convert overall_profit to a number
-    }, 0);
+// Sort keys the product table may ask for -> the SQL they mean. A fixed map, never the
+// client's string, since it's interpolated into ORDER BY.
+const PRODUCT_SORTS = {
+  revenue: "revenue",
+  profit: "profit",
+  qty: "qty_sold",
+  refunded: "qty_refunded",
+  margin: "profit::numeric / NULLIF(revenue, 0)",
+  price: "avg_price",
+  name: "productname",
+};
+const MAX_PRODUCT_PAGE_SIZE = 500;
 
-    // Return both the sales data and the total profit/loss
-    return {
-      salesData, // Product-wise profit/loss including buying price
-      totalProfitLoss, // Total profit/loss for the specified timeframe and type
-    };
-  } catch (err) {
-    console.log(err);
-    throw err; // Ensure to throw the error to be caught in your controller
-  }
+// Per-product performance, paginated and sorted in the database. `type` keeps the report's
+// existing profit/loss filter; categoryId and search narrow it further. Totals cover every
+// matching product, not just the page on screen.
+const fetchReportProducts = async (
+  { startDate, endDate, paymentMethod, type, categoryId, search, sort = "revenue", direction = "desc", page = 1, pageSize = 25 },
+  shopId
+) => {
+  assertReportRange(startDate, endDate);
+  const orderExpr = PRODUCT_SORTS[sort] || PRODUCT_SORTS.revenue;
+  const orderDir = direction === "asc" ? "ASC" : "DESC";
+  const size = Math.min(Math.max(parseInt(pageSize, 10) || 25, 1), MAX_PRODUCT_PAGE_SIZE);
+  const safePage = Math.max(parseInt(page, 10) || 1, 1);
+  const having =
+    type === "profit"
+      ? "HAVING SUM(s.quantity * (s.selling_price - s.buying_price)) > 0"
+      : type === "loss"
+      ? "HAVING SUM(s.quantity * (s.selling_price - s.buying_price)) < 0"
+      : "";
+
+  const { rows } = await pool.query(
+    `WITH per_product AS (
+       SELECT p.id AS product_id,
+              p.productname,
+              p.category_id,
+              c.category_name,
+              COALESCE(SUM(s.quantity) FILTER (WHERE s.quantity > 0), 0)::BIGINT AS qty_sold,
+              COALESCE(-SUM(s.quantity) FILTER (WHERE s.quantity < 0), 0)::BIGINT AS qty_refunded,
+              SUM(s.quantity * s.selling_price)::BIGINT AS revenue,
+              SUM(s.quantity * s.buying_price)::BIGINT AS cost,
+              SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit,
+              -- Quantity-weighted, so a few heavily discounted units can't drag the
+              -- average below where most of the volume actually sold.
+              CAST(SUM(s.quantity * s.selling_price) / NULLIF(SUM(s.quantity), 0) AS INT) AS avg_price
+       FROM sales_ledger s
+       JOIN products p ON p.id = s.product_id
+       LEFT JOIN categories c ON c.id = p.category_id
+       LEFT JOIN sale_transactions st ON st.id = s.transaction_id
+       WHERE s.event_time BETWEEN $1 AND $2
+         AND s.shop_id = $3
+         AND ($4::text IS NULL OR st.payment_method = $4)
+         AND ($5::int IS NULL OR p.category_id = $5)
+         AND ($6::text IS NULL OR p.productname ILIKE '%' || $6 || '%')
+       GROUP BY p.id, p.productname, p.category_id, c.category_name
+       ${having}
+     ),
+     totals AS (
+       SELECT COUNT(*)::INT AS total_count,
+              COALESCE(SUM(revenue), 0)::BIGINT AS total_revenue,
+              COALESCE(SUM(cost), 0)::BIGINT AS total_cost,
+              COALESCE(SUM(profit), 0)::BIGINT AS total_profit,
+              COALESCE(SUM(qty_sold), 0)::BIGINT AS total_qty
+       FROM per_product
+     )
+     SELECT totals.*, page.*
+     FROM totals
+     LEFT JOIN LATERAL (
+       SELECT * FROM per_product
+       ORDER BY ${orderExpr} ${orderDir} NULLS LAST, productname, product_id
+       LIMIT $7 OFFSET $8
+     ) page ON true`,
+    [
+      startDate,
+      endDate,
+      shopId,
+      paymentFilter(paymentMethod),
+      categoryId ? Number(categoryId) : null,
+      search && String(search).trim() ? String(search).trim() : null,
+      size,
+      (safePage - 1) * size,
+    ]
+  );
+
+  const head = rows[0];
+  const totalCount = head.total_count;
+  const toNumber = (value) => (value === null || value === undefined ? null : Number(value));
+  return {
+    rows: rows
+      .filter((row) => row.product_id !== null)
+      .map((row) => ({
+        productId: row.product_id,
+        productname: row.productname,
+        categoryId: row.category_id,
+        categoryName: row.category_name,
+        qtySold: toNumber(row.qty_sold),
+        qtyRefunded: toNumber(row.qty_refunded),
+        revenue: toNumber(row.revenue),
+        cost: toNumber(row.cost),
+        profit: toNumber(row.profit),
+        avgPrice: toNumber(row.avg_price),
+      })),
+    totals: {
+      revenue: Number(head.total_revenue),
+      cost: Number(head.total_cost),
+      profit: Number(head.total_profit),
+      qtySold: Number(head.total_qty),
+    },
+    page: safePage,
+    pageSize: size,
+    totalCount,
+    totalPages: Math.max(1, Math.ceil(totalCount / size)),
+  };
+};
+
+// The report's "where did it come from" views: by category, by cashier, and when in the
+// day/week sales happen. Hours and weekdays are bucketed in the shop's business timezone
+// (same as the trend chart), so "7 PM" means 7 PM on the shop's own clock.
+const fetchReportBreakdowns = async (startDate, endDate, paymentMethod, shopId) => {
+  assertReportRange(startDate, endDate);
+  const method = paymentFilter(paymentMethod);
+  const businessTimezone = await getBusinessTimezone(shopId);
+  const base = `FROM sales_ledger s
+       LEFT JOIN sale_transactions st ON st.id = s.transaction_id
+       WHERE s.event_time BETWEEN $1 AND $2
+         AND s.shop_id = $3
+         AND ($4::text IS NULL OR st.payment_method = $4)`;
+  const params = [startDate, endDate, shopId, method];
+  const localTime = `((s.event_time AT TIME ZONE 'UTC') AT TIME ZONE $5)`;
+
+  const [byCategory, byCashier, byHour, byWeekday] = await Promise.all([
+    pool.query(
+      `SELECT c.id AS category_id,
+              COALESCE(c.category_name, 'Uncategorized') AS category_name,
+              COALESCE(SUM(s.quantity) FILTER (WHERE s.quantity > 0), 0)::BIGINT AS qty_sold,
+              SUM(s.quantity * s.selling_price)::BIGINT AS revenue,
+              SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit
+       FROM sales_ledger s
+       JOIN products p ON p.id = s.product_id
+       LEFT JOIN categories c ON c.id = p.category_id
+       LEFT JOIN sale_transactions st ON st.id = s.transaction_id
+       WHERE s.event_time BETWEEN $1 AND $2
+         AND s.shop_id = $3
+         AND ($4::text IS NULL OR st.payment_method = $4)
+       GROUP BY c.id, c.category_name
+       ORDER BY revenue DESC NULLS LAST, category_name`,
+      params
+    ),
+    // Who rang the sales up — the original sale's cashier, so refunds count against the
+    // sale they reverse. Sales from before users existed show as "Unassigned".
+    pool.query(
+      `SELECT u.id AS user_id,
+              COALESCE(u.display_name, 'Unassigned') AS name,
+              COUNT(DISTINCT COALESCE('t' || s.transaction_id, 's' || s.sale_id)) FILTER (WHERE s.quantity > 0)::INT AS transactions,
+              SUM(s.quantity * s.selling_price)::BIGINT AS revenue,
+              SUM(s.quantity * (s.selling_price - s.buying_price))::BIGINT AS profit
+       FROM sales_ledger s
+       JOIN sales orig ON orig.id = s.sale_id
+       LEFT JOIN users u ON u.id = orig.sold_by
+       LEFT JOIN sale_transactions st ON st.id = s.transaction_id
+       WHERE s.event_time BETWEEN $1 AND $2
+         AND s.shop_id = $3
+         AND ($4::text IS NULL OR st.payment_method = $4)
+       GROUP BY u.id, u.display_name
+       ORDER BY revenue DESC NULLS LAST, name`,
+      params
+    ),
+    pool.query(
+      `SELECT EXTRACT(HOUR FROM ${localTime})::INT AS hour,
+              COUNT(DISTINCT COALESCE('t' || s.transaction_id, 's' || s.sale_id))::INT AS transactions,
+              SUM(s.quantity * s.selling_price)::BIGINT AS revenue
+       ${base} AND s.quantity > 0
+       GROUP BY hour ORDER BY hour`,
+      [...params, businessTimezone]
+    ),
+    pool.query(
+      `SELECT EXTRACT(ISODOW FROM ${localTime})::INT AS weekday,
+              COUNT(DISTINCT COALESCE('t' || s.transaction_id, 's' || s.sale_id))::INT AS transactions,
+              SUM(s.quantity * s.selling_price)::BIGINT AS revenue
+       ${base} AND s.quantity > 0
+       GROUP BY weekday ORDER BY weekday`,
+      [...params, businessTimezone]
+    ),
+  ]);
+
+  const numbers = (row) =>
+    Object.fromEntries(Object.entries(row).map(([key, value]) => [key, typeof value === "string" && /^-?\d+$/.test(value) ? Number(value) : value]));
+  // Every hour/weekday present even with no sales, so the charts have an honest zero
+  // instead of a gap.
+  const hours = new Map(byHour.rows.map((r) => [r.hour, numbers(r)]));
+  const days = new Map(byWeekday.rows.map((r) => [r.weekday, numbers(r)]));
+  return {
+    byCategory: byCategory.rows.map(numbers),
+    byCashier: byCashier.rows.map(numbers),
+    byHour: Array.from({ length: 24 }, (_, hour) => hours.get(hour) || { hour, transactions: 0, revenue: 0 }),
+    byWeekday: Array.from({ length: 7 }, (_, i) => days.get(i + 1) || { weekday: i + 1, transactions: 0, revenue: 0 }),
+  };
 };
 
 // Daily revenue/profit/units within a date range — powers the Sales Report trend chart.
@@ -885,7 +1023,7 @@ const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null, sh
     throw new Error("Invalid date inputs. Please provide valid start and end dates.");
   }
 
-  // Sources from sales_ledger, same reasoning as fetchSales above — a refund lands on its
+  // Sources from sales_ledger, same reasoning as the Sales Report queries above — a refund lands on its
   // OWN day here (negative units/revenue/profit that day), not retroactively on the day of
   // the original sale. Grouped by day in the business timezone (not Postgres's UTC session
   // timezone) so the chart's day buckets agree with what a human looking at the shop's clock
@@ -913,7 +1051,7 @@ const fetchSalesTimeSeries = async (startDate, endDate, paymentMethod = null, sh
 // Cash/card/bank-transfer totals for a date range — powers both the Sales Report's summary
 // cards and the Payment Mediums page's, one function reused rather than duplicated. Revenue
 // (quantity * selling_price), not profit — a payment-medium breakdown is about how money
-// came in, which fetchSales/fetchSalesByProfitLoss's profit-per-product view doesn't answer.
+// came in, which the report's per-product profit view doesn't answer.
 const fetchPaymentMediumTotals = async (startDate, endDate, shopId) => {
   if (!startDate || !endDate || !isValidDate(startDate) || !isValidDate(endDate)) {
     throw new Error("Invalid date inputs. Please provide valid start and end dates.");
@@ -941,8 +1079,9 @@ const fetchPaymentMediumTotals = async (startDate, endDate, shopId) => {
 
 module.exports = {
   checkoutSale,
-  fetchSales,
-  fetchSalesByProfitLoss,
+  fetchReportSummary,
+  fetchReportProducts,
+  fetchReportBreakdowns,
   fetchSalesTimeSeries,
   fetchPaymentMediumTotals,
   getRecentSales,
