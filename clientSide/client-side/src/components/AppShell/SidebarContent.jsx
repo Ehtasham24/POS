@@ -34,7 +34,9 @@ export default function SidebarContent({ onNavigate = () => {} }) {
         </span>
       </Link>
 
-      <nav className="flex-1 space-y-1 px-3 py-2">
+      {/* Scrolls on its own when the window is shorter than the menu (a laptop at 125%+ zoom), so
+          the last items — Company, Settings — stay reachable. */}
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 py-2">
         {visibleItems.map(({ to, labelKey, icon: Icon, end, alsoActiveOn }) => (
           <NavLink
             key={to}
