@@ -125,11 +125,40 @@ const runStatementAsTenant = async (rawQuery, shopId, args) => {
   }
 };
 
+// A plain read: SELECT (or WITH) with no data-modifying clause anywhere in it.
+const WRITE_PATTERN = /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CALL)\b/i;
+const isReadOnly = (text) => /^\s*(SELECT|WITH)\b/i.test(text) && !WRITE_PATTERN.test(text.replace(/FOR\s+(NO\s+KEY\s+)?UPDATE/gi, ""));
+
 const queryAsTenant = async (shopId, args) => {
   const client = await rawPool.connect();
+  const rawQuery = client.query.bind(client);
+
+  // Reads skip waiting for their COMMIT: a transaction that only read commits and rolls back
+  // alike, so the rows go back to the caller one round trip sooner (a third of each query's
+  // time when the database is far away) and the connection returns to the pool once the
+  // COMMIT lands.
+  if (isReadOnly(statementText(args))) {
+    let result;
+    try {
+      await rawQuery(beginAsTenant(shopId));
+      result = await rawQuery(...args);
+    } catch (err) {
+      rawQuery("ROLLBACK").then(
+        () => client.release(),
+        (rollbackErr) => client.release(rollbackErr)
+      );
+      throw err;
+    }
+    rawQuery("COMMIT").then(
+      () => client.release(),
+      (commitErr) => client.release(commitErr)
+    );
+    return result;
+  }
+
   let broken = false;
   try {
-    return await runStatementAsTenant(client.query.bind(client), shopId, args);
+    return await runStatementAsTenant(rawQuery, shopId, args);
   } catch (err) {
     broken = !!err.connectionBroken;
     throw err;

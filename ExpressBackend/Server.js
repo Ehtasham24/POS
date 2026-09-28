@@ -29,6 +29,8 @@ const errorHandler = require("./Middleware/errorHandler");
 const { startShiftAutoCloseSweep } = require("./Sevices/shiftSweep");
 const { recordEgress } = require("./Sevices/egressService");
 const monitoring = require("./Sevices/monitoringService");
+const { invalidate } = require("./utils/cache");
+const { inventoryCacheKey } = require("./Sevices/inventoryService");
 const { startMaintenanceSweep } = require("./Sevices/maintenanceSweep");
 const cors = require("cors");
 
@@ -95,6 +97,11 @@ const Server = async () => {
         });
       }
       if (!shopId) return;
+      // Any change a shop makes (a sale, a refund, stock added, a product edited) can move its
+      // stock figures — drop its cached inventory summary so the next read is current.
+      if (req.method !== "GET" && res.statusCode < 400) {
+        invalidate(inventoryCacheKey(shopId)).catch(() => {});
+      }
       const bytes = Number(res.getHeader("content-length")) || 0;
       recordEgress(shopId, bytes).catch((err) => console.error("Egress tracking failed:", err));
     });

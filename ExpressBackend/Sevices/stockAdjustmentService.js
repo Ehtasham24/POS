@@ -129,42 +129,43 @@ const listAdjustments = async ({ productId, startDate, endDate, reasonCode, page
 // shrinkage cost somewhere visible, instead of it silently vanishing from every report.
 const getShrinkageSummary = async (startDate, endDate, shopId) => {
   [startDate, endDate] = await shopRangeToUtc(startDate, endDate, shopId);
-  const { rows: totals } = await pool.query(
-    `SELECT COALESCE(SUM(-quantity_change), 0) AS total_units_lost,
-            COALESCE(SUM(-quantity_change * buying_price), 0) AS total_cost_impact
-     FROM stock_adjustments
-     WHERE adjusted_at BETWEEN $1 AND $2 AND quantity_change < 0 AND shop_id = $3`,
-    [startDate, endDate, shopId]
-  );
-
-  const { rows: byReason } = await pool.query(
-    `SELECT reason_code,
-            SUM(-quantity_change) AS units_lost,
-            SUM(-quantity_change * buying_price) AS cost_impact
-     FROM stock_adjustments
-     WHERE adjusted_at BETWEEN $1 AND $2 AND quantity_change < 0 AND shop_id = $3
-     GROUP BY reason_code
-     ORDER BY cost_impact DESC`,
-    [startDate, endDate, shopId]
-  );
-
-  // GROUP BY includes a.shop_id alongside product_id/productname — same fail-safe reasoning
-  // as salesService.js's fetchSales: two shops can now share a product name (migration 021),
-  // so grouping only by product_id (itself already shop-specific, since a product row only
-  // ever belongs to one shop) is actually already safe here — shop_id is added purely for
-  // consistency/defense-in-depth with the WHERE filter, not because product_id alone could
-  // actually merge two shops' rows.
-  const { rows: byProduct } = await pool.query(
-    `SELECT a.product_id, p.productname,
-            SUM(-a.quantity_change) AS units_lost,
-            SUM(-a.quantity_change * a.buying_price) AS cost_impact
-     FROM stock_adjustments a
-     JOIN products p ON p.id = a.product_id
-     WHERE a.adjusted_at BETWEEN $1 AND $2 AND a.quantity_change < 0 AND a.shop_id = $3
-     GROUP BY a.product_id, p.productname, a.shop_id
-     ORDER BY cost_impact DESC`,
-    [startDate, endDate, shopId]
-  );
+  const params = [startDate, endDate, shopId];
+  // Three independent reads — sent together rather than one after another.
+  //
+  // byProduct's GROUP BY includes a.shop_id alongside product_id/productname — same fail-safe
+  // reasoning as salesService.js's fetchSales: product_id is itself already shop-specific, so
+  // shop_id is there for consistency/defense-in-depth with the WHERE filter, not because
+  // product_id alone could merge two shops' rows.
+  const [{ rows: totals }, { rows: byReason }, { rows: byProduct }] = await Promise.all([
+    pool.query(
+      `SELECT COALESCE(SUM(-quantity_change), 0) AS total_units_lost,
+              COALESCE(SUM(-quantity_change * buying_price), 0) AS total_cost_impact
+       FROM stock_adjustments
+       WHERE adjusted_at BETWEEN $1 AND $2 AND quantity_change < 0 AND shop_id = $3`,
+      params
+    ),
+    pool.query(
+      `SELECT reason_code,
+              SUM(-quantity_change) AS units_lost,
+              SUM(-quantity_change * buying_price) AS cost_impact
+       FROM stock_adjustments
+       WHERE adjusted_at BETWEEN $1 AND $2 AND quantity_change < 0 AND shop_id = $3
+       GROUP BY reason_code
+       ORDER BY cost_impact DESC`,
+      params
+    ),
+    pool.query(
+      `SELECT a.product_id, p.productname,
+              SUM(-a.quantity_change) AS units_lost,
+              SUM(-a.quantity_change * a.buying_price) AS cost_impact
+       FROM stock_adjustments a
+       JOIN products p ON p.id = a.product_id
+       WHERE a.adjusted_at BETWEEN $1 AND $2 AND a.quantity_change < 0 AND a.shop_id = $3
+       GROUP BY a.product_id, p.productname, a.shop_id
+       ORDER BY cost_impact DESC`,
+      params
+    ),
+  ]);
 
   return {
     totalUnitsLost: Number(totals[0].total_units_lost),

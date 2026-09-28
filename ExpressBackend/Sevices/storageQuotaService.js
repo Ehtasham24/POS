@@ -13,7 +13,7 @@ const WARNING_THRESHOLD_PERCENT = 75;
 const usageCacheKey = (shopId) => `storage-usage:${shopId}`;
 // 10 minutes — this is polled by every logged-in user's browser (StorageWarningBadge, same
 // 60s interval as LowStockBell/PendingBankPaymentsBell), so computing it fresh per poll
-// would mean 14 GROUP-BY-less COUNT/SUM queries every minute per active shop. A cache this
+// would mean scanning 14 tables every minute per active shop. A cache this
 // long means a shop that just blew past its quota might take up to 10 minutes to see the
 // warning light up — an acceptable trade for how this number is actually used (a slow-
 // moving storage trend, not something that needs to the second freshness the way a stock
@@ -24,16 +24,16 @@ const USAGE_CACHE_TTL_SECONDS = 600;
 // just scoped to one shop_id (so it's cheap enough to run per-shop, not just per-admin-page-
 // load) — see that function's own comment for why pg_column_size is a real, if lower-bound,
 // measurement rather than a guess.
+// Every table's row sizes summed in ONE statement (a UNION ALL), not one query per table —
+// each round trip to a distant database costs far more than the scan itself.
+const sumRowBytesSql = (where) =>
+  `SELECT COALESCE(SUM(bytes), 0)::bigint AS approx_bytes FROM (${USAGE_TABLES.map(
+    (table) => `SELECT SUM(pg_column_size(t.*)) AS bytes FROM ${table} t ${where}`
+  ).join(" UNION ALL ")}) per_table`;
+
 const getShopStorageBytes = async (shopId) => {
-  let totalBytes = 0;
-  for (const table of USAGE_TABLES) {
-    const { rows } = await pool.query(
-      `SELECT COALESCE(SUM(pg_column_size(t.*)), 0)::bigint AS approx_bytes FROM ${table} t WHERE shop_id = $1`,
-      [shopId]
-    );
-    totalBytes += Number(rows[0].approx_bytes);
-  }
-  return totalBytes;
+  const { rows } = await pool.query(sumRowBytesSql("WHERE shop_id = $1"), [shopId]);
+  return Number(rows[0].approx_bytes);
 };
 
 // Same measurement as getShopStorageBytes, just with no WHERE clause — every shop's content
@@ -44,14 +44,8 @@ const getShopStorageBytes = async (shopId) => {
 // look like it owns the entire database.
 const globalApproxBytesCacheKey = "storage-usage:global-total";
 const getAllShopsApproxBytesTotal = async () => {
-  let totalBytes = 0;
-  for (const table of USAGE_TABLES) {
-    const { rows } = await systemPool.query(
-      `SELECT COALESCE(SUM(pg_column_size(t.*)), 0)::bigint AS approx_bytes FROM ${table} t`
-    );
-    totalBytes += Number(rows[0].approx_bytes);
-  }
-  return totalBytes;
+  const { rows } = await systemPool.query(sumRowBytesSql(""));
+  return Number(rows[0].approx_bytes);
 };
 
 // What the shop's own UI actually needs to know: how much it's using, what it's allowed

@@ -7,9 +7,9 @@ const { withCache } = require("../utils/cache");
 // (see clientSide LowStockBell.jsx) — plus loaded by the Inventory page itself. Unlike
 // categories/settings, stock changes constantly (every sale, every restock), and it has
 // many write paths (sales, voids/refunds, lot add-stock, product create/update/delete),
-// so rather than chase invalidation through all of them, this just caches for 30s — well
-// under the 60s poll interval, so it still absorbs the bulk of the polling traffic
-// without ever being more than 30s stale.
+// so rather than chase invalidation through each of them, server.js drops this shop's copy
+// after any successful write request of that shop — the polling still hits the cache, but
+// a sale or restock shows up at once. The 30s TTL is the backstop.
 // Keyed per-shop — otherwise the 30s cache would serve one shop's stock summary to
 // another for up to 30 seconds after the first request from either.
 const inventoryCacheKey = (shopId) => `inventory:summary:${shopId}`;
@@ -72,4 +72,4 @@ const getInventory = async (shopId) => {
   });
 };
 
-module.exports = { getInventory };
+module.exports = { getInventory, inventoryCacheKey };
