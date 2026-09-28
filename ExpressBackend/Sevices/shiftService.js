@@ -3,12 +3,17 @@ const ApiError = require("../utils/ApiError");
 const { dateRangeCondition } = require("../utils/dateRangeFilter");
 const { assertOwnedByShop } = require("../utils/shopOwnership");
 
-// How long a shift can go with no real activity (a sale, refund, or cash movement) before
-// Sevices/shiftSweep.js's periodic check treats it as abandoned — a crashed app, a closed
-// browser tab, a forgotten "Close Shift" click — and closes it automatically rather than
-// leaving it open forever (which would block that user from ever opening a new shift again,
-// migrations/017's one-open-shift-per-user constraint).
-const IDLE_MINUTES = 15;
+// A shift is closed by a person — the cashier (or the owner) counts the drawer and enters
+// the total, the way every mainstream POS works (Square, Loyverse, Lightspeed). A quiet
+// spell, a closed tab or a restarted device doesn't end it: the cashier picks the same shift
+// up when they come back, and the register reminds them once it has been open too long.
+//
+// The only automatic close is a safety net for a shift nobody will ever come back to: no
+// sale, refund or cash movement for ABANDONED_AFTER_DAYS days (Square's own rule is a week of
+// inactivity). It closes uncounted and lands in "needs review" (auto_closed), so the drawer
+// still gets counted by a human — it just stops blocking that user's next shift
+// (migrations/017's one-open-shift-per-user constraint).
+const ABANDONED_AFTER_DAYS = 7;
 
 // Same self-or-owner shape voidSale (Sevices/salesService.js) already establishes: a
 // cashier acts on their own shift, an owner can act on anyone's.
@@ -324,7 +329,7 @@ const getShiftDetail = async (shiftId, requestingUser) => {
 // closeOpenShiftsForDowngrade) just found itself, never with an id supplied by an HTTP caller.
 const autoCloseOneShift = async (
   shiftId,
-  note = `Auto-closed after ${IDLE_MINUTES} minutes of inactivity — drawer wasn't counted, needs manual review.`
+  note = `Auto-closed after ${ABANDONED_AFTER_DAYS} days with no activity — drawer wasn't counted, needs manual review.`
 ) => {
   const client = await pool.connect();
   try {
@@ -370,8 +375,8 @@ const autoCloseOneShift = async (
 // across shops, it just doesn't need to be told which shop to look at).
 const autoCloseIdleShifts = async () => {
   const { rows: idle } = await pool.query(
-    `SELECT id FROM shifts WHERE status = 'open' AND last_activity_at < NOW() - ($1 || ' minutes')::interval`,
-    [IDLE_MINUTES]
+    `SELECT id FROM shifts WHERE status = 'open' AND last_activity_at < NOW() - make_interval(days => $1)`,
+    [ABANDONED_AFTER_DAYS]
   );
   for (const { id } of idle) {
     await autoCloseOneShift(id);
@@ -440,7 +445,7 @@ const reconcileShift = async (shiftId, requestingUser, countedCash, notes) => {
 };
 
 module.exports = {
-  IDLE_MINUTES,
+  ABANDONED_AFTER_DAYS,
   getOpenShift,
   openShift,
   closeShift,

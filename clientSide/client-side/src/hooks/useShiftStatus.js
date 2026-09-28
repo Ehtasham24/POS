@@ -11,6 +11,12 @@ import { apiGet } from "utils/api";
 // is shown rather than a possibly false one); false = no shift open; object = the open shift.
 // Advisory only: the real rule is enforced server-side at checkout.
 let status = null;
+
+// Past this a still-open shift is almost certainly yesterday's (or a forgotten one) — the
+// register nudges the cashier to count the drawer and close it. Never closes it for them.
+export const LONG_SHIFT_HOURS = 12;
+export const isShiftOpenTooLong = (shift) =>
+  !!shift?.opened_at && Date.now() - new Date(shift.opened_at).getTime() > LONG_SHIFT_HOURS * 60 * 60 * 1000;
 let statusUserId = null; // shifts are per user — a different login starts from "unknown"
 let inFlight = null;
 const listeners = new Set();

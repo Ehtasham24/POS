@@ -28,7 +28,7 @@ import { useAuth } from "auth/AuthContext";
 import { useToast } from "components/Toast/ToastContext";
 import useDebounce from "hooks/useDebounce";
 import useMediaQuery from "hooks/useMediaQuery";
-import useShiftStatus from "hooks/useShiftStatus";
+import useShiftStatus, { isShiftOpenTooLong } from "hooks/useShiftStatus";
 import { apiGet } from "utils/api";
 import * as offlineCache from "offline/cache";
 import { formatPKR } from "utils/money";
@@ -281,7 +281,17 @@ export default function RegisterPage() {
 
   const shiftPill =
     currentShift !== null ? (
-      currentShift ? (
+      currentShift && isShiftOpenTooLong(currentShift) ? (
+        <Link
+          to="/shifts"
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-amber-50 px-3 text-xs font-semibold text-amber-700 ring-1 ring-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:text-amber-400 dark:ring-amber-500/30"
+        >
+          <HiOutlineClock className="text-sm" />
+          {t("register.shiftOpenLong", {
+            since: new Date(currentShift.opened_at).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" }),
+          })}
+        </Link>
+      ) : currentShift ? (
         <Link
           to="/shifts"
           className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-success-50 px-3 text-xs font-semibold text-success-700 dark:bg-success-500/10 dark:text-success-500"

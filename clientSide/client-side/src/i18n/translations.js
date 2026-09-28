@@ -41,6 +41,7 @@ const translations = {
       shiftOpen: "Shift open",
       noShift: "No shift open",
       noShiftWarning: "No shift open — this sale can't be completed until you open one.",
+      shiftOpenLong: "Shift open since {since} · count and close",
       left: "{n} left",
       outOfStock: "Out of stock",
       lots: "Lots",
@@ -507,7 +508,7 @@ const translations = {
       reconcileSubmit: "Save Count",
       reconcileSuccess: "Shift reconciled",
       autoClosedExplanation:
-        "This shift was closed automatically after 15 minutes of inactivity — nobody counted the drawer yet. Count it now and enter the real total.",
+        "This shift was closed automatically because it was left open with no activity — nobody counted the drawer yet. Count it now and enter the real total.",
       closedAt: "Closed",
       filterAllStatuses: "All Statuses",
       filterAllUsers: "All Staff",
@@ -648,6 +649,7 @@ const translations = {
       shiftOpen: "شفٹ کھلی ہے",
       noShift: "کوئی شفٹ نہیں کھلی",
       noShiftWarning: "کوئی شفٹ نہیں کھلی — شفٹ کھولے بغیر یہ سیل مکمل نہیں ہو سکتی۔",
+      shiftOpenLong: "شفٹ {since} سے کھلی ہے · گنیں اور بند کریں",
       left: "{n} باقی",
       outOfStock: "اسٹاک ختم",
       lots: "لاٹس",
@@ -1113,7 +1115,7 @@ const translations = {
       reconcileSubmit: "گنتی محفوظ کریں",
       reconcileSuccess: "شفٹ ریکنسائل ہو گئی",
       autoClosedExplanation:
-        "یہ شفٹ 15 منٹ کی غیر فعالیت کے بعد خودکار طور پر بند ہوئی — ابھی تک کسی نے دراز نہیں گنا۔ اب گنیں اور اصل رقم درج کریں۔",
+        "یہ شفٹ بغیر کسی سرگرمی کے کھلی رہ جانے کی وجہ سے خودکار طور پر بند ہوئی — ابھی تک کسی نے دراز نہیں گنا۔ اب گنیں اور اصل رقم درج کریں۔",
       closedAt: "بند ہوئی",
       filterAllStatuses: "تمام حالتیں",
       filterAllUsers: "تمام عملہ",

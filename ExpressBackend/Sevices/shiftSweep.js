@@ -1,11 +1,10 @@
 const { autoCloseIdleShifts } = require("./shiftService");
 const { trackJob } = require("./monitoringService");
 
-// Checked every 2 minutes — frequent enough that an abandoned shift is never left "open"
-// much longer than shiftService.js's own IDLE_MINUTES threshold, without hammering the DB
-// (the query it runs is a cheap, indexed scan over the small set of currently-open shifts —
-// see migrations/019's idx_shifts_open_last_activity).
-const SWEEP_INTERVAL_MS = 2 * 60 * 1000;
+// Checked hourly — the threshold it enforces is days (shiftService.js's ABANDONED_AFTER_DAYS),
+// so there's nothing to gain from looking more often. The query is a cheap, indexed scan over
+// the small set of currently-open shifts (migrations/019's idx_shifts_open_last_activity).
+const SWEEP_INTERVAL_MS = 60 * 60 * 1000;
 
 // Called once at server startup (Server.js). A plain setInterval is enough here — this app
 // runs as one persistent long-lived Node process (not serverless/multi-instance), so there's
