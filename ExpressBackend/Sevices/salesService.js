@@ -1,7 +1,7 @@
 const { pool } = require("../Db");
 const { getSettings, getBusinessTimezone, shopRangeToUtc } = require("./settingsService");
 const storeCreditService = require("./storeCreditService");
-const { applyStockDelta } = require("./lotService");
+const { applyStockDelta, lockProductsInOrder } = require("./lotService");
 const { getOpenShift, touchActivity } = require("./shiftService");
 const { hasFeature } = require("../config/features");
 const ApiError = require("../utils/ApiError");
@@ -216,6 +216,8 @@ const checkoutSale = async (items, paymentMethod, requestingUser, shopId, { vouc
     }
 
     const threshold = await getLowStockThreshold(shopId);
+
+    await lockProductsInOrder(client, items.map((i) => i.productID), shopId);
 
     const soldItems = [];
     for (const item of items) {

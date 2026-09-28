@@ -228,6 +228,20 @@ const decrementLot = async (lotId, quantity, shopId) => {
 // multi-lot aggregate and can differ) — a caller that needs the product-level aggregate
 // specifically (e.g. checkoutSale's low-stock check) should still read products.quantity
 // itself, not rely on this value for that.
+// Locks every product a multi-item write is about to change, lowest id first. applyStockDelta
+// locks one row at a time as it goes, so two carts holding the same products in a different
+// order (A: 5 then 9, B: 9 then 5) would each wait on the other until Postgres aborts one
+// with "deadlock detected" — which the load test (scripts/load-test.js) hit under concurrent
+// checkouts. Taking the locks up front in one fixed order makes the second cart simply wait
+// its turn. Lots need no ordering of their own: a lot is only ever locked by a transaction
+// already holding its product.
+const lockProductsInOrder = async (client, productIds, shopId) => {
+  await client.query(`SELECT id FROM products WHERE id = ANY($1::int[]) AND shop_id = $2 ORDER BY id FOR UPDATE`, [
+    [...new Set(productIds.map(Number))],
+    shopId,
+  ]);
+};
+
 const applyStockDelta = async (client, { productId, lotId, delta, shopId }) => {
   const change = Number(delta);
   if (!Number.isFinite(change) || change === 0) {
@@ -281,4 +295,5 @@ module.exports = {
   getLotByCode,
   decrementLot,
   applyStockDelta,
+  lockProductsInOrder,
 };
