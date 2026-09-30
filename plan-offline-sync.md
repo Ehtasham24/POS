@@ -259,8 +259,8 @@ After each round it syncs everything and checks the invariants:
 ## Decisions (owner, 2026-09-30)
 
 1. Voucher redemption offline: needs internet; the owner's PIN can allow a one-off offline
-   redemption, recorded and reviewed. *(Pending the owner's confirmation after the scenario was
-   explained.)*
+   redemption, recorded and reviewed (option C of the three explained: online-only,
+   allow-and-flag, or online-only with owner override).
 2. Offline limits: warn at 3 days, block sales at 14 days.
 3. Local history kept on a device: 20 days.
 4. Device registration: owner only, within the shop's device limit, which the platform admin
