@@ -21,9 +21,24 @@ Status: phase 0 in progress (2026-10-01). iPhone is out of scope for now.
   - `Development.env` must never load on a device (it points at the cloud database):
     `ExpressBackend/loadEnv.js` skips it when `POS_RUNTIME=device`.
 - `device/schema.sql` is generated from the cloud by `device/scripts/export-schema.js` (no RLS).
+- **Windows app:** `npm run app` in `device/` (Electron 44) opens the POS in a window, served by
+  the device runtime in the same process. Verified: first start ~10s (creates the database),
+  real login through the UI, Register loads, clean exit on close. One instance at a time.
+  On a device the server listens on 127.0.0.1 only; the session cookie is Lax over plain HTTP.
+- **Node 18 check for Android:** nodejs-mobile's newest build is Node 18.20.4 (Oct 2024). The
+  same smoke test passes 21/21 on a portable Node 18.20.4, so the backend and PGlite don't need
+  anything newer.
 
-**Still to do in phase 0:** hard power-off test; Electron shell; Android (Capacitor +
-nodejs-mobile); PGlite vs SQLite decision.
+- **Power-cut test** (`scripts/power-cut.js`): 100 rounds of killing the device mid-sale with 3
+  cashiers selling, 6,505 sales in total — 512/512 checks passed. After every kill the
+  database opened (restart median 2.1s), every confirmed receipt was present, and stock +
+  units sold always equalled opening stock (no half-written sale). Killing the very first
+  start mid-setup (5 times) always left a database that starts normally. This is a process
+  kill: the operating system's own write cache survives it. A true plug-pull on real hardware
+  is still worth one run during the pilot.
+
+**Still to do in phase 0:** Android build (Capacitor + nodejs-mobile, on a phone or an
+emulator); then the PGlite vs SQLite decision (so far PGlite has passed everything).
 
 ## Goal
 
