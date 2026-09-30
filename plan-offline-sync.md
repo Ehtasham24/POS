@@ -1,6 +1,29 @@
 # Offline Registers: Local Backend on Windows and Android, Synced Through the Cloud
 
-Status: plan, not started (2026-09-30). iPhone is out of scope for now.
+Status: phase 0 in progress (2026-10-01). iPhone is out of scope for now.
+
+## Progress
+
+**Phase 0, Windows (done):** `device/` runs the unchanged backend on PGlite in one process.
+- `node device/scripts/smoke.js` passes 21/21: 200 concurrent checkouts from 5 cashiers (p50
+  ~95ms, ~50 sales/s), refund, void, stock adjustment, reports (10–50ms), shift close; stock and
+  report totals reconcile.
+- Findings, and what was done about them:
+  - **pglite-socket's multiplexer returned wrong results under concurrent connections**, so
+    PGlite runs in-process behind a pg-Pool-shaped adapter (`device/pglitePool.js`) that runs
+    one statement at a time and gives an open transaction the database to itself.
+  - **PGlite starts in the machine's time zone**, which shifted stored times by +5h. The local
+    database is pinned to UTC, like the cloud.
+  - **Queries issued outside the request's own open transaction** (checkout and refund read
+    the open shift and shop settings on a second connection) hang a single-session database,
+    and waste a connection in the cloud. Fixed at the call sites. `Db.js` now logs any
+    remaining ones and, on a device, runs them inside the transaction.
+  - `Development.env` must never load on a device (it points at the cloud database):
+    `ExpressBackend/loadEnv.js` skips it when `POS_RUNTIME=device`.
+- `device/schema.sql` is generated from the cloud by `device/scripts/export-schema.js` (no RLS).
+
+**Still to do in phase 0:** hard power-off test; Electron shell; Android (Capacitor +
+nodejs-mobile); PGlite vs SQLite decision.
 
 ## Goal
 

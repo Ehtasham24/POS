@@ -4,7 +4,7 @@ const fs = require("fs");
 const https = require("https");
 const http = require("http");
 const cookieParser = require("cookie-parser");
-require("dotenv").config({ path: path.join(__dirname, "Development.env") });
+require("./loadEnv");
 const routesProducts = require("./Routes/API/productsRoutes");
 const routesCategories = require("./Routes/API/categoriesRoutes");
 const routesSales = require("./Routes/API/salesRoutes");

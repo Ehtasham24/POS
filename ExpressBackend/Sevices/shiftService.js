@@ -33,9 +33,11 @@ const assertCanAct = (shift, requestingUser) => {
 // No shopId parameter needed here: a user belongs to exactly one shop (users.shop_id is
 // fixed), so "the open shift for user #N" can never resolve to a row outside that user's
 // own shop — the user id itself is already as narrow a boundary as shop_id would add.
-const getOpenShift = async (userId) => {
+// `executor` is a caller's transaction client, same as touchActivity below: a checkout reads the
+// open shift inside its own transaction rather than on a second connection.
+const getOpenShift = async (userId, executor = pool) => {
   if (!userId) return null;
-  const { rows } = await pool.query(
+  const { rows } = await executor.query(
     `SELECT * FROM shifts WHERE opened_by = $1 AND status = 'open'`,
     [userId]
   );

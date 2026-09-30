@@ -1,10 +1,6 @@
 const { Pool, types } = require("pg");
 const { AsyncLocalStorage } = require("async_hooks");
-const path = require("path");
-require("dotenv").config({
-  override: true,
-  path: path.join(__dirname, "Development.env"),
-});
+require("./loadEnv");
 
 // This database's session timezone is UTC (confirmed via `SHOW timezone`), so every
 // "timestamp without time zone" / "date" value actually stored is UTC wall-clock digits —
@@ -31,13 +27,25 @@ types.setTypeParser(1082, (value) => (value === null ? null : new Date(value + "
 // (setTypeParser above is client-side, not a session SET), which is the one thing
 // transaction-mode pooling doesn't preserve — safe as long as that stays true. (The tenant
 // context below is deliberately transaction-scoped for exactly this reason.)
-const rawPool = new Pool({
-  connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },
-  max: Number(process.env.PG_POOL_MAX) || 20,
-  idleTimeoutMillis: 30000,
-  connectionTimeoutMillis: 5000,
-});
+//
+// On a shop's own device (../device/) there is no database server: the database is PGlite,
+// running inside this process. The device runtime registers a factory for a pool-shaped
+// wrapper around it (device/pglitePool.js) before loading the backend; it's handed pg's own
+// type parsers and parameter encoding so values come back exactly as they do from the cloud.
+const ON_DEVICE = process.env.POS_RUNTIME === "device";
+const createDevicePool = () => {
+  if (!global.posDevice) throw new Error("POS_RUNTIME=device, but no local database was registered (start through device/index.js)");
+  return global.posDevice.createPool({ types, prepareValue: require("pg/lib/utils").prepareValue });
+};
+const rawPool = ON_DEVICE
+  ? createDevicePool()
+  : new Pool({
+      connectionString: process.env.DATABASE_URL,
+      ssl: { rejectUnauthorized: false },
+      max: Number(process.env.PG_POOL_MAX) || 20,
+      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 5000,
+    });
 
 // pg emits 'error' on idle clients (e.g. the pooler dropping a connection)
 // as a plain EventEmitter event — with no listener, Node treats it as an
@@ -192,16 +200,59 @@ const tenantClient = (client, shopId) => {
   return wrapped;
 };
 
+// ---------------------------------------------------------------------------------------
+// A pool.query issued while the same request holds a transaction open on a checked-out client
+// runs on a SECOND connection, outside that transaction. In the cloud that costs an extra
+// connection per request — twenty concurrent checkouts each waiting for a second one can
+// exhaust the pool. On a device it's worse: the local database runs one session, which the
+// open transaction holds, so the second query waits for the transaction and the transaction
+// waits for the query — the register hangs. Such a call should use the transaction's own
+// client; this catches any that don't. Each request's context remembers its open transaction:
+// a query from outside it is logged (once per call site, so it gets fixed), and on a device
+// it's run inside the transaction instead of hanging. A second pool.connect() in the same
+// situation is logged too; on a device it waits, then fails with "Local database busy".
+const reportedOutsideTransaction = new Set();
+
+const trackTransaction = (client, store) => {
+  const tracked = Object.create(client);
+  tracked.query = (...args) => {
+    const text = statementText(args);
+    if (BEGIN_PATTERN.test(text)) store.openTransaction ??= tracked;
+    else if (END_PATTERN.test(text) && store.openTransaction === tracked) store.openTransaction = null;
+    return client.query(...args);
+  };
+  tracked.release = (...releaseArgs) => {
+    if (store.openTransaction === tracked) store.openTransaction = null;
+    return client.release(...releaseArgs);
+  };
+  return tracked;
+};
+
+const reportOutsideTransaction = (call) => {
+  const site = new Error().stack.split("\n").slice(3, 6).map((line) => line.trim()).join(" <- ");
+  if (reportedOutsideTransaction.has(site)) return;
+  reportedOutsideTransaction.add(site);
+  console.warn(`${call} while this request's transaction is open — pass its client instead: ${site}`);
+};
+
 // Same surface every service already uses (query/connect), so none of them changed.
 const pool = {
   query: (...args) => {
+    const transaction = tenantContext.getStore()?.openTransaction;
+    if (transaction) {
+      reportOutsideTransaction("pool.query");
+      if (ON_DEVICE) return transaction.query(...args);
+    }
     const shopId = currentShopId();
     return shopId ? queryAsTenant(shopId, args) : rawPool.query(...args);
   },
   connect: async () => {
+    const store = tenantContext.getStore();
+    if (store?.openTransaction) reportOutsideTransaction("pool.connect");
     const client = await rawPool.connect();
     const shopId = currentShopId();
-    return shopId ? tenantClient(client, shopId) : client;
+    const wrapped = shopId ? tenantClient(client, shopId) : client;
+    return store ? trackTransaction(wrapped, store) : wrapped;
   },
   end: () => rawPool.end(),
 };

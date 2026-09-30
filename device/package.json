@@ -1,0 +1,10 @@
+{
+  "name": "pos-device",
+  "version": "0.0.1",
+  "private": true,
+  "description": "Runs the POS backend on a shop's own device (Windows / Android) against a local database, synced through the cloud. See ../plan-offline-sync.md.",
+  "main": "index.js",
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.8"
+  }
+}

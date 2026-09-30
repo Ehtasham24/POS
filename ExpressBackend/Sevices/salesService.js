@@ -164,6 +164,9 @@ const checkoutSale = async (items, paymentMethod, requestingUser, shopId, { vouc
   const creditToApply =
     storeCreditRedeemed > 0 ? Math.min(Number(storeCreditRedeemed), cartTotal) : 0;
 
+  // A shop setting, read before the transaction opens (see refundSale).
+  const threshold = await getLowStockThreshold(shopId);
+
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
@@ -185,7 +188,7 @@ const checkoutSale = async (items, paymentMethod, requestingUser, shopId, { vouc
     // whole branch only runs when requestingUser is set (a live checkout, never the
     // automated/webhook path), and requestingUser is always freshly re-fetched per-request
     // by requireAuth, so its shopTier can't be stale the way a cached value could be.
-    const openShift = await getOpenShift(requestingUser?.id);
+    const openShift = await getOpenShift(requestingUser?.id, client);
     if (requestingUser && hasFeature(requestingUser.shopTier, "shifts") && !openShift) {
       throw new ApiError(409, "Open a shift before making a sale — see the Shifts page");
     }
@@ -214,8 +217,6 @@ const checkoutSale = async (items, paymentMethod, requestingUser, shopId, { vouc
         shopId,
       });
     }
-
-    const threshold = await getLowStockThreshold(shopId);
 
     await lockProductsInOrder(client, items.map((i) => i.productID), shopId);
 
@@ -608,6 +609,9 @@ const refundSale = async (
   // The Store Credit page shows the contact's name next to the voucher — it has to be this
   // shop's contact, not just any id that exists.
   await assertOwnedByShop(pool, requestingUser.shopId, { contacts: contactId });
+  // A shop setting, not data this transaction changes — read before it opens, so it doesn't
+  // take a second connection while the transaction holds one.
+  const windowDays = await getRefundWindowDays(requestingUser.shopId);
 
   const client = await pool.connect();
   try {
@@ -628,7 +632,6 @@ const refundSale = async (
     if (!sale) throw new ApiError(404, "Sale not found");
     if (sale.is_voided) throw new ApiError(409, "This sale was voided — nothing to refund");
 
-    const windowDays = await getRefundWindowDays(requestingUser.shopId);
     if (windowDays != null) {
       const { rows: ageCheck } = await client.query(
         `SELECT (NOW() - sale_time) > ($2 || ' days')::interval AS expired FROM sales WHERE id = $1`,
@@ -686,7 +689,7 @@ const refundSale = async (
     // now — deliberately not the original sale's shift. A refund's cash impact hits the
     // drawer at refund time, possibly days later and by different staff than rang up the
     // original sale, so it belongs in whichever shift is open when the cash actually leaves.
-    const openShift = await getOpenShift(requestingUser?.id);
+    const openShift = await getOpenShift(requestingUser?.id, client);
 
     // When refundMethod is store_credit, this row IS the voucher — its own refund_amount is
     // the initial value, its own id (formatted below as REF-XXXXXX) is the redemption code.
