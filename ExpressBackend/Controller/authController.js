@@ -1,7 +1,7 @@
 const asyncHandler = require("../utils/asyncHandler");
 const { login, setNewPassword } = require("../Sevices/authService");
 const { createRequest } = require("../Sevices/passwordResetService");
-const { COOKIE_NAME, COOKIE_OPTIONS } = require("../utils/auth");
+const { COOKIE_NAME, sessionCookieOptions } = require("../utils/auth");
 const { getFeaturesForTier } = require("../config/features");
 
 // Reshapes the flat user object authService.js returns (…, shopId, shopTier, shopIsActive)
@@ -31,14 +31,14 @@ const withShopInfo = (user) => ({
 const Login = asyncHandler(async (req, res) => {
   const { username, password } = req.body;
   const { token, user } = await login(username, password, { ip: req.ip, userAgent: req.get("user-agent") });
-  res.cookie(COOKIE_NAME, token, { ...COOKIE_OPTIONS, secure: req.secure });
+  res.cookie(COOKIE_NAME, token, sessionCookieOptions(req));
   res.send(withShopInfo(user));
 });
 
 const Logout = asyncHandler(async (req, res) => {
   // Always succeeds — see requireAuth.js's comment on why this route never requires a
   // valid session. Clearing a cookie that doesn't exist / already expired is a no-op.
-  res.clearCookie(COOKIE_NAME, { ...COOKIE_OPTIONS, secure: req.secure });
+  res.clearCookie(COOKIE_NAME, sessionCookieOptions(req));
   res.status(204).send();
 });
 

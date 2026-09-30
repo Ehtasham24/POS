@@ -48,11 +48,17 @@ const COOKIE_OPTIONS = {
   maxAge: 180 * 24 * 60 * 60 * 1000, // mirrors TOKEN_TTL
 };
 
+// The options for this request. Over plain HTTP a None cookie would be rejected (it needs
+// Secure), so it's Lax there instead — fine, because plain HTTP only ever serves the app from
+// the same origin as the API: a shop's own device (http://localhost, ../device/).
+const sessionCookieOptions = (req) =>
+  req.secure ? { ...COOKIE_OPTIONS, secure: true } : { ...COOKIE_OPTIONS, sameSite: "lax", secure: false };
+
 module.exports = {
   hashPassword,
   comparePassword,
   signToken,
   verifyToken,
   COOKIE_NAME,
-  COOKIE_OPTIONS,
+  sessionCookieOptions,
 };

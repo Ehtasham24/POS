@@ -22,7 +22,8 @@ const OPENING_STOCK = 100000;
 let pass = 0;
 let fail = 0;
 const check = (label, ok, detail) => {
-  ok ? pass++ : fail++;
+  if (ok) pass++;
+  else fail++;
   console.log(`${ok ? "  OK  " : "  FAIL"} ${label}${ok ? "" : `  -> ${JSON.stringify(detail).slice(0, 300)}`}`);
 };
 const timed = async (fn) => {

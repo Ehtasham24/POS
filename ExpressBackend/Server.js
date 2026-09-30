@@ -36,6 +36,11 @@ const cors = require("cors");
 
 const server = express();
 const Port = process.env.PORT || 4000;
+// On a shop's own device (../device/) the app and its API are for that machine only: listen on
+// loopback, so nobody else on the shop's WiFi can reach them, and skip the cloud-only
+// phone-forwarder webhook listener.
+const ON_DEVICE = process.env.POS_RUNTIME === "device";
+const Host = ON_DEVICE ? "127.0.0.1" : undefined;
 
 const Server = async () => {
   // Behind a reverse proxy (deploy/nginx/pos.conf), TLS ends at the proxy and this app only
@@ -167,9 +172,9 @@ const Server = async () => {
           { cert: fs.readFileSync(certPath), key: fs.readFileSync(keyPath) },
           server
         )
-        .listen(Port, () => console.log(`HTTPS server started at Port ${Port}`));
+        .listen(Port, Host, () => console.log(`HTTPS server started at Port ${Port}`));
     } else {
-      server.listen(Port, () => console.log(`Server started at Port ${Port}`));
+      server.listen(Port, Host, () => console.log(`Server started at Port ${Port}`));
     }
   } catch (err) {
     console.log(err);
@@ -187,17 +192,19 @@ const Server = async () => {
   // cookie the HTTPS-only requirement was originally about (see utils/auth.js's
   // SameSite=None+Secure comment) — that reasoning doesn't apply to a shared-secret
   // header, so plain HTTP here is a deliberate, scoped trade-off, not an oversight.
-  const webhookApp = express();
-  webhookApp.use(express.json());
-  // Only the phone's two secret-authenticated routes — not the whole router, whose staff
-  // routes (forwarder status, secret management) rely on the session cookie.
-  webhookApp.use(routesPaymentNotifications.webhookRoutes);
-  // Same JSON error shape as the main app (401/403 from the secret/plan checks).
-  webhookApp.use(errorHandler);
-  const webhookPort = process.env.WEBHOOK_PORT || 4001;
-  http
-    .createServer(webhookApp)
-    .listen(webhookPort, () => console.log(`Phone-forwarder webhook listening on port ${webhookPort}`));
+  if (!ON_DEVICE) {
+    const webhookApp = express();
+    webhookApp.use(express.json());
+    // Only the phone's two secret-authenticated routes — not the whole router, whose staff
+    // routes (forwarder status, secret management) rely on the session cookie.
+    webhookApp.use(routesPaymentNotifications.webhookRoutes);
+    // Same JSON error shape as the main app (401/403 from the secret/plan checks).
+    webhookApp.use(errorHandler);
+    const webhookPort = process.env.WEBHOOK_PORT || 4001;
+    http
+      .createServer(webhookApp)
+      .listen(webhookPort, () => console.log(`Phone-forwarder webhook listening on port ${webhookPort}`));
+  }
 
   // Auto-closes an abandoned shift (crashed app, closed tab, forgotten to close) after 15
   // minutes of no activity — see Sevices/shiftSweep.js and migrations/019.

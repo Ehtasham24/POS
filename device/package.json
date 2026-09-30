@@ -3,8 +3,18 @@
   "version": "0.0.1",
   "private": true,
   "description": "Runs the POS backend on a shop's own device (Windows / Android) against a local database, synced through the cloud. See ../plan-offline-sync.md.",
-  "main": "index.js",
+  "main": "electron/main.js",
   "dependencies": {
     "@electric-sql/pglite": "^0.5.8"
+  },
+  "devDependencies": {
+    "electron": "^44.5.1"
+  },
+  "scripts": {
+    "start": "node index.js",
+    "app": "electron .",
+    "smoke": "node scripts/smoke.js",
+    "power-cut": "node scripts/power-cut.js",
+    "export-schema": "node scripts/export-schema.js"
   }
 }

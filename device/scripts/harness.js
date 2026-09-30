@@ -15,7 +15,6 @@ const startDevice = ({ dataDir, port = 4100, env = {} }) =>
         ...process.env,
         POS_DATA_DIR: dataDir,
         POS_PORT: String(port),
-        POS_WEBHOOK_PORT: String(port + 1),
         ...env,
       },
       stdio: ["ignore", "pipe", "pipe"],
@@ -33,14 +32,14 @@ const startDevice = ({ dataDir, port = 4100, env = {} }) =>
 // Hard kill: no shutdown handlers run, the closest a test gets to pulling the plug.
 const killDevice = (child) =>
   new Promise((resolve) => {
-    if (child.exitCode !== null) return resolve();
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
     child.once("exit", resolve);
     child.kill("SIGKILL");
   });
 
 const stopDevice = (child) =>
   new Promise((resolve) => {
-    if (child.exitCode !== null) return resolve();
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
     child.once("exit", resolve);
     child.kill("SIGTERM");
   });
