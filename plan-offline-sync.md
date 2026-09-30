@@ -127,18 +127,22 @@ leave no row behind. Instead:
   skipped. Applying a change is an idempotent upsert by uuid, so the rare repeat is harmless.
 - Deletes become soft deletes (`deleted_at`) on synced tables. The change feed carries them
   like any other change.
-- The feed is pruned after 90 days. A device whose cursor is older than that re-downloads a
-  full snapshot.
+- The feed is pruned after 30 days, beyond the 14-day offline block. A device whose cursor is
+  older than that re-downloads a full snapshot.
 
 ## The sync protocol
 
 ### Registration and first run
 1. Install, open, log in. This needs internet once.
-2. The cloud checks the user, the shop's status and the shop's device limit, then creates the
-   `devices` row, assigns a receipt prefix, and returns a device token. The token is stored in
+2. Only the shop **owner** can register a device. The cloud checks the owner, the shop's status
+   and the shop's device limit (`shops.max_devices`, set per shop by the platform admin in the
+   admin console, next to `max_users`), then creates the `devices` row, assigns a receipt
+   prefix, and returns a device token. Registering a device over the limit is refused with
+   "device limit reached, contact support". Retired and blocked devices don't count. Viewer mode
+   needs no registration (it's the web app), so only register devices count. The token is stored in
    Electron `safeStorage` on Windows and the Android Keystore on Android.
 3. Snapshot download: master data (products, lots, categories, contacts, users, settings, open
-   shifts) plus the last 90 days of sales and ledgers. It's paged and resumable. The device
+   shifts, vouchers with a balance) plus the last 20 days of sales and ledgers. It's paged and resumable. The device
    can't sell until the snapshot completes, and the progress is shown.
 
 ### Push (device → cloud)
@@ -178,7 +182,7 @@ leave no row behind. Instead:
 | Refund or void of a sale made on another device that hasn't synced yet | Not possible: that device can't see the sale. The refund waits until the sale syncs. |
 | Same sale voided on two devices | The second void is a no-op, not an error. |
 | Refund over the remaining refundable amount (two devices refund the same sale offline) | The cloud caps it at what's left, and the excess goes to `sync_rejections` for the owner. |
-| Store-credit voucher redeemed on two devices offline | **Redemption needs internet** (recommended). The balance is shared money and can't be split safely offline. The register shows "needs internet" for vouchers only. |
+| Store-credit voucher redeemed on two devices offline | Vouchers are bearer slips (`REF-…` code, no customer identity), so offline the same slip could be spent on two devices. **Needs internet by default** (the phone's 4G usually still works during load-shedding). With no internet at all, the owner can allow a one-off offline redemption with their PIN. It's recorded as "offline override" and any overspend lands in review. |
 | Customer credit (udhaar) over the credit limit offline | Allowed, and flagged in review. The ledger is append-only and its balance is derived, so it always converges. |
 | Bank / QR payment offline | Not available offline, because confirmation comes from a cloud webhook. Cash and card work offline. |
 
@@ -196,7 +200,7 @@ leave no row behind. Instead:
 | Device lost or stolen | Owner or admin sets it to **blocked**: the token is rejected and its pushes are refused (its unsent data is untrusted). |
 | Device replaced normally | **Retired**: it may push what it has, then it's wiped. A device must never be wiped with unsent entries without an explicit confirmation showing the count. |
 | Shop suspended, or tier downgraded, while a device is offline | The device picks it up on its next pull. Offline, it keeps working for a grace period (below). |
-| Device offline for a long time | Warn after 3 days. After 14 days, sales are blocked until it syncs (this caps drift and billing abuse). Both numbers are configurable per platform. |
+| Device offline for a long time | Warn after 3 days. After 14 days, sales are blocked until it syncs (this caps drift and billing abuse). Decided 2026-09-30. Both numbers are platform settings. |
 
 ### Clock and ordering
 | Case | Rule |
@@ -214,7 +218,7 @@ leave no row behind. Instead:
 | Cloud applied an event but the acknowledgement was lost | Same as above: the resend is ignored. |
 | App updated to a new schema while events are unsent | Events carry `payload_version`, and the cloud keeps upgraders for older versions for at least 6 months. The cloud never refuses data for being old. Local migrations run on start, before the sync worker. |
 | Very old app version | Pull and new features are refused with "update required". **Push is still accepted.** |
-| Phone storage fills up / local DB grows | Keep 90 days of sales locally, with older history read from the cloud when online. The app shows free space and warns at 90%. |
+| Phone storage fills up / local DB grows | Keep 20 days of sales locally, with older history read from the cloud when online (offline reports cover those 20 days, and say so). The app shows free space and warns at 90%. |
 | App uninstalled or data cleared with unsent entries | Unrecoverable on Android. Mitigations: push within seconds when online, show the pending count prominently, and have the Devices page show "oldest unsent" so a stuck device is noticed quickly. |
 | Windows DB corruption | A daily local backup copy (last 7 kept). Recovery: re-download the snapshot, then replay what survives. |
 | Android kills the app in the background | Sync runs while the app is open. A "backup register" phone refreshes when opened (a pull is 1–3s). Periodic background refresh (Android's 15-minute minimum, WorkManager) is a later add-on, not a dependency. |
@@ -230,7 +234,7 @@ leave no row behind. Instead:
 | Phase | Work | Done when |
 |---|---|---|
 | **0. Prototype** (1–2 wk) | Express + PGlite inside Electron and inside Capacitor + nodejs-mobile on Android. | Checkout works on both. The hard power-off test passes 100/100. Speed is measured. **Go/no-go on PGlite vs SQLite.** |
-| **1. Cloud groundwork** (2 wk) | Migration: `devices`, `sync_log`, `sync_rejections`, uuid columns and backfill, `receipt_no`, device-scoped lot codes, soft deletes, `sync_changes` triggers. Device registration API. | Isolation suite passes with the new tables. Receipts show the stored numbers. The web app is unchanged for users. |
+| **1. Cloud groundwork** (2 wk) | Migration: `devices`, `shops.max_devices` (editable in the admin console), `sync_log`, `sync_rejections`, uuid columns and backfill, `receipt_no`, device-scoped lot codes, soft deletes, `sync_changes` triggers. Device registration API. | Isolation suite passes with the new tables. Receipts show the stored numbers. The web app is unchanged for users. |
 | **2. Local mode** (2–3 wk) | Local backend packaging, snapshot download, local login, outbox writes in every write service. | A device sells for a day with the network cable pulled. |
 | **3. Sync engine** (3–4 wk) | Push, pull, rebase, the rules above, rejections. | The sync simulator (below) converges with zero invariant violations. |
 | **4. Visibility** (1–2 wk) | Owner Devices page, admin Devices tab, Health warning, review lists (stock, rejections, duplicates). | The owner can answer "is everything in?" from their phone. |
@@ -252,10 +256,12 @@ After each round it syncs everything and checks the invariants:
 - shift expected cash = the sum of its sales and cash movements, across devices;
 - nothing lost: every rejected event is present in `sync_rejections`.
 
-## Decisions needed from the owner (recommended defaults in bold)
+## Decisions (owner, 2026-09-30)
 
-1. Voucher redemption offline: **needs internet**, or allow it and flag overspends.
-2. Offline limits: **warn at 3 days, block sales at 14 days**.
-3. Local history kept on a device: **90 days**.
-4. Devices per shop by tier: **Basic 1, Smart 2, Advanced 5**.
-5. Who can register a device: **owner only**, or any cashier with owner approval.
+1. Voucher redemption offline: needs internet; the owner's PIN can allow a one-off offline
+   redemption, recorded and reviewed. *(Pending the owner's confirmation after the scenario was
+   explained.)*
+2. Offline limits: warn at 3 days, block sales at 14 days.
+3. Local history kept on a device: 20 days.
+4. Device registration: owner only, within the shop's device limit, which the platform admin
+   sets per shop in the admin console.
