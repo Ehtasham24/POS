@@ -12,7 +12,7 @@
   },
   "scripts": {
     "start": "node index.js",
-    "app": "electron .",
+    "app": "node scripts/start-app.js",
     "smoke": "node scripts/smoke.js",
     "power-cut": "node scripts/power-cut.js",
     "export-schema": "node scripts/export-schema.js"
