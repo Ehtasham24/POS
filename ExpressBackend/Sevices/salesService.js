@@ -101,25 +101,11 @@ const getRefundWindowDays = async (shopId) => {
   return Number.isFinite(days) && days > 0 ? days : null;
 };
 
-// Receipt numbers are just the sale_transactions row's SERIAL id, formatted — Postgres
-// allocates that atomically under concurrency by design (same guarantee sales.id/users.id
-// already rely on elsewhere in this file), so there's no custom counter/locking logic that
-// could produce a duplicate. Formatting is applied at read/display time only, never stored,
-// so the prefix/padding can change later without having to reformat historical receipts.
-//
-// NOTE: sale_transactions.id is a single database-wide SERIAL, so receipt numbers are
-// unique but not contiguous per shop once there's more than one shop (Shop A might see
-// RCPT-000001, RCPT-000004, ...) — a cosmetic gap, not a correctness issue; tracked as a
-// follow-up (a per-shop sequence) rather than fixed in this pass.
-const RECEIPT_PREFIX = "RCPT-";
-const formatReceiptNo = (transactionId) =>
-  transactionId ? `${RECEIPT_PREFIX}${String(transactionId).padStart(6, "0")}` : null;
-
-// Same idea, same robustness rationale (refunds.id is a SERIAL, allocated atomically by
-// Postgres) — just its own prefix so a refund slip is visibly distinct from a sale receipt.
-const REFUND_PREFIX = "REF-";
-const formatRefundNo = (refundId) =>
-  refundId ? `${REFUND_PREFIX}${String(refundId).padStart(6, "0")}` : null;
+// Receipt and refund numbers are stored on their rows (sale_transactions.receipt_no,
+// refunds.receipt_no — migration 032), not formatted from ids: a row written here gets
+// RCPT-000123 / REF-000123 from its id by the column's trigger, while a shop's own device
+// writes its own "{prefix}-{counter}" so two offline devices can't hand out the same number.
+// A refund's number doubles as its store-credit voucher code (storeCreditService.js).
 
 // Checkout: atomically creates one sale_transactions row (the receipt) plus one sales row
 // per cart item, all inside a single DB transaction — either the whole cart sells or none of
@@ -200,10 +186,10 @@ const checkoutSale = async (items, paymentMethod, requestingUser, shopId, { vouc
     // open shifts never get cross-attributed.
     const { rows: txnRows } = await client.query(
       `INSERT INTO sale_transactions (sold_by, payment_method, store_credit_applied, shift_id, shop_id)
-       VALUES ($1, $2, $3, $4, $5) RETURNING id`,
+       VALUES ($1, $2, $3, $4, $5) RETURNING id, receipt_no`,
       [requestingUser?.id || null, paymentMethod || null, creditToApply, openShift?.id || null, shopId]
     );
-    const transactionId = txnRows[0].id;
+    const { id: transactionId, receipt_no: receiptNo } = txnRows[0];
     // A real sale is exactly the "this shift is genuinely in use" signal the auto-close
     // sweep (Sevices/shiftSweep.js) needs — resets the idle clock every time one happens.
     await touchActivity(client, openShift?.id);
@@ -270,7 +256,7 @@ const checkoutSale = async (items, paymentMethod, requestingUser, shopId, { vouc
 
     return {
       transactionId,
-      receiptNo: formatReceiptNo(transactionId),
+      receiptNo,
       items: soldItems,
       total: cartTotal,
       creditApplied: creditToApply,
@@ -326,10 +312,8 @@ const fetchBilledHistory = async (
       startDate && endDate && isValidDate(startDate) && isValidDate(endDate);
     const parsedCategoryId = parseInt(categoryId, 10);
     const hasCategoryFilter = Number.isFinite(parsedCategoryId);
-    const parsedTransactionId = receiptNo
-      ? parseInt(String(receiptNo).replace(/^RCPT-/i, ""), 10)
-      : NaN;
-    const hasReceiptFilter = Number.isFinite(parsedTransactionId);
+    const receiptFilter = String(receiptNo ?? "").trim().toUpperCase();
+    const hasReceiptFilter = receiptFilter !== "";
     const hasPaymentMethodFilter = ["cash", "card", "bank_transfer"].includes(paymentMethod);
 
     // shop_id is unconditional, not behind an "if filter set" check like the rest —
@@ -366,8 +350,8 @@ const fetchBilledHistory = async (
       conditions.push(`s.is_voided = false`);
     }
     if (hasReceiptFilter) {
-      params.push(parsedTransactionId);
-      conditions.push(`s.transaction_id = $${params.length}`);
+      params.push(receiptFilter);
+      conditions.push(`st.receipt_no = $${params.length}`);
     }
     if (hasPaymentMethodFilter) {
       params.push(paymentMethod);
@@ -377,10 +361,10 @@ const fetchBilledHistory = async (
     const joinClause = hasCategoryFilter
       ? "JOIN public.products p ON s.product_id = p.id"
       : "";
-    // Only needed in these two queries when actually filtering by it — the final
+    // Only needed in these two queries when filtering by payment method or receipt — the final
     // rows-fetching query below already joins sale_transactions unconditionally, for
     // store_credit_applied/payment_method regardless of whether this filter is active.
-    const stJoinClause = hasPaymentMethodFilter
+    const stJoinClause = hasPaymentMethodFilter || hasReceiptFilter
       ? "LEFT JOIN public.sale_transactions st ON st.id = s.transaction_id"
       : "";
 
@@ -425,7 +409,7 @@ const fetchBilledHistory = async (
               ${BATCH_KEY_EXPR} AS batch_key,
               p.productname, l.lot_code,
               COALESCE((SELECT SUM(r.quantity) FROM refunds r WHERE r.sale_id = s.id), 0) AS refunded_quantity,
-              st.store_credit_applied, st.payment_method
+              st.store_credit_applied, st.payment_method, st.receipt_no
        FROM public.sales s
        JOIN public.products p ON s.product_id = p.id
        LEFT JOIN public.lots l ON s.lot_id = l.id
@@ -465,7 +449,7 @@ const fetchBilledHistory = async (
         transaction_id: row.transaction_id,
         // null for legacy (pre-receipt-number) batches — the frontend shows nothing/a
         // dash there rather than fabricate a number for sales that never got one.
-        receipt_no: formatReceiptNo(row.transaction_id),
+        receipt_no: row.receipt_no ?? null,
         // How much of THIS line item has already been refunded — always derived fresh from
         // the refunds table (see refundSale), never a cached flag on sales itself.
         refunded_quantity: Number(row.refunded_quantity),
@@ -705,7 +689,7 @@ const refundSale = async (
     await client.query("COMMIT");
     return {
       refund: inserted[0],
-      refundNo: formatRefundNo(inserted[0].id),
+      refundNo: inserted[0].receipt_no,
       remainingAfter: remaining - qty,
     };
   } catch (err) {

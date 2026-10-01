@@ -12,7 +12,8 @@ const { createPglitePool } = require("./pglitePool");
 const deviceConfig = (dataDir) => {
   const file = path.join(dataDir, "device.json");
   if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8"));
-  const config = { jwtSecret: crypto.randomBytes(48).toString("hex"), createdAt: new Date().toISOString() };
+  // receiptPrefix stays "D1" until the device is registered with the cloud, which assigns one.
+  const config = { jwtSecret: crypto.randomBytes(48).toString("hex"), receiptPrefix: "D1", createdAt: new Date().toISOString() };
   fs.mkdirSync(dataDir, { recursive: true });
   fs.writeFileSync(file, JSON.stringify(config, null, 2));
   return config;
@@ -34,13 +35,14 @@ const createDevShop = async (devShop) => {
 // "Server started at Port N" when it is listening. Call once per process.
 const startDevice = async ({ dataDir, port = 4100, devShop }) => {
   const started = Date.now();
-  const db = await openLocalDb(path.join(dataDir, "pgdata"));
+  const config = deviceConfig(dataDir);
+  const db = await openLocalDb(path.join(dataDir, "pgdata"), { receiptPrefix: config.receiptPrefix || "D1" });
   console.log(`Local database ready in ${Date.now() - started}ms`);
 
   Object.assign(process.env, {
     POS_RUNTIME: "device",
     DB_TENANT_RLS: "off", // one shop per device database; see plan-offline-sync.md
-    JWT_SECRET: deviceConfig(dataDir).jwtSecret,
+    JWT_SECRET: config.jwtSecret,
     PORT: String(port),
     APP_HTTPS: "false",
   });

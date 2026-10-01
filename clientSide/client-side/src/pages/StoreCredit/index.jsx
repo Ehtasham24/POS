@@ -9,7 +9,6 @@ import { useTimezone } from "timezone/TimezoneContext";
 import { apiGet } from "utils/api";
 import StoreCreditHistoryRow from "storeCreditComponents/StoreCreditHistoryRow";
 
-const formatVoucherCode = (refundId) => `REF-${String(refundId).padStart(6, "0")}`;
 
 // Gift-voucher model, not a customer list (see migrations/011_store_credit_vouchers.sql) —
 // every row here is one store-credit refund still holding a balance, identified by its own
@@ -118,7 +117,7 @@ export default function StoreCreditPage() {
                               </button>
                             </td>
                             <td className="px-2 py-3 font-mono font-medium text-gray-800 dark:text-gray-100">
-                              {formatVoucherCode(v.refund_id)}
+                              {v.code}
                             </td>
                             <td className="pr-2 py-3 truncate text-gray-600 dark:text-gray-300">
                               {v.contact_name || t("storeCredit.notTagged")}

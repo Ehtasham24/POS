@@ -90,7 +90,7 @@ function ShiftDetailRow({ shiftId, colSpan }) {
                     <li key={sale.transaction_id} className="flex items-center justify-between gap-2 text-sm">
                       <span className="flex min-w-0 items-center gap-2">
                         <span className="truncate font-mono text-gray-700 dark:text-gray-300">
-                          RCPT-{String(sale.transaction_id).padStart(6, "0")}
+                          {sale.receipt_no}
                         </span>
                         <span
                           className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${
@@ -121,7 +121,7 @@ function ShiftDetailRow({ shiftId, colSpan }) {
                     <li key={refund.id} className="text-sm">
                       <div className="flex items-center justify-between gap-2">
                         <span className="font-mono text-gray-700 dark:text-gray-300">
-                          REF-{String(refund.id).padStart(6, "0")}
+                          {refund.receipt_no}
                         </span>
                         <span className="shrink-0 font-semibold text-danger-600 dark:text-danger-400">
                           -PKR {Number(refund.refund_amount).toFixed(0)}

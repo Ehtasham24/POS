@@ -647,6 +647,47 @@ async function main() {
     const otherNotice = await asShop2(`SELECT id FROM announcements WHERE id = ${Number(created.announcementId)}`);
     check("An announcement addressed to shop 1 is invisible to shop 2", otherNotice.rows.length === 0, otherNotice.rows);
 
+    // Device sync tables (migration 032). A shop sees and registers only its own devices, and
+    // reads only its own change feed, which only the database's trigger writes.
+    // (asShop rolls back, so the shop's own insert is checked through RETURNING, and the
+    // visibility checks use a device written as the table owner.)
+    const ownInsert = await asShop2(
+      `INSERT INTO devices (id, shop_id, name, platform, receipt_prefix, token_hash, registered_by)
+       VALUES (gen_random_uuid(), ${Number(created.shopId)}, 'rls-probe', 'windows', 'P7', 'rls-probe-own-${Date.now()}', ${Number(created.userId)})
+       RETURNING id`
+    );
+    check("A shop can register a device of its own", ownInsert.rows.length === 1, ownInsert.rows);
+    created.deviceId = require("crypto").randomUUID();
+    await pool.query(
+      `INSERT INTO devices (id, shop_id, name, platform, receipt_prefix, token_hash, registered_by)
+       VALUES ($1, $2, 'rls-probe', 'windows', 'P9', $3, $4)`,
+      [created.deviceId, created.shopId, `rls-probe-${created.deviceId}`, created.userId]
+    );
+    const ownDevice = await asShop2(`SELECT id FROM devices WHERE id = '${created.deviceId}'`);
+    const deviceFromShop1 = await asShop(shop1Id, `SELECT id FROM devices WHERE id = '${created.deviceId}'`);
+    check(
+      "Devices: a shop sees its own registered device, never another shop's",
+      ownDevice.rows.length === 1 && deviceFromShop1.rows.length === 0,
+      { ownDevice: ownDevice.rows, deviceFromShop1: deviceFromShop1.rows }
+    );
+    const crossDevice = await errorOf(() =>
+      asShop2(
+        `INSERT INTO devices (id, shop_id, name, platform, receipt_prefix, token_hash, registered_by)
+         VALUES (gen_random_uuid(), ${Number(shop1Id)}, 'rls-probe', 'windows', 'P8', 'rls-probe-x-${created.deviceId}', ${Number(created.userId)})`
+      )
+    );
+    check("A shop can't register a device under another shop", /row-level security/.test(crossDevice || ""), crossDevice);
+    const feedShops = await asShop2(`SELECT DISTINCT shop_id FROM sync_changes`);
+    check(
+      "Change feed: a shop reads only its own changes (and has some from this run)",
+      feedShops.rows.length === 1 && feedShops.rows[0].shop_id === created.shopId,
+      feedShops.rows
+    );
+    const feedWrite = await errorOf(() =>
+      asShop2(`INSERT INTO sync_changes (shop_id, table_name, row_key, op) VALUES (${Number(created.shopId)}, 'x', 'x', 'insert')`)
+    );
+    check("A shop can't write the change feed directly", /permission denied/.test(feedWrite || ""), feedWrite);
+
     // Foreign keys are checked WITHOUT row-level security, so this is the one gap RLS can't
     // close — migration 029's same-shop keys do. Run as the table owner (no RLS at all) to
     // prove it's the schema itself refusing, not any app code.
@@ -674,6 +715,7 @@ async function main() {
       if (created.intentId) await pool.query(`DELETE FROM bank_payment_intents WHERE id = $1`, [created.intentId]);
       if (created.paymentId) await pool.query(`DELETE FROM subscription_payments WHERE id = $1`, [created.paymentId]);
       if (created.announcementId) await pool.query(`DELETE FROM announcements WHERE id = $1`, [created.announcementId]);
+      if (created.deviceId) await pool.query(`DELETE FROM devices WHERE id = $1`, [created.deviceId]);
       for (const table of [
         "bank_payment_intents",
         "store_credit_redemptions",
@@ -705,6 +747,7 @@ async function main() {
       for (const id of created.categoryIds) await pool.query(`DELETE FROM categories WHERE id = $1`, [id]);
       for (const id of created.contactIds) await pool.query(`DELETE FROM contacts WHERE id = $1`, [id]);
       if (created.userId) await pool.query(`DELETE FROM users WHERE id = $1`, [created.userId]);
+      if (created.shopId) await pool.query(`DELETE FROM sync_changes WHERE shop_id = $1`, [created.shopId]);
       if (created.shopId) await pool.query(`DELETE FROM shops WHERE id = $1`, [created.shopId]);
       console.log("  Cleaned up all test data.");
     } catch (e) {

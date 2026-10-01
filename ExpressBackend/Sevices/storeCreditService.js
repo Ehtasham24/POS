@@ -4,28 +4,28 @@ const ApiError = require("../utils/ApiError");
 // Gift-voucher model, not a customer-account model (see migrations/011_store_credit_vouchers.sql
 // for the full reasoning) — a store-credit refund IS the voucher, its own id/REF-XXXXXX number
 // IS the redemption code. No customer identity required anywhere in this file.
+//
+// That number is stored as refunds.receipt_no (migration 032): REF-000123 for a refund made
+// in the cloud, "{prefix}-{counter}" for one made on a shop's own device.
 
 const DEFAULT_PAGE_SIZE = 20;
 
-const REFUND_CODE_PREFIX = /^REF-/i;
-const parseVoucherCode = (code) => {
-  const refundId = parseInt(String(code ?? "").replace(REFUND_CODE_PREFIX, ""), 10);
-  return Number.isFinite(refundId) ? refundId : null;
-};
+const normalizeVoucherCode = (code) => String(code ?? "").trim().toUpperCase();
 
 // Looked up by code at checkout (any staff) to show the balance before redeeming, and again
 // server-side inside redeemVoucher for the real check. Returns null for a bad/unrecognized
 // code rather than throwing — callers decide how to surface "not found" for their context.
-// shopId is checked even though a refund_id can't literally collide between shops (it's a
-// global SERIAL) — without it, a cashier could type in another shop's voucher code (ids are
-// sequential, easy to guess/enumerate) and see, then redeem, credit that isn't theirs.
+// Codes are unique per shop only, and cloud ones are sequential (easy to guess), so the lookup
+// is always within the cashier's own shop — never another shop's credit.
 const getVoucherByCode = async (code, shopId) => {
-  const refundId = parseVoucherCode(code);
-  if (refundId == null) return null;
+  const voucherCode = normalizeVoucherCode(code);
+  if (!voucherCode) return null;
   const { rows } = await pool.query(
-    `SELECT refund_id, initial_amount, balance, contact_id
-     FROM store_credit_voucher_balances WHERE refund_id = $1 AND shop_id = $2`,
-    [refundId, shopId]
+    `SELECT vb.refund_id, r.receipt_no AS code, vb.initial_amount, vb.balance, vb.contact_id
+     FROM store_credit_voucher_balances vb
+     JOIN refunds r ON r.id = vb.refund_id
+     WHERE r.receipt_no = $1 AND vb.shop_id = $2`,
+    [voucherCode, shopId]
   );
   return rows[0] || null;
 };
@@ -42,19 +42,20 @@ const getVoucherByCode = async (code, shopId) => {
 // comes from wherever checkoutSale itself got it (a live cashier's req.user.shopId, or a
 // pending bank_payment_intent's own shop_id for an automated confirmation).
 const redeemVoucher = async (client, { code, amount, transactionId, requestingUser, shopId }) => {
-  const refundId = parseVoucherCode(code);
-  if (refundId == null) throw new ApiError(400, "Invalid voucher code");
+  const voucherCode = normalizeVoucherCode(code);
+  if (!voucherCode) throw new ApiError(400, "Invalid voucher code");
   const amountNum = Number(amount);
   if (!Number.isFinite(amountNum) || amountNum <= 0) {
     throw new ApiError(400, "Store credit amount must be greater than 0");
   }
 
   const { rows } = await client.query(
-    `SELECT * FROM refunds WHERE id = $1 AND shop_id = $2 AND refund_method = 'store_credit' FOR UPDATE`,
-    [refundId, shopId]
+    `SELECT * FROM refunds WHERE receipt_no = $1 AND shop_id = $2 AND refund_method = 'store_credit' FOR UPDATE`,
+    [voucherCode, shopId]
   );
   const voucher = rows[0];
   if (!voucher) throw new ApiError(404, "Invalid voucher code");
+  const refundId = voucher.id;
 
   const { rows: redeemedRows } = await client.query(
     `SELECT COALESCE(SUM(amount), 0) AS redeemed FROM store_credit_redemptions WHERE refund_id = $1`,
@@ -94,8 +95,10 @@ const listActiveVouchers = async (shopId, page = 1, pageSize = DEFAULT_PAGE_SIZE
   const offset = (safePage - 1) * pageSize;
 
   const { rows } = await pool.query(
-    `SELECT vb.refund_id, vb.initial_amount, vb.balance, vb.refunded_at, vb.contact_id, c.name AS contact_name
+    `SELECT vb.refund_id, r.receipt_no AS code, vb.initial_amount, vb.balance, vb.refunded_at, vb.contact_id,
+            c.name AS contact_name
      FROM store_credit_voucher_balances vb
+     JOIN refunds r ON r.id = vb.refund_id
      LEFT JOIN contacts c ON c.id = vb.contact_id
      WHERE vb.balance > 0 AND vb.shop_id = $1
      ORDER BY vb.refunded_at DESC
@@ -131,7 +134,6 @@ const getVoucherHistory = async (refundId, page = 1, pageSize = DEFAULT_PAGE_SIZ
 };
 
 module.exports = {
-  parseVoucherCode,
   getVoucherByCode,
   redeemVoucher,
   listActiveVouchers,

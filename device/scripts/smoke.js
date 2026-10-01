@@ -72,6 +72,7 @@ const pct = (list, p) => {
     const errors = [];
     const sold = new Map();
     const saleIds = [];
+    const receipts = [];
     const [, wallMs] = await timed(() =>
       Promise.all(
         cashiers.map(async ({ api }) => {
@@ -88,7 +89,9 @@ const pct = (list, p) => {
             if (res.status !== 200) errors.push(res);
             else {
               for (const it of items) sold.set(it.productID, (sold.get(it.productID) || 0) + it.quantity);
-              saleIds.push(...res.body.data.items.map((i) => ({ saleId: i.saleId, productID: i.productID, quantity: i.quantity })));
+              const { receiptNo, items: lines } = res.body.data;
+              receipts.push(receiptNo);
+              saleIds.push(...lines.map((i) => ({ saleId: i.saleId, productID: i.productID, quantity: i.quantity, linesInReceipt: lines.length })));
             }
           }
         })
@@ -104,6 +107,12 @@ const pct = (list, p) => {
       quantity: 1, refundAmount: 250, refundMethod: "store_credit", condition: "resellable", reason: "smoke test",
     });
     check("Refund to store credit", refund.status < 300, refund);
+    // This device numbers its own receipts and refunds (prefix D1 until it's registered).
+    check(
+      `Receipts numbered by the device (${receipts[0]} … ${receipts[receipts.length - 1]}, refund ${refund.body.refundNo})`,
+      receipts.every((r) => /^D1-\d{6}$/.test(r)) && new Set(receipts).size === receipts.length && /^D1-R\d{6}$/.test(refund.body.refundNo),
+      { sample: receipts.slice(0, 3), refundNo: refund.body.refundNo }
+    );
     const voided = await owner("PATCH", `/api/sales/${voidTarget.saleId}/void`, { reason: "smoke test" });
     check("Void", voided.status < 300, voided);
     const adjusted = await owner("POST", "/api/stock-adjustments", { productId: productIds[9], quantityChange: -2, reasonCode: "damaged", note: "smoke" });
@@ -139,12 +148,13 @@ const pct = (list, p) => {
       const [res, ms] = await timed(() => owner(method, url, body));
       check(`${method} ${url.split("?")[0]} (${Math.round(ms)}ms)`, res.status === 200, res);
     }
-    // The report agrees with what was actually sold. A void removes one line, not its receipt.
+    // The report agrees with what was actually sold. A void removes one line; its receipt only
+    // drops out of the count when that was the receipt's only line.
     const { current } = (await owner("POST", "/api/Sales/summary", range)).body;
     const itemsSold = [...sold.values()].reduce((n, q) => n + q, 0) - voidTarget.quantity;
     check(
       `Report counts match the sales made (${current.transactions} transactions, ${current.itemsSold} items)`,
-      current.transactions === total && current.itemsSold === itemsSold && current.refundCount === 1 && current.voidCount === 1,
+      current.transactions === total - (voidTarget.linesInReceipt === 1 ? 1 : 0) && current.itemsSold === itemsSold && current.refundCount === 1 && current.voidCount === 1,
       { current, itemsSold }
     );
 

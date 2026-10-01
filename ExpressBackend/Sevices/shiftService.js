@@ -281,13 +281,13 @@ const getShiftDetail = async (shiftId, requestingUser) => {
   // everything actually sold during it, one row per receipt (not per line item — Sales
   // History is where a receipt's own items are already browsable in full).
   const { rows: sales } = await pool.query(
-    `SELECT st.id AS transaction_id, st.payment_method, st.created_at,
+    `SELECT st.id AS transaction_id, st.receipt_no, st.payment_method, st.created_at,
             COALESCE(SUM(s.selling_price * s.quantity), 0) AS total,
             COUNT(*) AS item_count
      FROM sale_transactions st
      JOIN sales s ON s.transaction_id = st.id AND s.is_voided = false
      WHERE st.shift_id = $1
-     GROUP BY st.id, st.payment_method, st.created_at
+     GROUP BY st.id, st.receipt_no, st.payment_method, st.created_at
      ORDER BY st.created_at`,
     [shiftId]
   );
@@ -295,7 +295,7 @@ const getShiftDetail = async (shiftId, requestingUser) => {
   // Every refund attributed to this shift (by when the refund itself happened, not the
   // original sale's shift — same distinction sumCashRefunds above already relies on).
   const { rows: refunds } = await pool.query(
-    `SELECT r.id, r.refund_amount, r.refund_method, r.reason, r.refunded_at,
+    `SELECT r.id, r.receipt_no, r.refund_amount, r.refund_method, r.reason, r.refunded_at,
             u.display_name AS refunded_by_name
      FROM refunds r
      LEFT JOIN users u ON u.id = r.refunded_by
