@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, useLocation, Link } from "react-router-dom";
 import { HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import Logo from "components/Logo";
@@ -6,6 +6,7 @@ import { useAuth } from "auth/AuthContext";
 import { useLanguage } from "i18n/LanguageContext";
 import useTheme from "hooks/useTheme";
 import ForgotPasswordModal from "./ForgotPasswordModal";
+import useDeviceStatus from "hooks/useDeviceStatus";
 
 // Deliberately not wrapped in AppShell — no sidebar/nav makes sense before there's a
 // logged-in user to show them for. Shop staff only (owner/cashier) — a platform superadmin
@@ -30,6 +31,13 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [showForgotPassword, setShowForgotPassword] = useState(false);
+  // On a shop's own device: send it to first-run setup until it has a shop, and hide the
+  // cloud-only links (password reset requests and the platform admin live in the cloud).
+  const deviceStatus = useDeviceStatus();
+  useEffect(() => {
+    if (deviceStatus?.device && !deviceStatus.setUp) navigate("/device-setup", { replace: true });
+  }, [deviceStatus, navigate]);
+  const onDevice = Boolean(deviceStatus?.device);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -111,21 +119,25 @@ export default function LoginPage() {
             {submitting ? t("auth.loggingIn") : t("auth.login")}
           </button>
 
-          <button
-            type="button"
-            onClick={() => setShowForgotPassword(true)}
-            className="block w-full text-center text-sm font-medium text-primary-600 transition-colors hover:underline dark:text-primary-400"
-          >
-            {t("auth.forgotPassword")}
-          </button>
+          {!onDevice && (
+            <button
+              type="button"
+              onClick={() => setShowForgotPassword(true)}
+              className="block w-full text-center text-sm font-medium text-primary-600 transition-colors hover:underline dark:text-primary-400"
+            >
+              {t("auth.forgotPassword")}
+            </button>
+          )}
         </form>
 
-        <Link
-          to="/admin/login"
-          className="mt-4 block text-center text-xs text-gray-400 transition-colors hover:text-gray-600 hover:underline dark:text-gray-500 dark:hover:text-gray-300"
-        >
-          Platform admin? Sign in here.
-        </Link>
+        {!onDevice && (
+          <Link
+            to="/admin/login"
+            className="mt-4 block text-center text-xs text-gray-400 transition-colors hover:text-gray-600 hover:underline dark:text-gray-500 dark:hover:text-gray-300"
+          >
+            Platform admin? Sign in here.
+          </Link>
+        )}
       </div>
 
       <ForgotPasswordModal isOpen={showForgotPassword} onClose={() => setShowForgotPassword(false)} />

@@ -17,6 +17,7 @@ import { tryAutoReconnect } from "utils/thermalPrinter/connection";
 // bundle; every other page (and its heavy dependencies, e.g. the report's and admin's
 // charts) is its own chunk, fetched only when that page is first visited.
 const SalesDataComponent = lazyPage(() => import("pages/Report/Report"));
+const DeviceSetup = lazyPage(() => import("pages/DeviceSetup"));
 const SalesHistory = lazyPage(() => import("pages/SalesHistory"));
 const CreditDebit = lazyPage(() => import("pages/CreditDebit"));
 const Settings = lazyPage(() => import("pages/Settings"));
@@ -69,6 +70,9 @@ function App() {
               <Suspense fallback={<PageLoading />}>
                 <Routes>
                   <Route path="/login" element={<LoginPage />} />
+                  {/* A shop's own device (the Windows/Android app) before its first-run setup —
+                      Login sends it here; on the web this page just returns to Login. */}
+                  <Route path="/device-setup" element={<DeviceSetup />} />
                   {/* Separate from /login, deliberately — see pages/AdminLogin's own
                       top comment for why the two used to be one shared screen and no
                       longer are. */}

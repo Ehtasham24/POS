@@ -1,6 +1,6 @@
 # Offline Registers: Local Backend on Windows and Android, Synced Through the Cloud
 
-Status: phase 0 in progress (2026-10-01). iPhone is out of scope for now.
+Status: phases 1–2 done for Windows (2026-10-02); phase 3 (sync) next. iPhone is out of scope for now.
 
 ## Progress
 
@@ -49,7 +49,32 @@ Status: phase 0 in progress (2026-10-01). iPhone is out of scope for now.
   one transaction with a SAVEPOINT around the sale.
 
 **Still to do in phase 0:** Android build (Capacitor + nodejs-mobile, on a phone or an
-emulator); then the PGlite vs SQLite decision (so far PGlite has passed everything).
+emulator); then the PGlite vs SQLite decision (so far PGlite has passed everything). Windows
+goes first: phases 1–5 for Windows, then Android (owner's decision, 2026-10-02).
+
+**Phase 1 (done, 2026-10-02):** migration 032 applied to the cloud — `shops.max_devices`
+(admin console, shop edit form), `devices`, `sync_log`, `sync_rejections`, a `uuid` on every
+synced table, stored `receipt_no` on sale_transactions/refunds (existing numbers kept; voucher
+codes are refund numbers), and the `sync_changes` feed written by trigger. Device registration
+(owner only, within the limit; prefixes P1/P2…, M1…, never reused; token stored hashed), device
+list with derived sync state, retire/block, `requireDevice` token auth. Isolation suite 65/65.
+- Changed from the plan: deletes need no soft-delete column — the feed trigger records the
+  deleted row's key.
+- Device side: `schema.sql` records the cloud migration it includes; `device/migrations/` brings
+  older local databases up to date on start; the device numbers its own receipts
+  (`{prefix}-000001`, refunds `{prefix}-R000001`).
+
+**Phase 2 (done, 2026-10-02):** first-run setup. On a device with no shop, Login sends the owner
+to "Set up this device": they sign in with their usual account, the device registers and
+downloads the shop (`device/setup.js`; snapshot API `GET /api/sync/snapshot[/:table]`, paged):
+staff with password hashes, catalogue, customer ledgers and vouchers in full, the last 20 days
+of trading, and the change-feed cursor its first pull starts from. Loaded in one local
+transaction; rows made on the device get ids from 1,000,000,000 up so they never collide with
+cloud rows. Then everyone signs in on the device with their usual password, offline.
+Verified: API test 13/13 and a browser test 4/4 against a temporary cloud shop.
+- Not yet: the token is kept in `device.json` in the app's data folder; moving it to Windows'
+  protected storage (Electron safeStorage) is a phase 4 item. Offline sign-in is allowed for
+  every downloaded user; the 7-day rule waits for sync (phase 3), which keeps users current.
 
 ## Goal
 

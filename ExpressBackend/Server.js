@@ -126,6 +126,7 @@ const Server = async () => {
   server.use(routesPaymentGateway); // JazzCash/Easypaisa: initiate gated by requireAuth per-route, callback verified by gateway signature not auth
   server.use(routesAuth); // public: login/logout; /me itself requires auth per-route
   server.use(routesHealth); // public: connectivity ping target
+  if (ON_DEVICE) server.use(global.posDevice.routes); // device status and first-run setup (device/deviceRoutes.js)
   server.use(routesUsers);
   server.use(routesProducts);
   server.use(routesCategories);

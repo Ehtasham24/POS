@@ -6,16 +6,29 @@ const fs = require("fs");
 const path = require("path");
 const { openLocalDb } = require("./localDb");
 const { createPglitePool } = require("./pglitePool");
+const { deviceRoutes } = require("./deviceRoutes");
+
+// Where the shop's cloud server is. The setup page shows it and lets it be changed.
+const DEFAULT_CLOUD_URL = process.env.POS_CLOUD_URL || "https://localhost:4000";
 
 // Per-device settings that must survive restarts: the secret this device signs its own login
-// sessions with. Never the cloud's JWT_SECRET, which must not leave the cloud.
+// sessions with (never the cloud's JWT_SECRET, which must not leave the cloud), and once it's
+// set up, its registration — id, token, receipt prefix, cloud address — and sync position.
+// Written to a temporary file and renamed over the old one, so a power cut mid-write leaves
+// either the old settings or the new, never half a file.
+const configFile = (dataDir) => path.join(dataDir, "device.json");
+const saveDeviceConfig = (dataDir, config) => {
+  const file = configFile(dataDir);
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(config, null, 2));
+  fs.renameSync(`${file}.tmp`, file);
+};
 const deviceConfig = (dataDir) => {
-  const file = path.join(dataDir, "device.json");
+  const file = configFile(dataDir);
   if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8"));
   // receiptPrefix stays "D1" until the device is registered with the cloud, which assigns one.
   const config = { jwtSecret: crypto.randomBytes(48).toString("hex"), receiptPrefix: "D1", createdAt: new Date().toISOString() };
   fs.mkdirSync(dataDir, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify(config, null, 2));
+  saveDeviceConfig(dataDir, config);
   return config;
 };
 
@@ -46,7 +59,15 @@ const startDevice = async ({ dataDir, port = 4100, devShop }) => {
     PORT: String(port),
     APP_HTTPS: "false",
   });
-  global.posDevice = { createPool: (driver) => createPglitePool(db, driver) };
+  global.posDevice = {
+    createPool: (driver) => createPglitePool(db, driver),
+    routes: deviceRoutes({
+      db,
+      config,
+      saveConfig: (next) => saveDeviceConfig(dataDir, next),
+      defaultCloudUrl: DEFAULT_CLOUD_URL,
+    }),
+  };
 
   if (devShop) await createDevShop(devShop);
   require("../ExpressBackend/Server");
