@@ -1,7 +1,7 @@
 // The Windows app: one window showing the POS, served by the device runtime running inside
 // this same process (the local database and the backend — see ../runtime.js).
 const path = require("path");
-const { app, BrowserWindow, dialog } = require("electron");
+const { app, BrowserWindow, dialog, session } = require("electron");
 const { startDevice } = require("../runtime");
 
 const PORT = 4100;
@@ -39,6 +39,10 @@ if (!app.requestSingleInstanceLock()) {
         devShop: process.env.POS_DEV_SHOP,
       });
       await waitForServer(device.url);
+      // The web app's service worker caches the build for offline use in a browser. Here the
+      // server is on this machine, so it only adds a risk: an updated app showing the old
+      // build from cache. Cleared on every start, so an update shows at once.
+      await session.defaultSession.clearStorageData({ storages: ["serviceworkers", "cachestorage"] });
     } catch (err) {
       dialog.showErrorBox("POS could not start", String(err?.stack || err));
       app.exit(1);

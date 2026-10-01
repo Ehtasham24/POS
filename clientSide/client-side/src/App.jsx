@@ -3,7 +3,8 @@ import Register from "pages/Register";
 import CartPersistence from "components/CartPersistence";
 import LoginPage from "pages/Login";
 import NotFound from "pages/NotFound";
-import lazyPage from "utils/lazyPage";
+import lazyPage, { preloadPages } from "utils/lazyPage";
+import PageLoading from "components/PageLoading";
 import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
 import { ToastProvider } from "components/Toast/ToastContext";
 import { LanguageProvider } from "i18n/LanguageContext";
@@ -38,10 +39,6 @@ const SetNewPasswordPage = lazyPage(() => import("pages/SetNewPassword"));
 
 // Shown while a page's chunk downloads — a thin bar at the top rather than a full-screen
 // spinner, so a fast load doesn't flash anything noticeable.
-const PageLoading = () => (
-  <div className="fixed inset-x-0 top-0 z-50 h-1 animate-pulse bg-primary-600" role="progressbar" aria-busy="true" />
-);
-
 // Owner-only pages — Inventory, Credit/Debit, Contacts, Sales Report, Settings, Company —
 // a Cashier's role is restricted to the selling screens (Categories/Product List) plus
 // their own sales (Sales History, server-filtered — see salesController.js's
@@ -53,6 +50,13 @@ function App() {
   // no-ops elsewhere) — see utils/thermalPrinter/connection.js.
   useEffect(() => {
     tryAutoReconnect();
+  }, []);
+
+  // A few seconds after the app opens, fetch every other page's code in the background, so
+  // opening a page for the first time doesn't wait on it (see utils/lazyPage.js).
+  useEffect(() => {
+    const timer = setTimeout(preloadPages, 3000);
+    return () => clearTimeout(timer);
   }, []);
 
   return (

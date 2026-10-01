@@ -26,6 +26,7 @@ const translations = {
       save: "Save",
       saving: "Saving...",
       submit: "Submit",
+      loading: "Loading…",
     },
     pos: {
       addProduct: "Add Product",
@@ -634,6 +635,7 @@ const translations = {
       save: "محفوظ کریں",
       saving: "محفوظ ہو رہا ہے...",
       submit: "جمع کریں",
+      loading: "لوڈ ہو رہا ہے…",
     },
     pos: {
       addProduct: "پروڈکٹ شامل کریں",
