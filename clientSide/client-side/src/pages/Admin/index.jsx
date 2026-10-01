@@ -42,7 +42,7 @@ export default function AdminShops() {
   // Editing an existing shop's name/seat limit — separate from `form` (New Shop) since
   // this one has no owner-account fields at all.
   const [editTarget, setEditTarget] = useState(null);
-  const [editForm, setEditForm] = useState({ name: "", maxUsers: 5, storageQuotaPercent: "" });
+  const [editForm, setEditForm] = useState({ name: "", maxUsers: 5, maxDevices: 1, storageQuotaPercent: "" });
   const [editSaving, setEditSaving] = useState(false);
 
   // Owner Profile — a shop's owner identity (name/email/phone/CNIC), what a forgot
@@ -141,6 +141,7 @@ export default function AdminShops() {
     setEditForm({
       name: shop.name,
       maxUsers: shop.max_users,
+      maxDevices: shop.max_devices,
       // A percentage of the platform's total DB capacity (see Platform Settings below), not
       // an absolute number — blank means "no quota configured," not 0.
       storageQuotaPercent: shop.storage_quota_percent ?? "",
@@ -155,6 +156,7 @@ export default function AdminShops() {
       await apiPatch(`/api/admin/shops/${editTarget.id}`, {
         name: editForm.name,
         maxUsers: editForm.maxUsers,
+        maxDevices: editForm.maxDevices,
         storageQuotaPercent,
       });
       toast.success(`${editTarget.name} updated.`);
@@ -497,6 +499,24 @@ export default function AdminShops() {
             {editTarget && (
               <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
                 Currently {editTarget.user_count} active user(s). Can't go below that.
+              </p>
+            )}
+          </div>
+          <div>
+            <label className={labelClass}>Max devices (offline registers)</label>
+            <input
+              type="number"
+              required
+              min={0}
+              step={1}
+              value={editForm.maxDevices}
+              onChange={(e) => setEditForm((prev) => ({ ...prev, maxDevices: e.target.value }))}
+              className={inputClass}
+            />
+            {editTarget && (
+              <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                Windows PCs / Android phones the owner may register. Currently {editTarget.device_count} active; can't go
+                below that. 0 = web app only.
               </p>
             )}
           </div>

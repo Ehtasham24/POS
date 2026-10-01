@@ -83,8 +83,9 @@ const isOnline = (shopId) => {
 
 const listShops = async () => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users, s.storage_quota_percent,
+    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users, s.max_devices, s.storage_quota_percent,
             (SELECT COUNT(*) FROM users u WHERE u.shop_id = s.id AND u.is_active = true) AS user_count,
+            (SELECT COUNT(*)::int FROM devices d WHERE d.shop_id = s.id AND d.status = 'active') AS device_count,
             ${DUE_ON_SQL} AS due_on, ${SHOP_ACTIVITY_SQL}
      FROM shops s
      ORDER BY s.created_at DESC`
@@ -103,6 +104,16 @@ const parseMaxUsers = (value) => {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed < 1) {
     throw new ApiError(400, "Max users must be a positive whole number");
+  }
+  return parsed;
+};
+
+// How many registers (devices running the POS offline) a shop may have — 0 is allowed: a shop
+// that only uses the web app.
+const parseMaxDevices = (value) => {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0) {
+    throw new ApiError(400, "Max devices must be a whole number, 0 or more");
   }
   return parsed;
 };
@@ -189,8 +200,8 @@ const parseStorageQuotaPercent = (value) => {
 // Edits a shop's own details (name, seat limit, storage quota) — deliberately separate from
 // updateShopTier below: tier changes trigger downgrade automations and are a much bigger
 // deal, whereas these are plain field edits with no side effects.
-const updateShopDetails = async (shopId, { name, maxUsers, storageQuotaPercent }) => {
-  if (name === undefined && maxUsers === undefined && storageQuotaPercent === undefined) {
+const updateShopDetails = async (shopId, { name, maxUsers, maxDevices, storageQuotaPercent }) => {
+  if (name === undefined && maxUsers === undefined && maxDevices === undefined && storageQuotaPercent === undefined) {
     throw new ApiError(400, "Nothing to update");
   }
   if (name !== undefined && !name.trim()) {
@@ -221,6 +232,20 @@ const updateShopDetails = async (shopId, { name, maxUsers, storageQuotaPercent }
     params.push(parsed);
     updates.push(`max_users = $${params.length}`);
   }
+  if (maxDevices !== undefined) {
+    const parsed = parseMaxDevices(maxDevices);
+    // Same rule as max_users: not below the devices already registered and active (retire
+    // or block one first, from the shop's Devices list).
+    const { rows: countRows } = await pool.query(
+      `SELECT COUNT(*)::int AS n FROM devices WHERE shop_id = $1 AND status = 'active'`,
+      [shopId]
+    );
+    if (parsed < countRows[0].n) {
+      throw new ApiError(400, `Can't set the limit below the ${countRows[0].n} active device(s) this shop already has`);
+    }
+    params.push(parsed);
+    updates.push(`max_devices = $${params.length}`);
+  }
   if (storageQuotaPercent !== undefined) {
     params.push(parseStorageQuotaPercent(storageQuotaPercent));
     updates.push(`storage_quota_percent = $${params.length}`);
@@ -228,7 +253,7 @@ const updateShopDetails = async (shopId, { name, maxUsers, storageQuotaPercent }
 
   const { rows } = await pool.query(
     `UPDATE shops SET ${updates.join(", ")} WHERE id = $1
-     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_percent`,
+     RETURNING id, name, slug, tier, is_active, max_users, max_devices, storage_quota_percent`,
     params
   );
   if (!rows[0]) throw new ApiError(404, "Shop not found");
@@ -346,7 +371,7 @@ const updateShopTier = async (shopId, newTier) => {
 
   const { rows: updated } = await pool.query(
     `UPDATE shops SET tier = $2 WHERE id = $1
-     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_percent`,
+     RETURNING id, name, slug, tier, is_active, max_users, max_devices, storage_quota_percent`,
     [shopId, newTier]
   );
 
@@ -356,7 +381,7 @@ const updateShopTier = async (shopId, newTier) => {
 const setShopActive = async (shopId, isActive) => {
   const { rows } = await pool.query(
     `UPDATE shops SET is_active = $2 WHERE id = $1
-     RETURNING id, name, slug, tier, is_active, max_users, storage_quota_percent`,
+     RETURNING id, name, slug, tier, is_active, max_users, max_devices, storage_quota_percent`,
     [shopId, !!isActive]
   );
   if (!rows[0]) throw new ApiError(404, "Shop not found");
@@ -566,7 +591,8 @@ const getPlatformOverview = async () => {
 // recent trading, billing, sign-in history and the admin changes made to it.
 const getShopDetail = async (shopId) => {
   const { rows } = await pool.query(
-    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users, s.storage_quota_percent,
+    `SELECT s.id, s.name, s.slug, s.tier, s.is_active, s.created_at, s.max_users, s.max_devices, s.storage_quota_percent,
+            (SELECT COUNT(*)::int FROM devices d WHERE d.shop_id = s.id AND d.status = 'active') AS device_count,
             ${DUE_ON_SQL} AS due_on, ${SHOP_ACTIVITY_SQL}
      FROM shops s WHERE s.id = $1`,
     [shopId]

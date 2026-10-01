@@ -55,9 +55,9 @@ const UpdateShopDetails = asyncHandler(async (req, res) => {
   // the quota back to unlimited" — both are meaningfully different from a caller's request
   // body, and destructuring preserves that distinction (JSON.parse keeps an explicit null
   // as null, not undefined).
-  const { name, maxUsers, storageQuotaPercent } = req.body;
-  const shop = await updateShopDetails(id, { name, maxUsers, storageQuotaPercent });
-  await audit(req, "shop.update", shop.id, { name, maxUsers, storageQuotaPercent });
+  const { name, maxUsers, maxDevices, storageQuotaPercent } = req.body;
+  const shop = await updateShopDetails(id, { name, maxUsers, maxDevices, storageQuotaPercent });
+  await audit(req, "shop.update", shop.id, { name, maxUsers, maxDevices, storageQuotaPercent });
   res.send(shop);
 });
 

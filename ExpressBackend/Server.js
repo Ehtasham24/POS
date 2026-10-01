@@ -25,6 +25,7 @@ const routesUsers = require("./Routes/API/usersRoutes");
 const routesHealth = require("./Routes/API/healthRoutes");
 const routesAdmin = require("./Routes/API/adminRoutes");
 const routesShopStatus = require("./Routes/API/shopStatusRoutes");
+const routesDevices = require("./Routes/API/deviceRoutes");
 const errorHandler = require("./Middleware/errorHandler");
 const { startShiftAutoCloseSweep } = require("./Sevices/shiftSweep");
 const { recordEgress } = require("./Sevices/egressService");
@@ -140,6 +141,7 @@ const Server = async () => {
   server.use(routesStockAdjustments);
   server.use(routesAdmin); // platform-level (requireSuperAdmin) — no shop context, see adminRoutes.js
   server.use(routesShopStatus);
+  server.use(routesDevices);
 
   // Serve static files from the React app
   server.use(

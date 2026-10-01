@@ -223,6 +223,7 @@ export default function ShopDetail({ shopId, onClose, onChanged }) {
                   label="Users"
                   value={`${detail.users.filter((u) => u.is_active).length} active / ${shop.max_users} allowed`}
                 />
+                <Fact label="Devices" value={`${shop.device_count} active / ${shop.max_devices} allowed`} />
                 <Fact label="Next payment due" value={sub.dueOn ? formatDay(sub.dueOn) : "Not billed"} />
                 <Fact label="Timezone" value={shop.timezone} />
                 <Fact label="Created" value={formatDay(shop.created_at)} />
