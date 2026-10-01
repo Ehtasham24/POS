@@ -37,6 +37,17 @@ Status: phase 0 in progress (2026-10-01). iPhone is out of scope for now.
   kill: the operating system's own write cache survives it. A true plug-pull on real hardware
   is still worth one run during the pilot.
 
+- **Cloud crash found on the way:** pg-pool doesn't listen for errors on a checked-out
+  connection, so the database connection dropping mid-transaction crashed the whole server
+  (it happened during these tests). `Db.js` now listens while a connection is checked out;
+  reproduced by cutting the socket mid-transaction — before: process dies, after: that query
+  fails and the server keeps running.
+- **Known nested transaction, deliberately left for now:** `bankPaymentService.confirmIntent`
+  runs `checkoutSale` in a second transaction while holding its own (so a failed sale can't
+  undo the error it records). On a device that waits 15s and fails "Local database busy".
+  Bank/QR payments are cloud-only in this plan; before they ever run on a device, switch it to
+  one transaction with a SAVEPOINT around the sale.
+
 **Still to do in phase 0:** Android build (Capacitor + nodejs-mobile, on a phone or an
 emulator); then the PGlite vs SQLite decision (so far PGlite has passed everything).
 

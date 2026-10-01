@@ -55,6 +55,24 @@ rawPool.on("error", (err) => {
   console.error("Unexpected error on idle Postgres client:", err);
 });
 
+// The same crash for a client that's checked out: pg-pool stops listening to a client's
+// 'error' events while it's handed out, so the pooler dropping the connection mid-transaction
+// (or the network going away) took the whole server down — observed. The statement in flight
+// fails on its own and its caller handles that; this only keeps the process alive. Removed on
+// release, since the same client is checked out again and again.
+const connectRaw = async () => {
+  const client = await rawPool.connect();
+  if (typeof client.on !== "function") return client; // the device database has no connection to lose
+  const onError = (err) => console.error("Postgres connection lost while in use:", err.message);
+  client.on("error", onError);
+  const release = client.release;
+  client.release = (...args) => {
+    client.removeListener("error", onError);
+    return release.apply(client, args);
+  };
+  return client;
+};
+
 // ---------------------------------------------------------------------------------------
 // Tenant isolation at the database level (row-level security, migration 028).
 //
@@ -138,7 +156,7 @@ const WRITE_PATTERN = /\b(INSERT|UPDATE|DELETE|MERGE|TRUNCATE|CALL)\b/i;
 const isReadOnly = (text) => /^\s*(SELECT|WITH)\b/i.test(text) && !WRITE_PATTERN.test(text.replace(/FOR\s+(NO\s+KEY\s+)?UPDATE/gi, ""));
 
 const queryAsTenant = async (shopId, args) => {
-  const client = await rawPool.connect();
+  const client = await connectRaw();
   const rawQuery = client.query.bind(client);
 
   // Reads skip waiting for their COMMIT: a transaction that only read commits and rolls back
@@ -249,7 +267,7 @@ const pool = {
   connect: async () => {
     const store = tenantContext.getStore();
     if (store?.openTransaction) reportOutsideTransaction("pool.connect");
-    const client = await rawPool.connect();
+    const client = await connectRaw();
     const shopId = currentShopId();
     const wrapped = shopId ? tenantClient(client, shopId) : client;
     return store ? trackTransaction(wrapped, store) : wrapped;
