@@ -5,6 +5,7 @@
 //
 // Runs in the background; the setup page polls setupState() for progress.
 const crypto = require("crypto");
+const { cloudClient } = require("./cloudClient");
 
 // Rows this device creates get ids from here up, far above anything the cloud has handed out,
 // so a row arriving from the cloud never collides with one made here (int4 tops out at ~2.1
@@ -16,37 +17,6 @@ let state = { status: "idle" };
 const setupState = () => state;
 const progress = (fields) => {
   state = { ...state, ...fields };
-};
-
-// A small client for the cloud API, by session cookie (as the owner) or device token.
-const cloudClient = (cloudUrl) => {
-  let cookie = null;
-  const call = async (method, path, { body, deviceToken } = {}) => {
-    const headers = { "content-type": "application/json" };
-    if (cookie) headers.cookie = cookie;
-    if (deviceToken) headers.authorization = `Device ${deviceToken}`;
-    let res;
-    try {
-      res = await fetch(cloudUrl.replace(/\/+$/, "") + path, {
-        method,
-        headers,
-        body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(30000),
-      });
-    } catch (err) {
-      throw new Error(`Can't reach the server at ${cloudUrl} — check the internet connection (${err.cause?.code || err.message})`);
-    }
-    const setCookie = res.headers.get("set-cookie");
-    if (setCookie) cookie = setCookie.split(";")[0];
-    const data = await res.json().catch(() => null);
-    if (!res.ok) {
-      const error = new Error(data?.message || `Server answered ${res.status}`);
-      error.status = res.status;
-      throw error;
-    }
-    return data;
-  };
-  return { call };
 };
 
 // JSON values as Postgres takes them: objects (jsonb columns) as JSON text. Timestamps arrive
@@ -70,7 +40,9 @@ const insertRows = async (tx, table, rows, columns) => {
 const runSetup = async ({ db, config, saveConfig, cloudUrl, username, password, deviceName, platform, appVersion }) => {
   progress({ status: "running", step: "signing_in", message: null, rows: 0 });
   // Registered already, but the download didn't finish last time: just download again.
-  if (config.deviceToken) return downloadShop({ db, config, saveConfig, cloud: cloudClient(config.cloudUrl) });
+  if (config.deviceToken) {
+    return downloadShop({ db, config, saveConfig, cloud: cloudClient(config.cloudUrl, { deviceToken: config.deviceToken }) });
+  }
 
   const cloud = cloudClient(cloudUrl);
   const user = await cloud.call("POST", "/api/auth/login", { body: { username, password } });
@@ -92,14 +64,14 @@ const runSetup = async ({ db, config, saveConfig, cloudUrl, username, password, 
     deviceName,
   });
   saveConfig(config);
-  await downloadShop({ db, config, saveConfig, cloud });
+  await downloadShop({ db, config, saveConfig, cloud: cloudClient(cloudUrl, { deviceToken: registration.token }) });
 };
 
 // The snapshot, loaded in one local transaction: a download cut short leaves the database
 // empty, and setup simply runs again.
 const downloadShop = async ({ db, config, saveConfig, cloud }) => {
   progress({ step: "downloading" });
-  const start = await cloud.call("GET", "/api/sync/snapshot", { deviceToken: config.deviceToken });
+  const start = await cloud.call("GET", "/api/sync/snapshot");
   const pages = [];
   let total = 0;
   for (const table of start.tables) {
@@ -107,8 +79,7 @@ const downloadShop = async ({ db, config, saveConfig, cloud }) => {
     for (;;) {
       const page = await cloud.call(
         "GET",
-        `/api/sync/snapshot/${table}?since=${encodeURIComponent(start.since)}&afterId=${afterId}`,
-        { deviceToken: config.deviceToken }
+        `/api/sync/snapshot/${table}?since=${encodeURIComponent(start.since)}&afterId=${afterId}`
       );
       if (page.rows.length) pages.push({ table, rows: page.rows });
       total += page.rows.length;
@@ -146,7 +117,8 @@ const downloadShop = async ({ db, config, saveConfig, cloud }) => {
   });
   await db.exec(`SET pos.receipt_prefix = '${config.receiptPrefix}'`);
 
-  Object.assign(config, { feedCursor: start.cursor, snapshotAt: new Date().toISOString(), snapshotSince: start.since });
+  const now = new Date().toISOString();
+  Object.assign(config, { feedCursor: start.cursor, snapshotAt: now, snapshotSince: start.since, lastSyncAt: now });
   saveConfig(config);
   progress({ status: "done", step: "done", rows: total });
 };

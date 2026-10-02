@@ -7,6 +7,7 @@ const path = require("path");
 const { openLocalDb } = require("./localDb");
 const { createPglitePool } = require("./pglitePool");
 const { deviceRoutes } = require("./deviceRoutes");
+const { createSyncWorker } = require("./syncWorker");
 
 // Where the shop's cloud server is. The setup page shows it and lets it be changed.
 const DEFAULT_CLOUD_URL = process.env.POS_CLOUD_URL || "https://localhost:4000";
@@ -59,20 +60,28 @@ const startDevice = async ({ dataDir, port = 4100, devShop }) => {
     PORT: String(port),
     APP_HTTPS: "false",
   });
+  const saveConfig = (next) => saveDeviceConfig(dataDir, next);
+  let syncWorker = null;
   global.posDevice = {
     createPool: (driver) => createPglitePool(db, driver),
-    routes: deviceRoutes({
-      db,
-      config,
-      saveConfig: (next) => saveDeviceConfig(dataDir, next),
-      defaultCloudUrl: DEFAULT_CLOUD_URL,
-    }),
+    routes: deviceRoutes({ db, config, saveConfig, defaultCloudUrl: DEFAULT_CLOUD_URL, sync: () => syncWorker }),
   };
 
   if (devShop) await createDevShop(devShop);
   require("../ExpressBackend/Server");
 
-  return { url: `http://127.0.0.1:${port}`, close: () => db.close() };
+  // Through the backend's own pool, so its transactions queue with the requests' (pglitePool.js).
+  // It idles until the device is registered and set up.
+  syncWorker = createSyncWorker({ db: require("../ExpressBackend/Db").systemPool, config, saveConfig });
+  syncWorker.start();
+
+  return {
+    url: `http://127.0.0.1:${port}`,
+    close: async () => {
+      await syncWorker.stop();
+      await db.close();
+    },
+  };
 };
 
 module.exports = { startDevice };

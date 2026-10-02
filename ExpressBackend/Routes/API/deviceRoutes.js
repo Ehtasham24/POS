@@ -9,6 +9,8 @@ const {
   UpdateDeviceStatus,
   StartSnapshot,
   SnapshotPage,
+  PushChanges,
+  PullChanges,
 } = require("../../Controller/deviceController");
 
 // A shop's own devices (plan-offline-sync.md). Registering, listing and retiring them is the
@@ -19,5 +21,7 @@ routes.patch("/api/devices/:id/status", requireAuth, requireOwner, UpdateDeviceS
 
 routes.get("/api/sync/snapshot", requireDevice, StartSnapshot);
 routes.get("/api/sync/snapshot/:table", requireDevice, SnapshotPage);
+routes.post("/api/sync/push", requireDevice, PushChanges);
+routes.get("/api/sync/pull", requireDevice, PullChanges);
 
 module.exports = routes;

@@ -9,13 +9,48 @@ const { startSetup, setupState } = require("./setup");
 const APP_VERSION = require("./package.json").version;
 const PLATFORM = process.platform === "android" ? "android" : "windows";
 
-const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl }) => {
+// Past this without reaching the cloud, a register stops selling until it syncs: its prices,
+// stock and staff could be weeks out of date, and its sales unknown to the owner. Warned from
+// WARN_AFTER_DAYS (plan-offline-sync.md, decided with the owner).
+const BLOCK_AFTER_DAYS = 14;
+const WARN_AFTER_DAYS = 3;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync }) => {
   const routes = express.Router();
-  const hasShop = async () => (await db.query(`SELECT EXISTS (SELECT 1 FROM shops) AS yes`)).rows[0].yes;
+  const offlineAge = () => {
+    const days = config.lastSyncAt ? (Date.now() - new Date(config.lastSyncAt).getTime()) / DAY_MS : 0;
+    return { daysSinceSync: Math.floor(days), warn: days >= WARN_AFTER_DAYS, blocked: days >= BLOCK_AFTER_DAYS };
+  };
+
+  // Mounted ahead of the sales routes (Server.js), so it runs before checkout.
+  routes.post("/api/sales/checkout", (req, res, next) => {
+    if (config.deviceToken && offlineAge().blocked) {
+      return res.status(409).send({
+        message: `This register hasn't reached the internet for ${BLOCK_AFTER_DAYS} days. Connect it once to sync, then carry on selling.`,
+      });
+    }
+    next();
+  });
+
+  routes.post("/api/device/sync-now", async (req, res, next) => {
+    try {
+      if (!config.deviceToken) return res.status(409).send({ message: "This device isn't registered with the cloud" });
+      await sync().syncNow();
+      res.send({ ...sync().state(), ...offlineAge() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Through the backend's pool (loaded after these routes are built), so these reads queue with
+  // the requests' transactions instead of landing in the middle of one (pglitePool.js).
+  const query = (...args) => require("../ExpressBackend/Db").systemPool.query(...args);
+  const hasShop = async () => (await query(`SELECT EXISTS (SELECT 1 FROM shops) AS yes`)).rows[0].yes;
 
   routes.get("/api/device/status", async (req, res, next) => {
     try {
-      const { rows } = await db.query(`SELECT name FROM shops ORDER BY id LIMIT 1`);
+      const { rows } = await query(`SELECT name FROM shops ORDER BY id LIMIT 1`);
       res.send({
         device: true,
         platform: PLATFORM,
@@ -27,6 +62,7 @@ const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl }) => {
         cloudUrl: config.cloudUrl || defaultCloudUrl,
         snapshotAt: config.snapshotAt ?? null,
         setup: setupState(),
+        sync: config.deviceToken ? { ...sync()?.state(), ...offlineAge() } : null,
       });
     } catch (err) {
       next(err);

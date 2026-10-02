@@ -1,5 +1,5 @@
 const { registerDevice, listDevices, setDeviceStatus } = require("../Sevices/deviceService");
-const { startSnapshot, snapshotPage } = require("../Sevices/syncService");
+const { startSnapshot, snapshotPage, pullChanges, pushEvents, recordDeviceContact } = require("../Sevices/syncService");
 const asyncHandler = require("../utils/asyncHandler");
 
 // The owner, signed in on the device being set up, registers it (device/setup.js does this).
@@ -26,4 +26,39 @@ const SnapshotPage = asyncHandler(async (req, res) => {
   res.send(await snapshotPage(req.device.shop_id, req.params.table, { since, afterId, limit }));
 });
 
-module.exports = { RegisterDevice, ListDevices, UpdateDeviceStatus, StartSnapshot, SnapshotPage };
+// A device's sync calls (phase 3). Each is recorded against the device — success or not — so the
+// owner's Devices list and the admin console can tell how current every register is.
+const withContactRecord = (direction, handler) =>
+  asyncHandler(async (req, res) => {
+    const started = Date.now();
+    const report = req.body?.report || req.query;
+    try {
+      const { result, rows } = await handler(req);
+      await recordDeviceContact(req.device, { direction, rows, durationMs: Date.now() - started, ok: true, report });
+      res.send({ ...result, serverTime: new Date().toISOString() });
+    } catch (err) {
+      await recordDeviceContact(req.device, {
+        direction,
+        rows: 0,
+        durationMs: Date.now() - started,
+        ok: false,
+        error: err.message,
+        report,
+      }).catch(() => {});
+      throw err;
+    }
+  });
+
+const PushChanges = withContactRecord("push", async (req) => {
+  const events = req.body?.events;
+  const result = await pushEvents(req.device, events);
+  return { result, rows: Array.isArray(events) ? events.length : 0 };
+});
+
+const PullChanges = withContactRecord("pull", async (req) => {
+  const { after, upTo, afterId } = req.query;
+  const result = await pullChanges(req.device.shop_id, { after, upTo, afterId });
+  return { result, rows: result.changes.length };
+});
+
+module.exports = { RegisterDevice, ListDevices, UpdateDeviceStatus, StartSnapshot, SnapshotPage, PushChanges, PullChanges };
