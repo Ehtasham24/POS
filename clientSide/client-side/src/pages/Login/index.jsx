@@ -76,6 +76,13 @@ export default function LoginPage() {
           <h1 className="font-poppins text-xl font-bold text-gray-800 dark:text-gray-100">
             {t("auth.title")}
           </h1>
+          {/* A shop's own register holds one shop: say which, so staff of another shop know
+              why their account isn't here. */}
+          {onDevice && deviceStatus.shopName && (
+            <p className="text-center text-sm text-gray-500 dark:text-gray-400">
+              {t("auth.deviceShop", { shop: deviceStatus.shopName })}
+            </p>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">

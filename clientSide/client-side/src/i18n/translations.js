@@ -211,6 +211,7 @@ const translations = {
     },
     auth: {
       title: "Sign In",
+      deviceShop: "This register belongs to {shop}. Only its staff can sign in here.",
       username: "Username",
       password: "Password",
       login: "Log In",
@@ -893,6 +894,7 @@ const translations = {
     },
     auth: {
       title: "لاگ ان کریں",
+      deviceShop: "یہ رجسٹر {shop} کا ہے۔ یہاں صرف اسی دکان کا عملہ سائن ان کر سکتا ہے۔",
       username: "یوزر نیم",
       password: "پاس ورڈ",
       login: "لاگ ان",
