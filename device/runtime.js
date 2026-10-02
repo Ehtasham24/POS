@@ -18,14 +18,44 @@ const DEFAULT_CLOUD_URL = process.env.POS_CLOUD_URL || "https://localhost:4000";
 // Written to a temporary file and renamed over the old one, so a power cut mid-write leaves
 // either the old settings or the new, never half a file.
 const configFile = (dataDir) => path.join(dataDir, "device.json");
+
+// The secrets in it (the device's cloud token, its session-signing key) are encrypted with the
+// operating system's protection for this Windows user (Electron safeStorage, DPAPI) when the app
+// runs under Electron, so copying the file to another machine or account doesn't copy them.
+// Run from the command line (tests, development) they're stored as they are.
+const SECRET_FIELDS = ["deviceToken", "jwtSecret"];
+const safeStorage = (() => {
+  if (!process.versions.electron) return null;
+  const { safeStorage: storage } = require("electron");
+  return storage.isEncryptionAvailable() ? storage : null;
+})();
+const toFile = (config) => {
+  if (!safeStorage) return config;
+  const stored = { ...config, protected: {} };
+  for (const field of SECRET_FIELDS) {
+    if (stored[field] == null) continue;
+    stored.protected[field] = safeStorage.encryptString(stored[field]).toString("base64");
+    delete stored[field];
+  }
+  return stored;
+};
+const fromFile = (stored) => {
+  const { protected: secrets = {}, ...config } = stored;
+  for (const [field, value] of Object.entries(secrets)) {
+    if (!safeStorage) throw new Error(`device.json holds protected ${field}, but this machine can't decrypt it`);
+    config[field] = safeStorage.decryptString(Buffer.from(value, "base64"));
+  }
+  return config;
+};
+
 const saveDeviceConfig = (dataDir, config) => {
   const file = configFile(dataDir);
-  fs.writeFileSync(`${file}.tmp`, JSON.stringify(config, null, 2));
+  fs.writeFileSync(`${file}.tmp`, JSON.stringify(toFile(config), null, 2));
   fs.renameSync(`${file}.tmp`, file);
 };
 const deviceConfig = (dataDir) => {
   const file = configFile(dataDir);
-  if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, "utf8"));
+  if (fs.existsSync(file)) return fromFile(JSON.parse(fs.readFileSync(file, "utf8")));
   // receiptPrefix stays "D1" until the device is registered with the cloud, which assigns one.
   const config = { jwtSecret: crypto.randomBytes(48).toString("hex"), receiptPrefix: "D1", createdAt: new Date().toISOString() };
   fs.mkdirSync(dataDir, { recursive: true });

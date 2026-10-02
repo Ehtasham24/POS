@@ -19,12 +19,14 @@ import {
   TIER_CHIP_CLASS,
   AUDIT_ACTION_LABEL,
   auditDetails,
+  DeviceStateChip,
 } from "./shared";
 
 const TABS = [
   ["summary", "Summary"],
   ["users", "Users"],
   ["billing", "Billing"],
+  ["devices", "Devices"],
   ["activity", "Activity"],
 ];
 
@@ -424,6 +426,42 @@ export default function ShopDetail({ shopId, onClose, onChanged }) {
                   </table>
                 )}
               </div>
+            </div>
+          )}
+
+          {tab === "devices" && (
+            <div className={cardClass}>
+              <div className="border-b border-surface-border px-4 py-2.5 dark:border-gray-700">
+                <h3 className="text-sm font-bold text-gray-800 dark:text-gray-100">
+                  Registers ({detail.devices.filter((d) => d.status === "active").length} active of {shop.max_devices} allowed)
+                </h3>
+              </div>
+              {detail.devices.length === 0 ? (
+                <p className="px-4 py-3 text-sm text-gray-500 dark:text-gray-400">
+                  No devices registered. The owner adds one by signing in on the Windows or Android app.
+                </p>
+              ) : (
+                <ul className="divide-y divide-surface-border text-sm dark:divide-gray-700">
+                  {detail.devices.map((d) => (
+                    <li key={d.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-2.5">
+                      <span className="min-w-0">
+                        <span className="font-medium text-gray-800 dark:text-gray-100">{d.name}</span>{" "}
+                        <span className="font-mono text-xs text-gray-500">
+                          {d.receipt_prefix} · {d.platform}
+                          {d.app_version ? ` · v${d.app_version}` : ""}
+                        </span>
+                        <span className="block text-xs text-gray-500 dark:text-gray-400">
+                          Last seen {timeAgo(d.last_seen_at)}
+                          {d.pending_count > 0 ? ` · ${d.pending_count} waiting to send` : ""}
+                          {Math.abs(d.clock_skew_ms || 0) > 300000 ? ` · clock ${Math.round(d.clock_skew_ms / 60000)} min off` : ""}
+                          {d.last_error ? ` · last error: ${d.last_error}` : ""}
+                        </span>
+                      </span>
+                      <DeviceStateChip state={d.sync_state} />
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           )}
 

@@ -7,6 +7,8 @@ const {
   RegisterDevice,
   ListDevices,
   UpdateDeviceStatus,
+  ListRejections,
+  ResolveRejection,
   StartSnapshot,
   SnapshotPage,
   PushChanges,
@@ -18,6 +20,8 @@ const {
 routes.post("/api/devices/register", requireAuth, requireOwner, RegisterDevice);
 routes.get("/api/devices", requireAuth, requireOwner, ListDevices);
 routes.patch("/api/devices/:id/status", requireAuth, requireOwner, UpdateDeviceStatus);
+routes.get("/api/devices/rejections", requireAuth, requireOwner, ListRejections);
+routes.patch("/api/devices/rejections/:id/resolve", requireAuth, requireOwner, ResolveRejection);
 
 routes.get("/api/sync/snapshot", requireDevice, StartSnapshot);
 routes.get("/api/sync/snapshot/:table", requireDevice, SnapshotPage);

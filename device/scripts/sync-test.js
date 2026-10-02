@@ -22,6 +22,33 @@ const DEVICE_ENV = {
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+// The internet, for one register: a TCP pass-through to the cloud that can be cut and restored.
+// TLS goes through untouched, so the register still checks the cloud's certificate.
+const net = require("net");
+const createLine = (listenPort, target) => {
+  const sockets = new Set();
+  let server = null;
+  const connect = () =>
+    new Promise((resolve) => {
+      server = net.createServer((inbound) => {
+        const outbound = net.connect(target.port, target.host);
+        for (const s of [inbound, outbound]) {
+          sockets.add(s);
+          s.on("close", () => sockets.delete(s));
+          s.on("error", () => {});
+        }
+        inbound.pipe(outbound).pipe(inbound);
+      });
+      server.listen(listenPort, "127.0.0.1", resolve);
+    });
+  const cut = () =>
+    new Promise((resolve) => {
+      for (const s of sockets) s.destroy();
+      server.close(() => resolve());
+    });
+  return { connect, cut, url: `https://localhost:${listenPort}` };
+};
+
 let pass = 0;
 let fail = 0;
 const check = (label, ok, detail) => {
@@ -61,11 +88,11 @@ const removeCloudShop = async (shopId) => {
 };
 
 // A register: set up against the cloud shop, signed in as the owner.
-const openRegister = async (name, port, owner) => {
+const openRegister = async (name, port, owner, cloudUrl = CLOUD) => {
   const dataDir = path.join(DATA, name);
   const device = await startDevice({ dataDir, port, env: DEVICE_ENV });
   const anon = client(device.base, "");
-  const started = await anon("POST", "/api/device/setup", { username: owner.username, password: owner.password, deviceName: name });
+  const started = await anon("POST", "/api/device/setup", { username: owner.username, password: owner.password, deviceName: name, cloudUrl });
   let status;
   for (let i = 0; i < 240; i++) {
     await sleep(250);
@@ -119,7 +146,11 @@ const cloudStock = async (shopId, productName) => {
 
     fs.rmSync(DATA, { recursive: true, force: true });
     const A = await openRegister("Counter PC", 4191, owner);
-    const B = await openRegister("Back PC", 4193, owner);
+    // P2 reaches the cloud through a line the test can cut (section 10).
+    const cloudAddress = new URL(CLOUD);
+    const line = createLine(4994, { host: cloudAddress.hostname, port: Number(cloudAddress.port) || 443 });
+    await line.connect();
+    const B = await openRegister("Back PC", 4193, owner, line.url);
     registers.push(A, B);
     check(`Two registers set up (${A.prefix}, ${B.prefix})`, A.prefix === "P1" && B.prefix === "P2", [A.prefix, B.prefix]);
     for (const r of registers) await r.api("POST", "/api/shifts", { openingFloat: 0 });
@@ -238,9 +269,110 @@ const cloudStock = async (shopId, productName) => {
       { cloud: pick(cloudSummary), A: pick(aSummary), B: pick(bSummary) }
     );
     const { rows: rejections } = await cloudDb.query(`SELECT event_type, reason FROM sync_rejections WHERE shop_id = $1`, [shopId]);
-    check("Nothing was rejected along the way", rejections.length === 0, rejections);
+    check("Nothing was rejected along the way (so far)", rejections.length === 0, rejections);
     const { rows: deviceRows } = await cloudDb.query(`SELECT name, pending_count, last_push_at IS NOT NULL AS pushed, last_pull_at IS NOT NULL AS pulled FROM devices WHERE shop_id = $1 ORDER BY name`, [shopId]);
     check("The cloud records each register's last sync and nothing pending", deviceRows.length === 2 && deviceRows.every((d) => d.pushed && d.pulled && d.pending_count === 0), deviceRows);
+
+    // --- 10. Offline (phase 4): P2 loses the internet.
+    await line.cut();
+    const offlineSale = await sell(B, "pedestal fan", 1);
+    const offlineSync = (await B.anon("POST", "/api/device/sync-now")).body;
+    check(
+      `Offline, P2 keeps selling (${offlineSale?.receiptNo}) and reports itself offline with sales waiting`,
+      Boolean(offlineSale?.receiptNo) && offlineSync.online === false && offlineSync.pending > 0,
+      offlineSync
+    );
+
+    // A store-credit voucher, issued on the web; offline it needs the owner's password on P2.
+    const webSale = (
+      await cloudCall(web, "POST", "/api/sales/checkout", {
+        items: [{ productID: cloudProduct.id, quantity: 1, sellingPrice: 4500 }],
+        paymentMethod: "cash",
+      })
+    ).body.data;
+    const voucher = (
+      await cloudCall(web, "POST", `/api/sales/${webSale.items[0].saleId}/refunds`, {
+        quantity: 1,
+        refundAmount: 4500,
+        refundMethod: "store_credit",
+        condition: "resellable",
+        reason: "sync test voucher",
+      })
+    ).body.refundNo;
+    await line.connect();
+    await syncNow(B);
+    await line.cut();
+    await B.anon("POST", "/api/device/sync-now"); // fails: the register now knows it's offline
+    const fanId = await productId(B, "ceiling fan");
+    const withVoucher = (extra = {}) =>
+      B.api("POST", "/api/sales/checkout", {
+        items: [{ productID: fanId, quantity: 1, sellingPrice: 4500 }],
+        paymentMethod: "cash",
+        voucherCode: voucher,
+        storeCreditRedeemed: 4500,
+        ...extra,
+      });
+    const refused = await withVoucher();
+    check("Offline, paying with a voucher asks for the owner's password", refused.status === 409 && refused.body.code === "VOUCHER_NEEDS_INTERNET", refused);
+    const wrongPassword = await withVoucher({ voucherOverride: { ownerPassword: "not-it" } });
+    check("A wrong owner password is refused", wrongPassword.status === 403, wrongPassword);
+    const approved = await withVoucher({ voucherOverride: { ownerPassword: owner.password } });
+    check("With the owner's password the voucher sale goes through offline", approved.status === 200 && Number(approved.body.data.creditApplied) === 4500, approved);
+
+    // Something the cloud can't accept, made offline: a username another device took first.
+    const takenName = `${owner.username}_dup`;
+    await B.api("POST", "/api/users", { username: takenName, password: "Sync-Cashier-1", displayName: "Dup", role: "cashier" });
+    await cloudCall(web, "POST", "/api/users", { username: takenName, password: "Sync-Cashier-1", displayName: "Dup web", role: "cashier" });
+
+    // Back online: everything sent, the voucher spent in the cloud, the clash reported.
+    await line.connect();
+    const backOnline = await syncNow(B);
+    const { rows: arrived } = await cloudDb.query(`SELECT 1 FROM sale_transactions WHERE shop_id = $1 AND receipt_no = $2`, [shopId, offlineSale.receiptNo]);
+    const balance = (await cloudCall(web, "GET", `/api/store-credit/lookup/${voucher}`)).body;
+    check(
+      "Back online, P2's offline sales reach the cloud and the voucher is spent there",
+      arrived.length === 1 && backOnline.pending === 0 && backOnline.online === true && Number(balance.balance ?? balance.voucher?.balance) === 0,
+      { arrived, backOnline, balance }
+    );
+    const issues = (await cloudCall(web, "GET", "/api/devices/rejections")).body.rejections;
+    check(
+      `What the cloud couldn't accept is listed for the owner (${issues.map((i) => i.event_type).join(", ")})`,
+      issues.length === 1 && issues[0].event_type === "users.insert" && /clashes/.test(issues[0].reason),
+      issues
+    );
+    await cloudCall(web, "PATCH", `/api/devices/rejections/${issues[0].id}/resolve`);
+    const afterResolve = (await cloudCall(web, "GET", "/api/devices/rejections")).body.rejections;
+    check("The owner marks it handled", afterResolve.length === 0, afterResolve);
+
+    // The owner's Devices list, the admin's shop detail and Health.
+    const list = (await cloudCall(web, "GET", "/api/devices")).body;
+    check(
+      "The owner's Devices list shows both registers in sync, and the limit",
+      list.limit === 2 && list.devices.length === 2 && list.devices.every((d) => d.sync_state === "in_sync"),
+      list
+    );
+    const adminDetail = (await cloudCall(adminToken, "GET", `/api/admin/shops/${shopId}/detail`)).body;
+    check("The admin's shop detail lists the registers", adminDetail.devices?.length === 2, adminDetail.devices);
+    const health = (await cloudCall(adminToken, "GET", "/api/admin/health")).body;
+    check("Health lists registers needing attention (none of these)", Array.isArray(health.devices) && !health.devices.some((d) => d.shop_id === shopId), health.devices);
+
+    // Two weeks without the internet: P2 stops selling until it syncs.
+    await line.cut();
+    await stopDevice(B.device.child);
+    const configPath = path.join(B.dataDir, "device.json");
+    const stale = JSON.parse(fs.readFileSync(configPath, "utf8"));
+    stale.lastSyncAt = new Date(Date.now() - 15 * 24 * 60 * 60 * 1000).toISOString();
+    fs.writeFileSync(configPath, JSON.stringify(stale, null, 2));
+    B.device = await startDevice({ dataDir: B.dataDir, port: B.port, env: DEVICE_ENV });
+    B.api = await login(B.device.base, owner.username, owner.password);
+    B.anon = client(B.device.base, "");
+    const blockedSale = await B.api("POST", "/api/sales/checkout", { items: [{ productID: fanId, quantity: 1, sellingPrice: 4500 }], paymentMethod: "cash" });
+    const blockedStatus = (await B.anon("GET", "/api/device/status")).body.sync;
+    check("After 14 days offline the register refuses sales and says why", blockedSale.status === 409 && blockedStatus.blocked === true, { blockedSale, blockedStatus });
+    await line.connect();
+    await syncNow(B);
+    const unblocked = await B.api("POST", "/api/sales/checkout", { items: [{ productID: fanId, quantity: 1, sellingPrice: 4500 }], paymentMethod: "cash" });
+    check("One sync later it sells again", unblocked.status === 200, unblocked);
 
     // --- 9. A retired register is cut off.
     const bId = (await cloudDb.query(`SELECT id FROM devices WHERE shop_id = $1 AND receipt_prefix = 'P2'`, [shopId])).rows[0].id;

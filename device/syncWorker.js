@@ -149,9 +149,35 @@ const createSyncWorker = ({ db, config, saveConfig }) => {
     );
   };
 
+  // A cloud row whose unique value (a username, a product name) is held here by a different
+  // row: one this device made that the cloud turned down (it's on the owner's sync issues
+  // list). The cloud's row wins; the local one's value gets this device's prefix — the same
+  // rule the cloud applies to clashing names — so the cloud's can be saved and syncing goes on.
+  const yieldClashingValue = async (client, change, err) => {
+    const constraint = err.constraint || /unique constraint "([^"]+)"/.exec(err.message)?.[1];
+    if (!constraint) throw err;
+    const { rows: cols } = await client.query(
+      `SELECT a.attname, format_type(a.atttypid, a.atttypmod) AS type
+       FROM pg_class i JOIN pg_index x ON x.indexrelid = i.oid
+       JOIN pg_attribute a ON a.attrelid = x.indrelid AND a.attnum = ANY(x.indkey)
+       WHERE i.relname = $1`,
+      [constraint]
+    );
+    const textColumns = cols.filter((c) => c.attname !== "shop_id" && /^(text|character varying)/.test(c.type));
+    if (!textColumns.length) throw err;
+    const keyCol = keyColumn(change.table);
+    for (const { attname } of textColumns) {
+      await client.query(
+        `UPDATE ${change.table} SET "${attname}" = "${attname}" || $1 WHERE "${attname}" = $2 AND ${keyCol}::text <> $3`,
+        [` (${config.receiptPrefix})`, change.row[attname], change.key]
+      );
+    }
+    await applyChange(client, change);
+  };
+
   // One page of changes in one local transaction. Rows arrive parents first; a change that
-  // trips a uniqueness rule (a name taken by a row whose rename comes later in the page) is
-  // tried again once the rest of the page is in.
+  // trips a uniqueness rule is tried again once the rest of the page is in (the clashing name
+  // may be renamed later in the page), and if it still clashes, the local row gives way.
   const applyPage = async (changes) => {
     const client = await db.connect();
     try {
@@ -169,7 +195,17 @@ const createSyncWorker = ({ db, config, saveConfig }) => {
           retry.push(change);
         }
       }
-      for (const change of retry) await applyChange(client, change);
+      for (const change of retry) {
+        await client.query("SAVEPOINT change");
+        try {
+          await applyChange(client, change);
+          await client.query("RELEASE SAVEPOINT change");
+        } catch (err) {
+          await client.query("ROLLBACK TO SAVEPOINT change");
+          if (err.code !== "23505") throw err;
+          await yieldClashingValue(client, change, err);
+        }
+      }
       retry = [];
       await client.query("COMMIT");
     } catch (err) {

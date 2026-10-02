@@ -11,6 +11,7 @@ import {
   HiOutlineQrCode,
   HiOutlineClock,
   HiOutlineArchiveBoxXMark,
+  HiOutlineComputerDesktop,
 } from "react-icons/hi2";
 
 // `roles` omitted = visible to everyone logged in (Owner and Cashier alike). A Cashier's
@@ -108,6 +109,16 @@ export const navItems = [
     labelKey: "nav.report",
     icon: HiOutlineChartBarSquare,
     roles: ["owner"],
+  },
+  // The shop's offline registers (plan-offline-sync.md). `cloudOnly`: the device list lives in
+  // the cloud, so the Windows/Android app itself doesn't show it.
+  {
+    to: "/devices",
+    label: "Devices",
+    labelKey: "nav.devices",
+    icon: HiOutlineComputerDesktop,
+    roles: ["owner"],
+    cloudOnly: true,
   },
   {
     to: "/company",

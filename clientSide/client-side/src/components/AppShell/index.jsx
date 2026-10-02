@@ -10,6 +10,7 @@ import PendingBankPaymentsBell from "./PendingBankPaymentsBell";
 import StorageWarningBadge from "./StorageWarningBadge";
 import ShopNotices from "./ShopNotices";
 import OfflineStatusBadge from "./OfflineStatusBadge";
+import DeviceSyncStatus, { DeviceSyncNotice } from "./DeviceSyncStatus";
 import UserMenu from "./UserMenu";
 import CartCheckout from "categoriesComponents/cartCheckout";
 
@@ -74,6 +75,7 @@ export default function AppShell({ title, actions, hideSearch, fullBleed = false
           </div>
           <div className="flex items-center gap-2">
             <OfflineStatusBadge />
+            <DeviceSyncStatus />
             <StorageWarningBadge />
             <PendingBankPaymentsBell />
             <LowStockBell />
@@ -104,6 +106,7 @@ export default function AppShell({ title, actions, hideSearch, fullBleed = false
                   just be deleted. */}
               <div className="flex items-center gap-2 md:hidden">
                 <OfflineStatusBadge />
+                <DeviceSyncStatus />
                 <StorageWarningBadge />
                 <PendingBankPaymentsBell />
                 <LowStockBell />
@@ -120,6 +123,7 @@ export default function AppShell({ title, actions, hideSearch, fullBleed = false
         </div>
 
         <ShopNotices />
+        <DeviceSyncNotice />
 
         <main className={fullBleed ? "min-h-0 flex-1" : "flex-1 px-8 py-8 md:px-5 md:py-6 sm:px-4"}>{children}</main>
       </div>

@@ -125,4 +125,67 @@ const findDeviceByToken = async (token) => {
   return rows[0] || null;
 };
 
-module.exports = { registerDevice, listDevices, setDeviceStatus, findDeviceByToken, syncState, PLATFORMS };
+// Changes a device sent that the cloud couldn't apply (Sevices/syncService.js), for the owner to
+// look at — open ones first. Resolving one only marks it seen; fixing it is done in the app.
+const listRejections = async (shopId, { includeResolved = false } = {}) => {
+  const { rows } = await pool.query(
+    `SELECT r.id, r.event_type, r.reason, r.payload, r.created_at, r.resolved_at, d.name AS device_name, d.receipt_prefix
+     FROM sync_rejections r JOIN devices d ON d.id = r.device_id
+     WHERE r.shop_id = $1 AND ($2 OR r.resolved_at IS NULL)
+     ORDER BY r.resolved_at IS NOT NULL, r.created_at DESC
+     LIMIT 200`,
+    [shopId, includeResolved]
+  );
+  return rows;
+};
+
+const resolveRejection = async (shopId, rejectionId, userId) => {
+  const { rows } = await pool.query(
+    `UPDATE sync_rejections SET resolved_at = NOW(), resolved_by = $3
+     WHERE id = $1 AND shop_id = $2 AND resolved_at IS NULL RETURNING id`,
+    [rejectionId, shopId, userId]
+  );
+  if (!rows[0]) throw new ApiError(404, "Open sync issue not found");
+  return rows[0];
+};
+
+// For the admin console's Health page: every active device across all shops that isn't in
+// sync, worst first. Spans every shop by design, so systemPool.
+const devicesNeedingAttention = async () => {
+  const { rows } = await systemPool.query(
+    `SELECT d.id, d.name, d.receipt_prefix, d.platform, d.last_seen_at, d.pending_count, d.oldest_pending_at,
+            d.clock_skew_ms, d.status, s.id AS shop_id, s.name AS shop_name,
+            (SELECT COUNT(*)::int FROM sync_rejections r WHERE r.device_id = d.id AND r.resolved_at IS NULL) AS open_rejections
+     FROM devices d JOIN shops s ON s.id = d.shop_id
+     WHERE d.status = 'active' AND s.is_active
+     ORDER BY d.last_seen_at NULLS FIRST`
+  );
+  return rows
+    .map((row) => ({ ...row, sync_state: syncState(row) }))
+    .filter((row) => row.sync_state !== "in_sync" || row.open_rejections > 0);
+};
+
+// Housekeeping (maintenanceSweep.js): the change feed and sync history are kept 30 days. A
+// device that hasn't pulled for longer than that has been blocked from selling since day 14
+// and re-downloads its shop when it comes back.
+const SYNC_HISTORY_DAYS = 30;
+const purgeOldSyncHistory = async () => {
+  const [feed, log] = await Promise.all([
+    systemPool.query(`DELETE FROM sync_changes WHERE changed_at < NOW() - make_interval(days => $1)`, [SYNC_HISTORY_DAYS]),
+    systemPool.query(`DELETE FROM sync_log WHERE created_at < NOW() - make_interval(days => $1)`, [SYNC_HISTORY_DAYS]),
+  ]);
+  return { feed: feed.rowCount, log: log.rowCount };
+};
+
+module.exports = {
+  registerDevice,
+  listDevices,
+  setDeviceStatus,
+  findDeviceByToken,
+  syncState,
+  listRejections,
+  resolveRejection,
+  devicesNeedingAttention,
+  purgeOldSyncHistory,
+  PLATFORMS,
+};

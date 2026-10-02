@@ -2,6 +2,7 @@
 // its header — kept in one place so the pages' styling and vocabulary (tier colors, table
 // labels, byte formatting) can't quietly drift apart from each other.
 import React from "react";
+import { formatTimeAgo } from "utils/timeAgo";
 
 export const inputClass =
   "bg-white-A700 dark:bg-gray-900 border border-surface-border dark:border-gray-700 mt-1.5 text-gray-900 dark:text-gray-100 text-sm rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 block w-full p-2.5";
@@ -126,15 +127,30 @@ export const formatDateTime = (value) =>
 export const formatDay = (value) =>
   value ? new Date(value).toLocaleDateString(undefined, { dateStyle: "medium", timeZone: "UTC" }) : "—";
 
-// "just now" / "5 min ago" / "3 h ago" / "12 days ago"; "never" for no date.
-export const timeAgo = (value) => {
-  if (!value) return "never";
-  const seconds = Math.max(0, (Date.now() - new Date(value).getTime()) / 1000);
-  if (seconds < 60) return "just now";
-  if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  if (seconds < 86400) return `${Math.floor(seconds / 3600)} h ago`;
-  return `${Math.floor(seconds / 86400)} day${seconds < 172800 ? "" : "s"} ago`;
+// "just now" / "5 min ago" / "3 h ago" / "12 days ago"; "never" for no date. (The admin console
+// is English-only; the shop app says it in its own language — utils/timeAgo.js.)
+export const timeAgo = (value) =>
+  formatTimeAgo(value, {
+    never: "never",
+    justNow: "just now",
+    minutes: (n) => `${n} min ago`,
+    hours: (n) => `${n} h ago`,
+    days: (n) => `${n} day${n === 1 ? "" : "s"} ago`,
+  });
+
+// How current a shop's register is with the cloud (Sevices/deviceService.js's syncState).
+export const DEVICE_STATE = {
+  in_sync: { label: "In sync", className: "bg-success-50 text-success-600 dark:bg-success-500/10 dark:text-success-500" },
+  behind: { label: "Behind", className: "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400" },
+  offline_long: { label: "Offline long", className: "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-500" },
+  retired: { label: "Retired", className: "bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300" },
+  blocked: { label: "Blocked", className: "bg-danger-50 text-danger-600 dark:bg-danger-500/10 dark:text-danger-500" },
 };
+
+export function DeviceStateChip({ state }) {
+  const chip = DEVICE_STATE[state] || DEVICE_STATE.behind;
+  return <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${chip.className}`}>{chip.label}</span>;
+}
 
 // Where a shop's subscription stands (Sevices/subscriptionService.js's subscriptionStatus).
 export const SUBSCRIPTION_CHIP = {

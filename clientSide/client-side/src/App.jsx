@@ -18,6 +18,7 @@ import { tryAutoReconnect } from "utils/thermalPrinter/connection";
 // charts) is its own chunk, fetched only when that page is first visited.
 const SalesDataComponent = lazyPage(() => import("pages/Report/Report"));
 const DeviceSetup = lazyPage(() => import("pages/DeviceSetup"));
+const Devices = lazyPage(() => import("pages/Devices"));
 const SalesHistory = lazyPage(() => import("pages/SalesHistory"));
 const CreditDebit = lazyPage(() => import("pages/CreditDebit"));
 const Settings = lazyPage(() => import("pages/Settings"));
@@ -219,6 +220,14 @@ function App() {
                     element={
                       <ProtectedRoute feature="shifts">
                         <Shifts />
+                      </ProtectedRoute>
+                    }
+                  />
+                  <Route
+                    path="/devices"
+                    element={
+                      <ProtectedRoute roles={OWNER_ONLY}>
+                        <Devices />
                       </ProtectedRoute>
                     }
                   />

@@ -39,6 +39,7 @@ import { rememberPrices, loadHeldSales, saveHeldSales, MAX_HELD_SALES } from "ut
 import ReceiptPreviewModal from "./ReceiptPreviewModal";
 import BankTransferQrModal from "./BankTransferQrModal";
 import OpenShiftModal from "./OpenShiftModal";
+import OwnerApprovalModal from "./OwnerApprovalModal";
 
 // Cash amounts customers commonly hand over — used to build one-tap tender suggestions.
 const CASH_DENOMINATIONS = [50, 100, 500, 1000, 5000];
@@ -118,6 +119,13 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
   const [showOpenShift, setShowOpenShift] = useState(false);
 
   const [showPayment, setShowPayment] = useState(false);
+  // Waiting on the owner's password for an offline voucher payment: { resolve }.
+  const [ownerApproval, setOwnerApproval] = useState(null);
+  const askOwnerApproval = () => new Promise((resolve) => setOwnerApproval({ resolve }));
+  const closeOwnerApproval = (password) => {
+    ownerApproval?.resolve(password);
+    setOwnerApproval(null);
+  };
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [amountTendered, setAmountTendered] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
@@ -265,7 +273,17 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
       };
 
       try {
-        const json = await apiPost("/api/sales/checkout", checkoutPayload);
+        let json;
+        try {
+          json = await apiPost("/api/sales/checkout", checkoutPayload);
+        } catch (error) {
+          // A shop's own register while offline: a voucher payment needs the owner's
+          // password there (device/deviceRoutes.js). Ask, then try once more with it.
+          if (error.code !== "VOUCHER_NEEDS_INTERNET") throw error;
+          const ownerPassword = await askOwnerApproval();
+          if (!ownerPassword) throw error;
+          json = await apiPost("/api/sales/checkout", { ...checkoutPayload, voucherOverride: { ownerPassword } });
+        }
         checkoutReceiptNo = json.data?.receiptNo ?? null;
 
         // The checkout response flags, per item, when it just dropped below the low-stock
@@ -858,6 +876,12 @@ export default function CartPanel({ onCheckedOut, onSold, onClose, hotkeys = fal
           setBankIntent(null);
           onCheckedOut?.();
         }}
+      />
+
+      <OwnerApprovalModal
+        isOpen={ownerApproval !== null}
+        onSubmit={(password) => closeOwnerApproval(password)}
+        onCancel={() => closeOwnerApproval(null)}
       />
 
       <ReceiptPreviewModal

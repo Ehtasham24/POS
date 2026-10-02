@@ -1,6 +1,7 @@
-const { registerDevice, listDevices, setDeviceStatus } = require("../Sevices/deviceService");
+const { registerDevice, listDevices, setDeviceStatus, listRejections, resolveRejection } = require("../Sevices/deviceService");
 const { startSnapshot, snapshotPage, pullChanges, pushEvents, recordDeviceContact } = require("../Sevices/syncService");
 const asyncHandler = require("../utils/asyncHandler");
+const { pool } = require("../Db");
 
 // The owner, signed in on the device being set up, registers it (device/setup.js does this).
 const RegisterDevice = asyncHandler(async (req, res) => {
@@ -9,11 +10,23 @@ const RegisterDevice = asyncHandler(async (req, res) => {
 });
 
 const ListDevices = asyncHandler(async (req, res) => {
-  res.send({ devices: await listDevices(req.user.shopId) });
+  const [devices, shop] = await Promise.all([
+    listDevices(req.user.shopId),
+    pool.query(`SELECT max_devices FROM shops WHERE id = $1`, [req.user.shopId]),
+  ]);
+  res.send({ devices, limit: shop.rows[0].max_devices });
 });
 
 const UpdateDeviceStatus = asyncHandler(async (req, res) => {
   res.send(await setDeviceStatus(req.user.shopId, req.params.id, req.body?.status));
+});
+
+const ListRejections = asyncHandler(async (req, res) => {
+  res.send({ rejections: await listRejections(req.user.shopId, { includeResolved: req.query.all === "1" }) });
+});
+
+const ResolveRejection = asyncHandler(async (req, res) => {
+  res.send(await resolveRejection(req.user.shopId, Number(req.params.id), req.user.id));
 });
 
 // Called by the device itself (requireDevice), for its first download.
@@ -61,4 +74,4 @@ const PullChanges = withContactRecord("pull", async (req) => {
   return { result, rows: result.changes.length };
 });
 
-module.exports = { RegisterDevice, ListDevices, UpdateDeviceStatus, StartSnapshot, SnapshotPage, PushChanges, PullChanges };
+module.exports = { RegisterDevice, ListDevices, UpdateDeviceStatus, ListRejections, ResolveRejection, StartSnapshot, SnapshotPage, PushChanges, PullChanges };

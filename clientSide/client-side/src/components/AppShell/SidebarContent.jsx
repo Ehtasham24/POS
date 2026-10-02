@@ -6,6 +6,7 @@ import { useLanguage } from "i18n/LanguageContext";
 import { useAuth } from "auth/AuthContext";
 import Logo from "components/Logo";
 import { navItems } from "./navItems";
+import useDeviceStatus from "hooks/useDeviceStatus";
 
 export default function SidebarContent({ onNavigate = () => {} }) {
   const [theme, toggleTheme] = useTheme();
@@ -19,10 +20,13 @@ export default function SidebarContent({ onNavigate = () => {} }) {
   // `feature` is the same idea for a tier-gated page — locked features are simply absent
   // from user.shop.features (/api/auth/me), so a Basic/Smart shop never sees a link to a
   // page it would just get redirected away from either.
+  // `cloudOnly` pages aren't shown in a shop's own device app (useDeviceStatus).
+  const onDevice = Boolean(useDeviceStatus()?.device);
   const visibleItems = navItems.filter(
     (item) =>
       (!item.roles || item.roles.includes(user?.role)) &&
-      (!item.feature || user?.shop?.features?.includes(item.feature))
+      (!item.feature || user?.shop?.features?.includes(item.feature)) &&
+      !(item.cloudOnly && onDevice)
   );
 
   return (

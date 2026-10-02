@@ -18,19 +18,52 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync }) => {
   const routes = express.Router();
+  // Through the backend's pool (loaded after these routes are built), so these reads queue with
+  // the requests' transactions instead of landing in the middle of one (pglitePool.js).
+  const query = (...args) => require("../ExpressBackend/Db").systemPool.query(...args);
   const offlineAge = () => {
     const days = config.lastSyncAt ? (Date.now() - new Date(config.lastSyncAt).getTime()) / DAY_MS : 0;
     return { daysSinceSync: Math.floor(days), warn: days >= WARN_AFTER_DAYS, blocked: days >= BLOCK_AFTER_DAYS };
   };
 
+  // The cloud answered within the last minute (the sync worker runs every 10 seconds).
+  const onlineNow = () => {
+    const state = sync()?.state();
+    return Boolean(state?.online && state.lastSyncAt && Date.now() - new Date(state.lastSyncAt).getTime() < 60000);
+  };
+
   // Mounted ahead of the sales routes (Server.js), so it runs before checkout.
-  routes.post("/api/sales/checkout", (req, res, next) => {
-    if (config.deviceToken && offlineAge().blocked) {
-      return res.status(409).send({
-        message: `This register hasn't reached the internet for ${BLOCK_AFTER_DAYS} days. Connect it once to sync, then carry on selling.`,
-      });
+  routes.post("/api/sales/checkout", async (req, res, next) => {
+    try {
+      if (config.deviceToken && offlineAge().blocked) {
+        return res.status(409).send({
+          message: `This register hasn't reached the internet for ${BLOCK_AFTER_DAYS} days. Connect it once to sync, then carry on selling.`,
+        });
+      }
+      // A store-credit voucher is a slip anyone holding it can spend, and its balance lives in
+      // the cloud: offline, two registers could each spend it in full. So offline, paying with
+      // a voucher needs the owner's password (decided with the owner, plan-offline-sync.md).
+      const usesVoucher = req.body?.voucherCode && Number(req.body.storeCreditRedeemed) > 0;
+      const override = req.body?.voucherOverride;
+      if (req.body) delete req.body.voucherOverride;
+      if (config.deviceToken && usesVoucher && !onlineNow()) {
+        if (!override?.ownerPassword) {
+          return res.status(409).send({
+            code: "VOUCHER_NEEDS_INTERNET",
+            message: "This register is offline. Paying with a store-credit voucher offline needs the owner's password.",
+          });
+        }
+        const { comparePassword } = require("../ExpressBackend/utils/auth");
+        const { rows: owners } = await query(`SELECT password_hash FROM users WHERE role = 'owner' AND is_active`);
+        let approved = false;
+        for (const owner of owners) approved = approved || (await comparePassword(override.ownerPassword, owner.password_hash));
+        if (!approved) return res.status(403).send({ code: "VOUCHER_NEEDS_INTERNET", message: "That isn't the owner's password." });
+        console.log(`Offline voucher redemption approved by the owner (${req.body.voucherCode})`);
+      }
+      next();
+    } catch (err) {
+      next(err);
     }
-    next();
   });
 
   routes.post("/api/device/sync-now", async (req, res, next) => {
@@ -43,9 +76,6 @@ const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync }) => {
     }
   });
 
-  // Through the backend's pool (loaded after these routes are built), so these reads queue with
-  // the requests' transactions instead of landing in the middle of one (pglitePool.js).
-  const query = (...args) => require("../ExpressBackend/Db").systemPool.query(...args);
   const hasShop = async () => (await query(`SELECT EXISTS (SELECT 1 FROM shops) AS yes`)).rows[0].yes;
 
   routes.get("/api/device/status", async (req, res, next) => {

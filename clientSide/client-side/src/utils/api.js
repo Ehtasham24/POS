@@ -62,6 +62,9 @@ const request = async (method, path, body, opts = {}) => {
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
     const error = new Error(errData.message || response.statusText || "Request failed");
+    // Machine-readable reason, when the server gives one (e.g. VOUCHER_NEEDS_INTERNET).
+    error.code = errData.code;
+    error.status = response.status;
     if (response.status === 401) {
       // Distinct from isNetworkError — this means the request *did* reach the server,
       // it just isn't (or is no longer) an authenticated one. Callers that need to tell

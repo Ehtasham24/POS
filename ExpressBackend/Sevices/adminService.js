@@ -14,6 +14,7 @@ const { issueTempPassword } = require("./passwordResetService");
 const { listLoginEvents, loginSecuritySummary } = require("./loginSecurityService");
 const { listAudit } = require("./auditService");
 const monitoring = require("./monitoringService");
+const { listDevices, devicesNeedingAttention } = require("./deviceService");
 
 const VALID_TIERS = Object.keys(TIER_RANK);
 
@@ -601,7 +602,7 @@ const getShopDetail = async (shopId) => {
   const shop = rows[0];
   const tz = await getBusinessTimezone(shopId);
 
-  const [users, trading, counts, payments, logins, audit] = await Promise.all([
+  const [users, trading, counts, payments, logins, audit, devices] = await Promise.all([
     pool.query(
       `SELECT u.id, u.username, u.display_name, u.role, u.is_active, u.created_at,
               (SELECT MAX(e.created_at) FROM login_events e WHERE e.user_id = u.id AND e.outcome = 'success') AS last_login_at
@@ -641,6 +642,7 @@ const getShopDetail = async (shopId) => {
     listPayments(shopId),
     listLoginEvents({ shopId, pageSize: 15 }),
     listAudit({ shopId, pageSize: 15 }),
+    listDevices(shopId),
   ]);
 
   const t = trading.rows[0];
@@ -662,6 +664,7 @@ const getShopDetail = async (shopId) => {
     subscription: { ...subscriptionStatus(shop.due_on), payments },
     recentLogins: logins.rows,
     recentAudit: audit.rows,
+    devices,
   };
 };
 
@@ -699,11 +702,12 @@ const getPlatformHealth = async () => {
   database.pool = poolStats();
 
   const online = monitoring.onlineShopIds();
-  const [names, logins] = await Promise.all([
+  const [names, logins, devices] = await Promise.all([
     database.ok && online.length
       ? pool.query(`SELECT id, name FROM shops WHERE id = ANY($1::int[])`, [online.map((o) => o.shopId)])
       : { rows: [] },
     database.ok ? loginSecuritySummary() : null,
+    database.ok ? devicesNeedingAttention() : [],
   ]);
   const nameById = new Map(names.rows.map((r) => [r.id, r.name]));
 
@@ -714,6 +718,8 @@ const getPlatformHealth = async () => {
       .map((o) => ({ ...o, name: nameById.get(o.shopId) || `Shop #${o.shopId}` }))
       .sort((a, b) => b.lastSeenAt - a.lastSeenAt),
     logins,
+    // Registers that are behind, offline long, or have sync issues waiting (plan-offline-sync.md).
+    devices,
   };
 };
 

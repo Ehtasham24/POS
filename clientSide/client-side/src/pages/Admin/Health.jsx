@@ -17,6 +17,7 @@ import {
   formatDateTime,
   timeAgo,
   SEVERITY_CLASS,
+  DeviceStateChip,
 } from "./shared";
 
 const REFRESH_MS = 15 * 1000;
@@ -69,6 +70,8 @@ const problemsOf = (h) => {
   if (h.lastHour.p95Ms > SLOW_P95_MS) problems.push(`Slow responses: 95% finish within ${ms(h.lastHour.p95Ms)}`);
   if (h.logins?.topUsernames.some((u) => u.lockedNow)) problems.push("Accounts locked after repeated wrong passwords");
   for (const job of h.jobs) if (job.lastError) problems.push(`Background job "${job.name}" failed: ${job.lastError}`);
+  const offlineLong = (h.devices || []).filter((d) => d.sync_state === "offline_long").length;
+  if (offlineLong) problems.push(`${offlineLong} register(s) offline for over a day with sales not yet sent`);
   return problems;
 };
 
@@ -337,6 +340,31 @@ export default function AdminHealth() {
               )}
             </Card>
           </div>
+
+          {health.devices?.length > 0 && (
+            <Card title={`Registers needing attention (${health.devices.length})`}>
+              <ul className="divide-y divide-surface-border dark:divide-gray-700">
+                {health.devices.map((d) => (
+                  <li key={d.id} className="flex flex-wrap items-center justify-between gap-3 px-5 py-2.5 text-sm">
+                    <span className="min-w-0">
+                      <Link to={`/admin/shops?shop=${d.shop_id}`} className="font-medium text-gray-800 hover:underline dark:text-gray-100">
+                        {d.shop_name}
+                      </Link>{" "}
+                      <span className="text-gray-600 dark:text-gray-300">
+                        · {d.name} ({d.receipt_prefix})
+                      </span>
+                      <span className="block text-xs text-gray-500 dark:text-gray-400">
+                        Last seen {timeAgo(d.last_seen_at)}
+                        {d.pending_count > 0 ? ` · ${d.pending_count} waiting to send` : ""}
+                        {d.open_rejections > 0 ? ` · ${d.open_rejections} sync issue(s)` : ""}
+                      </span>
+                    </span>
+                    <DeviceStateChip state={d.sync_state} />
+                  </li>
+                ))}
+              </ul>
+            </Card>
+          )}
 
           {health.logins && (
             <Card
