@@ -25,6 +25,8 @@ import { apiGet, apiDelete } from "utils/api";
 import * as offlineCache from "offline/cache";
 import Pagination from "components/Pagination";
 import useDebounce from "hooks/useDebounce";
+import { useFeature } from "auth/useFeature";
+import { INVENTORY_CHANGED_EVENT } from "./events";
 
 const PAGE_SIZE = 20;
 
@@ -126,17 +128,19 @@ function RowActionsMenu({ onEdit, onUpdate, onAdjust, onDelete }) {
             <HiOutlineArchiveBoxArrowDown className="text-base" />
             {t("pos.update")}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setOpen(false);
-              onAdjust();
-            }}
-            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-gray-800 transition-colors hover:bg-surface-subtle dark:text-gray-100 dark:hover:bg-gray-700"
-          >
-            <HiOutlineAdjustmentsHorizontal className="text-base" />
-            {t("inventory.adjustStock")}
-          </button>
+          {onAdjust && (
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                onAdjust();
+              }}
+              className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-gray-800 transition-colors hover:bg-surface-subtle dark:text-gray-100 dark:hover:bg-gray-700"
+            >
+              <HiOutlineAdjustmentsHorizontal className="text-base" />
+              {t("inventory.adjustStock")}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => {
@@ -261,6 +265,8 @@ export default function InventoryPage() {
   const [adjustItem, setAdjustItem] = useState(null);
   const [deleteItem, setDeleteItem] = useState(null);
   const [deleting, setDeleting] = useState(false);
+  // The Stock Adjustments API is Smart tier and up — on Basic the menu item would only fail.
+  const hasStockAdjustments = useFeature("stockAdjustments");
 
   const fetchInventory = async (pageToLoad) => {
     try {
@@ -292,6 +298,15 @@ export default function InventoryPage() {
     fetchInventory(1);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [categoryFilter, statusFilter, debouncedSearch]);
+
+  // Stock changed elsewhere on screen (restocked from the header's low-stock alerts):
+  // reload the page being viewed.
+  useEffect(() => {
+    const reload = () => fetchInventory(page);
+    window.addEventListener(INVENTORY_CHANGED_EVENT, reload);
+    return () => window.removeEventListener(INVENTORY_CHANGED_EVENT, reload);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, categoryFilter, statusFilter, debouncedSearch]);
 
   const handleConfirmDelete = async () => {
     if (!deleteItem) return;
@@ -505,7 +520,7 @@ export default function InventoryPage() {
                         <RowActionsMenu
                           onEdit={() => setEditItem(item)}
                           onUpdate={() => setUpdateItem(item)}
-                          onAdjust={() => setAdjustItem(item)}
+                          onAdjust={hasStockAdjustments ? () => setAdjustItem(item) : undefined}
                           onDelete={() => setDeleteItem(item)}
                         />
                       </td>

@@ -23,16 +23,22 @@ const reasonLabelKey = {
 // replacement for silently retyping a product's quantity. Owner-only (matches the rest of
 // Inventory). `product` is the row from Inventory's own list (id, productname, batch_tracked,
 // quantity) — for a batch-tracked product a specific lot must be picked, mirroring
-// updateProductModal.jsx's own lot-dropdown data source.
-export default function AdjustStockModal({ isOpen, onClose, product, onAdjusted }) {
+// updateProductModal.jsx's own lot-dropdown data source. `defaultReason` pre-selects the
+// reason each time it opens — RestockModal.jsx opens it as 'restock'.
+export default function AdjustStockModal({ isOpen, onClose, product, onAdjusted, defaultReason = "damaged" }) {
   const { t } = useLanguage();
   const toast = useToast();
   const [lots, setLots] = useState([]);
   const [lotId, setLotId] = useState("");
   const [quantityChange, setQuantityChange] = useState("");
-  const [reasonCode, setReasonCode] = useState("damaged");
+  const [reasonCode, setReasonCode] = useState(defaultReason);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const isRestock = reasonCode === "restock";
+
+  useEffect(() => {
+    if (isOpen) setReasonCode(defaultReason);
+  }, [isOpen, defaultReason]);
 
   useEffect(() => {
     if (!isOpen || !product?.batch_tracked) {
@@ -78,9 +84,11 @@ export default function AdjustStockModal({ isOpen, onClose, product, onAdjusted 
   if (!product) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} title={t("inventory.adjustStockTitle")}>
+    <Modal isOpen={isOpen} onClose={onClose} title={t(isRestock ? "inventory.restockTitle" : "inventory.adjustStockTitle")}>
       <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-        <p className="text-sm text-gray-600 dark:text-gray-300">{product.productname}</p>
+        <p className="text-sm text-gray-600 dark:text-gray-300">
+          {product.productname} · {t("inventory.inStockNow", { qty: product.quantity })}
+        </p>
 
         {product.batch_tracked && (
           <div>
@@ -105,20 +113,23 @@ export default function AdjustStockModal({ isOpen, onClose, product, onAdjusted 
 
         <div>
           <label htmlFor="adjust_quantity" className={labelClass}>
-            {t("inventory.adjustStockQuantityChange")}
+            {t(isRestock ? "inventory.restockQuantity" : "inventory.adjustStockQuantityChange")}
           </label>
           <input
             type="number"
             id="adjust_quantity"
             step="1"
+            min={isRestock ? 1 : undefined}
             value={quantityChange}
             onChange={(e) => setQuantityChange(e.target.value)}
-            placeholder="-1"
+            placeholder={isRestock ? "10" : "-1"}
             className={inputClass}
             required
             autoFocus
           />
-          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">{t("inventory.adjustStockQuantityHint")}</p>
+          <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
+            {t(isRestock ? "inventory.restockQuantityHint" : "inventory.adjustStockQuantityHint")}
+          </p>
         </div>
 
         <div>
@@ -166,7 +177,7 @@ export default function AdjustStockModal({ isOpen, onClose, product, onAdjusted 
             disabled={saving}
             className="rounded-lg bg-primary-600 px-4 py-2 text-sm font-semibold text-white-A700 hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? t("common.saving") : t("inventory.adjustStockSubmit")}
+            {saving ? t("common.saving") : t(isRestock ? "inventory.restockSubmit" : "inventory.adjustStockSubmit")}
           </button>
         </div>
       </form>

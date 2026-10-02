@@ -1,7 +1,10 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { HiOutlineBell, HiOutlineExclamationTriangle, HiOutlineXCircle } from "react-icons/hi2";
+import { useLocation, useNavigate } from "react-router-dom";
+import { HiOutlineBell, HiOutlineExclamationTriangle, HiOutlinePlusCircle, HiOutlineXCircle } from "react-icons/hi2";
 import { apiGet } from "utils/api";
+import { useLanguage } from "i18n/LanguageContext";
+import RestockModal from "categoriesComponents/RestockModal";
+import { INVENTORY_CHANGED_EVENT } from "pages/Inventory/events";
 
 const POLL_MS = 60000;
 const READ_STORAGE_KEY = "pos_low_stock_read";
@@ -24,10 +27,16 @@ const loadReadState = () => {
 // product id + the quantity at read time), so the badge doesn't keep nagging about the
 // same stock level once it's been seen. If that same product's quantity drops further
 // afterwards, it's treated as new information and counts as unread again.
+//
+// Clicking an alert opens RestockModal for that product, so the stock can be topped up
+// right there; the Inventory page (if open) is told to refetch afterwards.
 export default function LowStockBell() {
   const navigate = useNavigate();
+  const { pathname } = useLocation();
+  const { t } = useLanguage();
   const [items, setItems] = useState([]);
   const [open, setOpen] = useState(false);
+  const [restockItem, setRestockItem] = useState(null);
   const [readState, setReadState] = useState(loadReadState);
   const containerRef = useRef(null);
 
@@ -62,11 +71,24 @@ export default function LowStockBell() {
     navigate("/inventory");
   };
 
+  const openRestock = (item) => {
+    setOpen(false);
+    setRestockItem(item);
+  };
+
+  const handleRestocked = () => {
+    fetchAlerts();
+    window.dispatchEvent(new CustomEvent(INVENTORY_CHANGED_EVENT));
+  };
+
   const unreadCount = items.filter(
     (item) => readState[item.id] === undefined || readState[item.id] > Number(item.quantity)
   ).length;
 
   const handleToggle = () => {
+    // Refresh on open too — the 60s poll alone can show a list that's a minute stale
+    // right after a sale or a restock.
+    if (!open) fetchAlerts();
     setOpen((prev) => {
       const next = !prev;
       if (next && items.length > 0) {
@@ -100,11 +122,16 @@ export default function LowStockBell() {
       {open && (
         <div className="absolute right-0 top-full z-40 mt-2 w-80 max-w-[90vw] overflow-hidden rounded-xl border border-surface-border bg-white-A700 shadow-modal dark:border-gray-700 dark:bg-gray-800">
           <div className="border-b border-surface-border px-4 py-3 font-poppins font-bold text-gray-800 dark:border-gray-700 dark:text-gray-100">
-            Stock Alerts
+            {t("inventory.stockAlerts")}
+            {items.length > 0 && (
+              <p className="mt-0.5 font-sans text-xs font-normal text-gray-500 dark:text-gray-400">
+                {t("inventory.stockAlertsHint")}
+              </p>
+            )}
           </div>
           {items.length === 0 ? (
             <p className="px-4 py-6 text-center text-sm text-gray-500 dark:text-gray-400">
-              Everything is well stocked.
+              {t("inventory.stockAlertsEmpty")}
             </p>
           ) : (
             <ul className="max-h-80 overflow-y-auto">
@@ -112,8 +139,8 @@ export default function LowStockBell() {
                 <li key={item.id}>
                   <button
                     type="button"
-                    onClick={goToInventory}
-                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle dark:hover:bg-gray-700"
+                    onClick={() => openRestock(item)}
+                    className="group flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-surface-subtle dark:hover:bg-gray-700"
                   >
                     <div
                       className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${
@@ -131,16 +158,31 @@ export default function LowStockBell() {
                     <span className="min-w-0 flex-1 truncate text-sm font-medium text-gray-800 dark:text-gray-100">
                       {item.productname}
                     </span>
-                    <span className="shrink-0 text-xs font-semibold text-gray-500 dark:text-gray-400">
-                      {item.quantity} left
+                    <span className="shrink-0 text-xs font-semibold text-gray-500 group-hover:hidden dark:text-gray-400">
+                      {t("inventory.unitsLeft", { qty: item.quantity })}
+                    </span>
+                    <span className="hidden shrink-0 items-center gap-1 text-xs font-semibold text-primary-600 group-hover:flex dark:text-primary-400">
+                      <HiOutlinePlusCircle className="text-sm" />
+                      {t("inventory.restock")}
                     </span>
                   </button>
                 </li>
               ))}
             </ul>
           )}
+          {pathname !== "/inventory" && (
+            <button
+              type="button"
+              onClick={goToInventory}
+              className="w-full border-t border-surface-border px-4 py-2.5 text-center text-sm font-medium text-primary-600 hover:bg-surface-subtle dark:border-gray-700 dark:text-primary-400 dark:hover:bg-gray-700"
+            >
+              {t("inventory.openInventory")}
+            </button>
+          )}
         </div>
       )}
+
+      <RestockModal product={restockItem} onClose={() => setRestockItem(null)} onRestocked={handleRestocked} />
     </div>
   );
 }
