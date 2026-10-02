@@ -1,6 +1,10 @@
 import React, { useEffect } from "react";
+import { createPortal } from "react-dom";
 import { HiOutlineX } from "react-icons/hi";
 
+// Rendered into document.body, not where it's declared: a modal opened from inside the
+// header (e.g. LowStockBell's restock) sits under its backdrop-blur, which makes `fixed`
+// position against the header bar instead of the screen.
 const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
   useEffect(() => {
     if (!isOpen) return;
@@ -11,7 +15,7 @@ const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
 
   if (!isOpen) return null;
 
-  return (
+  return createPortal(
     <div
       role="dialog"
       aria-modal="true"
@@ -43,7 +47,8 @@ const Modal = ({ isOpen, onClose, title, children, maxWidth = "max-w-md" }) => {
         </div>
         <div className="px-6 py-5">{children}</div>
       </div>
-    </div>
+    </div>,
+    document.body
   );
 };
 
