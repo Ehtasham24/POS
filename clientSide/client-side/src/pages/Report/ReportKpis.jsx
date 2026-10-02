@@ -4,12 +4,12 @@ import { formatPKR } from "utils/money";
 
 // polarity: "up" = higher is good, "down" = higher is bad (refunds, voids), "neutral" = no
 // judgement either way (cost of goods rises with sales). Colour is never the only signal —
-// every change also has an arrow and a signed percentage.
+// every change also has an arrow and a signed percentage. Nothing is shown when the previous
+// figure is zero: there's no percentage to give (an empty previous period is said once, above
+// the tiles).
 const Delta = ({ current, previous, polarity }) => {
   const { t } = useLanguage();
-  if (!previous) {
-    return <p className="mt-2 text-xs text-gray-400 dark:text-gray-500">{t("report.noPrevious")}</p>;
-  }
+  if (!previous) return null;
   const change = ((current - previous) / Math.abs(previous)) * 100;
   const rounded = Math.round(change * 10) / 10;
   const flat = rounded === 0;
@@ -59,14 +59,18 @@ export default function ReportKpis({ summary }) {
     );
   }
   const { current: c, previous: p } = summary;
+  const previousHadActivity = p.transactions > 0 || p.refundCount > 0 || p.voidCount > 0;
 
   return (
     <>
+      {!previousHadActivity && (
+        <p className="mb-3 text-xs text-gray-500 dark:text-gray-400 printing:hidden">{t("report.noPrevious")}</p>
+      )}
       <div className="mb-6 grid grid-cols-4 gap-3 md:grid-cols-2 printing:mb-1 printing:grid-cols-4 printing:gap-2">
         <Tile
           label={t("report.netSales")}
           value={formatPKR(c.netSales)}
-          detail={t("report.grossDetail", { amount: formatPKR(c.grossSales) })}
+          detail={c.refunds > 0 ? t("report.grossDetail", { amount: formatPKR(c.grossSales) }) : null}
           current={c.netSales}
           previous={p.netSales}
         />
