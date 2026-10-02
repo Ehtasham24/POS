@@ -24,17 +24,24 @@ const configFile = (dataDir) => path.join(dataDir, "device.json");
 // runs under Electron, so copying the file to another machine or account doesn't copy them.
 // Run from the command line (tests, development) they're stored as they are.
 const SECRET_FIELDS = ["deviceToken", "jwtSecret"];
-const safeStorage = (() => {
-  if (!process.versions.electron) return null;
-  const { safeStorage: storage } = require("electron");
-  return storage.isEncryptionAvailable() ? storage : null;
-})();
+// Looked up on first use, not when this file loads: Electron only offers encryption once the app
+// is ready, and electron/main.js loads this file before that.
+let storageChecked = false;
+let protectedStorage = null;
+const safeStorage = () => {
+  if (!storageChecked && process.versions.electron) {
+    const { safeStorage: storage } = require("electron");
+    protectedStorage = storage.isEncryptionAvailable() ? storage : null;
+  }
+  storageChecked = true;
+  return protectedStorage;
+};
 const toFile = (config) => {
-  if (!safeStorage) return config;
+  if (!safeStorage()) return config;
   const stored = { ...config, protected: {} };
   for (const field of SECRET_FIELDS) {
     if (stored[field] == null) continue;
-    stored.protected[field] = safeStorage.encryptString(stored[field]).toString("base64");
+    stored.protected[field] = safeStorage().encryptString(stored[field]).toString("base64");
     delete stored[field];
   }
   return stored;
@@ -42,8 +49,8 @@ const toFile = (config) => {
 const fromFile = (stored) => {
   const { protected: secrets = {}, ...config } = stored;
   for (const [field, value] of Object.entries(secrets)) {
-    if (!safeStorage) throw new Error(`device.json holds protected ${field}, but this machine can't decrypt it`);
-    config[field] = safeStorage.decryptString(Buffer.from(value, "base64"));
+    if (!safeStorage()) throw new Error(`device.json holds protected ${field}, but this machine can't decrypt it`);
+    config[field] = safeStorage().decryptString(Buffer.from(value, "base64"));
   }
   return config;
 };
@@ -75,10 +82,19 @@ const createDevShop = async (devShop) => {
   console.log(`Created local shop "${name}"`);
 };
 
+// Trust the certificates Windows trusts (its certificate store), not only the list Node ships
+// with: the cloud's certificate may come from a company's or a development CA installed there.
+const trustSystemCertificates = () => {
+  const tls = require("tls");
+  if (typeof tls.setDefaultCACertificates !== "function") return;
+  tls.setDefaultCACertificates([...new Set([...tls.getCACertificates("default"), ...tls.getCACertificates("system")])]);
+};
+
 // Resolves once the database is open and the backend is loading; the backend logs
 // "Server started at Port N" when it is listening. Call once per process.
 const startDevice = async ({ dataDir, port = 4100, devShop }) => {
   const started = Date.now();
+  trustSystemCertificates();
   const config = deviceConfig(dataDir);
   const db = await openLocalDb(path.join(dataDir, "pgdata"), { receiptPrefix: config.receiptPrefix || "D1" });
   console.log(`Local database ready in ${Date.now() - started}ms`);

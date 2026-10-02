@@ -8,13 +8,66 @@
     "@electric-sql/pglite": "^0.5.8"
   },
   "devDependencies": {
-    "electron": "^44.5.1"
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3"
   },
   "scripts": {
     "start": "node index.js",
     "app": "node scripts/start-app.js",
     "smoke": "node scripts/smoke.js",
     "power-cut": "node scripts/power-cut.js",
-    "export-schema": "node scripts/export-schema.js"
+    "export-schema": "node scripts/export-schema.js",
+    "dist": "electron-builder --win nsis"
+  },
+  "productName": "POS",
+  "author": "POS",
+  "build": {
+    "appId": "pk.pos.register",
+    "productName": "POS",
+    "directories": {
+      "output": "dist"
+    },
+    "asar": false,
+    "files": [
+      "**/*",
+      "!data/**",
+      "!dist/**",
+      "!scripts/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../ExpressBackend",
+        "to": "ExpressBackend",
+        "filter": [
+          "**/*",
+          "!Development.env",
+          "!.env",
+          "!*.env",
+          "!certs/**",
+          "!scripts/**",
+          "!migrations/**"
+        ]
+      },
+      {
+        "from": "../ExpressBackend/node_modules",
+        "to": "ExpressBackend/node_modules",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../clientSide/client-side/build",
+        "to": "clientSide/client-side/build"
+      }
+    ],
+    "win": {
+      "target": "nsis"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "shortcutName": "POS"
+    }
   }
 }

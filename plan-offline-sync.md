@@ -1,6 +1,6 @@
 # Offline Registers: Local Backend on Windows and Android, Synced Through the Cloud
 
-Status: phases 1–2 done for Windows (2026-10-02); phase 3 (sync) next. iPhone is out of scope for now.
+Status: phases 1–4 done for Windows and its installer built (2026-10-02); the pilot is next, then Android. iPhone is out of scope for now.
 
 ## Progress
 
@@ -72,9 +72,43 @@ of trading, and the change-feed cursor its first pull starts from. Loaded in one
 transaction; rows made on the device get ids from 1,000,000,000 up so they never collide with
 cloud rows. Then everyone signs in on the device with their usual password, offline.
 Verified: API test 13/13 and a browser test 4/4 against a temporary cloud shop.
-- Not yet: the token is kept in `device.json` in the app's data folder; moving it to Windows'
-  protected storage (Electron safeStorage) is a phase 4 item. Offline sign-in is allowed for
-  every downloaded user; the 7-day rule waits for sync (phase 3), which keeps users current.
+- Offline sign-in is allowed for every user the device has; sync (phase 3) keeps that list
+  current — a user deactivated on the web is deactivated on the device at its next pull.
+
+**Phase 3 (done, 2026-10-02):** two-way sync. Device: triggers capture every change to a synced
+table into a local outbox (stock as how much it changed); `device/syncWorker.js` pushes it and
+pulls the shop's changes every 10s and on demand. Cloud: `POST /api/sync/push` applies each event
+once (per-device applied-up-to counter), stock as deltas, other columns last-write-wins, name
+clashes kept twice with the device's prefix, anything else to `sync_rejections`;
+`GET /api/sync/pull` reads the feed by transaction-id window (migration 033), so a late commit
+is never skipped. Shared table map: `ExpressBackend/utils/syncTables.js`.
+- Changed from the plan: the cursor is a transaction id (`pg_snapshot_xmin`), not a feed id;
+  push accepts any higher sequence number, since a rolled-back device transaction uses one up.
+- Found by the simulator and fixed: "sync now" could join a cycle that started before the
+  change it was meant to send; a value the cloud rejected (a taken username) stopped every
+  later pull on that device — the local row now gives way, with the device's prefix.
+
+**Phase 4 (done, 2026-10-02):** visibility. Owner's Devices page (web) with state, last sync,
+waiting count, clock drift, retire/block and sync issues; a sync badge and offline banners on
+the register; Devices tab in the admin's shop detail and registers needing attention on Health;
+the 3-day warning and 14-day sales block; offline voucher payments need the owner's password;
+the token and session key encrypted with Electron safeStorage; feed and sync log kept 30 days.
+- `device/scripts/sync-test.js` (two registers, the web app, the internet cut and restored):
+  28/28, run repeatedly.
+- Not yet: an offline voucher redemption approved by the owner isn't flagged for review in the
+  cloud (it's logged on the device only).
+
+**Phase 5, Windows (installer done; pilot next):** `npm run dist` in `device/` builds
+`dist/POS Setup <version>.exe` (NSIS, per-user install, ~127 MB). It carries the backend and the
+web build but never `Development.env`, `certs/`, `scripts/` or `migrations/`. The app trusts the
+Windows certificate store, picks the next free port if 4100 is taken, and was tested end to end
+from the packed build: setup, sign-in, a sale, the sale in the cloud, the token encrypted.
+- Before shops use it: set the real cloud address as the app's default (`POS_CLOUD_URL`, today
+  `https://localhost:4000`), sign the installer (Windows SmartScreen warns about unsigned ones),
+  add an app icon and auto-update, and run the pilot (a real shop, load-shedding days included,
+  one true plug-pull).
+- Not built: the bank/QR payment flow on a device (cloud-only; see the nested-transaction note
+  above).
 
 ## Goal
 

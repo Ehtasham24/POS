@@ -4,7 +4,24 @@ const path = require("path");
 const { app, BrowserWindow, dialog, session } = require("electron");
 const { startDevice } = require("../runtime");
 
-const PORT = 4100;
+const net = require("net");
+
+// The app's own server listens on this machine only. 4100 unless something else holds it —
+// another program, or a second copy of the app under another Windows user — then the next free
+// one. (A changed port only means signing in again.)
+const PREFERRED_PORT = 4100;
+const freePort = () =>
+  new Promise((resolve) => {
+    const attempt = (port) => {
+      const probe = net.createServer();
+      probe.once("error", () => attempt(port && port < PREFERRED_PORT + 20 ? port + 1 : 0));
+      probe.listen(port, "127.0.0.1", () => {
+        const { port: found } = probe.address();
+        probe.close(() => resolve(found));
+      });
+    };
+    attempt(PREFERRED_PORT);
+  });
 
 // Two copies of the app would open the same database folder at once and corrupt it: a second
 // launch just brings the running window forward.
@@ -35,7 +52,7 @@ if (!app.requestSingleInstanceLock()) {
     try {
       device = await startDevice({
         dataDir: path.join(app.getPath("userData"), "pos-data"),
-        port: PORT,
+        port: await freePort(),
         devShop: process.env.POS_DEV_SHOP,
       });
       await waitForServer(device.url);
