@@ -4,6 +4,7 @@ import { HiOutlineSun, HiOutlineMoon } from "react-icons/hi2";
 import Logo from "components/Logo";
 import { useAuth } from "auth/AuthContext";
 import useTheme from "hooks/useTheme";
+import useDeviceStatus from "hooks/useDeviceStatus";
 
 // Deliberately plain English, not routed through i18n/translations.js — same reasoning as
 // the rest of the admin console (pages/Admin/index.jsx's own top comment): this portal's
@@ -24,6 +25,7 @@ export default function AdminLoginPage() {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const deviceStatus = useDeviceStatus();
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -63,43 +65,62 @@ export default function AdminLoginPage() {
           <p className="text-sm text-gray-500 dark:text-gray-400">Sign in to the admin console</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-4">
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">Username</label>
-            <input
-              type="text"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
-              autoFocus
-              autoComplete="username"
-              className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
-          <div>
-            <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">Password</label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="current-password"
-              className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
-            />
-          </div>
-
-          {error && (
-            <p className="rounded-lg bg-danger-50 px-3 py-2 text-sm text-danger-600 dark:bg-danger-500/10 dark:text-danger-400">
-              {error}
+        {/* The admin console belongs to the cloud: a shop's own register (the Windows/Android
+            app) has only its shop's people in its database, never the platform admin. */}
+        {deviceStatus?.device ? (
+          <div className="space-y-4 text-center">
+            <p className="text-sm text-gray-600 dark:text-gray-300">
+              The admin console isn't part of this register app — it runs on the web, where every shop's
+              data is.
             </p>
-          )}
+            <a
+              href={`${deviceStatus.cloudUrl}/admin/login`}
+              target="_blank"
+              rel="noreferrer"
+              className="block w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700"
+            >
+              Open the admin console in the browser
+            </a>
+          </div>
+        ) : (
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">Username</label>
+              <input
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoFocus
+                autoComplete="username"
+                className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+              />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs font-semibold text-gray-500 dark:text-gray-400">Password</label>
+              <input
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                className="block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100"
+              />
+            </div>
 
-          <button
-            type="submit"
-            disabled={submitting || !username || !password}
-            className="w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {submitting ? "Signing in…" : "Sign In"}
-          </button>
-        </form>
+            {error && (
+              <p className="rounded-lg bg-danger-50 px-3 py-2 text-sm text-danger-600 dark:bg-danger-500/10 dark:text-danger-400">
+                {error}
+              </p>
+            )}
+
+            <button
+              type="submit"
+              disabled={submitting || !username || !password}
+              className="w-full rounded-lg bg-primary-600 py-2.5 text-sm font-semibold text-white-A700 transition-colors hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {submitting ? "Signing in…" : "Sign In"}
+            </button>
+          </form>
+        )}
 
         <Link
           to="/login"
