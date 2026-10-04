@@ -12,42 +12,9 @@ const path = require("path");
 const { signToken } = require("../../ExpressBackend/utils/auth");
 const { systemPool: cloudDb } = require("../../ExpressBackend/Db");
 const { startDevice, stopDevice, killDevice, client, login } = require("./harness");
+const { CLOUD, DEVICE_ENV, sleep, createLine, cloudCall, removeCloudShop, openRegister, syncNow } = require("./cloudHarness");
 
-const CLOUD = process.env.POS_CLOUD_URL || "https://localhost:4000";
 const DATA = path.join(__dirname, "..", "data", "sync-test");
-const DEVICE_ENV = {
-  POS_CLOUD_URL: CLOUD,
-  NODE_EXTRA_CA_CERTS: path.join(__dirname, "..", "..", "mkcert-rootCA.pem"),
-  NODE_TLS_REJECT_UNAUTHORIZED: "",
-};
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-// The internet, for one register: a TCP pass-through to the cloud that can be cut and restored.
-// TLS goes through untouched, so the register still checks the cloud's certificate.
-const net = require("net");
-const createLine = (listenPort, target) => {
-  const sockets = new Set();
-  let server = null;
-  const connect = () =>
-    new Promise((resolve) => {
-      server = net.createServer((inbound) => {
-        const outbound = net.connect(target.port, target.host);
-        for (const s of [inbound, outbound]) {
-          sockets.add(s);
-          s.on("close", () => sockets.delete(s));
-          s.on("error", () => {});
-        }
-        inbound.pipe(outbound).pipe(inbound);
-      });
-      server.listen(listenPort, "127.0.0.1", resolve);
-    });
-  const cut = () =>
-    new Promise((resolve) => {
-      for (const s of sockets) s.destroy();
-      server.close(() => resolve());
-    });
-  return { connect, cut, url: `https://localhost:${listenPort}` };
-};
 
 let pass = 0;
 let fail = 0;
@@ -55,59 +22,6 @@ const check = (label, ok, detail) => {
   if (ok) pass++;
   else fail++;
   console.log(`${ok ? "  OK  " : "  FAIL"} ${label}${ok ? "" : `  -> ${JSON.stringify(detail).slice(0, 500)}`}`);
-};
-
-const cloudCall = async (token, method, url, body) => {
-  const res = await fetch(CLOUD + url, {
-    method,
-    headers: { "content-type": "application/json", cookie: `pos_session=${token}` },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  return { status: res.status, body: await res.json().catch(() => null) };
-};
-
-const removeCloudShop = async (shopId) => {
-  const { rows } = await cloudDb.query(
-    `SELECT c.table_name FROM information_schema.columns c
-     JOIN information_schema.tables t ON t.table_schema = c.table_schema AND t.table_name = c.table_name
-     WHERE c.table_schema = 'public' AND c.column_name = 'shop_id' AND t.table_type = 'BASE TABLE'`
-  );
-  let pending = rows.map((r) => r.table_name);
-  for (let pass2 = 0; pass2 < 10 && pending.length; pass2++) {
-    const failed = [];
-    for (const table of pending) {
-      try {
-        await cloudDb.query(`DELETE FROM "${table}" WHERE shop_id = $1`, [shopId]);
-      } catch {
-        failed.push(table);
-      }
-    }
-    pending = failed;
-  }
-  await cloudDb.query(`DELETE FROM shops WHERE id = $1`, [shopId]);
-};
-
-// A register: set up against the cloud shop, signed in as the owner.
-const openRegister = async (name, port, owner, cloudUrl = CLOUD) => {
-  const dataDir = path.join(DATA, name);
-  const device = await startDevice({ dataDir, port, env: DEVICE_ENV });
-  const anon = client(device.base, "");
-  const started = await anon("POST", "/api/device/setup", { username: owner.username, password: owner.password, deviceName: name, cloudUrl });
-  let status;
-  for (let i = 0; i < 240; i++) {
-    await sleep(250);
-    status = (await anon("GET", "/api/device/status")).body;
-    if (status.setup.status !== "running") break;
-  }
-  if (started.status !== 202 || !status.setUp) throw new Error(`${name} setup failed: ${JSON.stringify(status.setup)}`);
-  const api = await login(device.base, owner.username, owner.password);
-  return { name, port, dataDir, device, api, anon, prefix: status.receiptPrefix };
-};
-
-const syncNow = async (register) => {
-  const res = await register.anon("POST", "/api/device/sync-now");
-  if (res.status !== 200 || res.body.lastError) throw new Error(`${register.name} sync failed: ${JSON.stringify(res.body)}`);
-  return res.body;
 };
 
 const stockOn = async (api, productName) => {
@@ -145,12 +59,12 @@ const cloudStock = async (shopId, productName) => {
     await cloudCall(web, "POST", "/api/shifts", { openingFloat: 0 });
 
     fs.rmSync(DATA, { recursive: true, force: true });
-    const A = await openRegister("Counter PC", 4191, owner);
+    const A = await openRegister(DATA, "Counter PC", 4191, owner);
     // P2 reaches the cloud through a line the test can cut (section 10).
     const cloudAddress = new URL(CLOUD);
     const line = createLine(4994, { host: cloudAddress.hostname, port: Number(cloudAddress.port) || 443 });
     await line.connect();
-    const B = await openRegister("Back PC", 4193, owner, line.url);
+    const B = await openRegister(DATA, "Back PC", 4193, owner, line.url);
     registers.push(A, B);
     check(`Two registers set up (${A.prefix}, ${B.prefix})`, A.prefix === "P1" && B.prefix === "P2", [A.prefix, B.prefix]);
     for (const r of registers) await r.api("POST", "/api/shifts", { openingFloat: 0 });

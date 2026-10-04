@@ -1,11 +1,11 @@
 // A small client for the shop's cloud API, used by first-run setup (as the owner, by session
-// cookie) and by the sync worker (as the device, by its token).
+// cookie), and by the sync worker and history reads (as the device, by its token).
 const cloudClient = (cloudUrl, { deviceToken } = {}) => {
   let cookie = null;
   const base = String(cloudUrl).replace(/\/+$/, "");
 
-  const call = async (method, path, { body } = {}) => {
-    const headers = { "content-type": "application/json" };
+  const call = async (method, path, { body, headers: extraHeaders, timeoutMs = 30000 } = {}) => {
+    const headers = { "content-type": "application/json", ...extraHeaders };
     if (cookie) headers.cookie = cookie;
     if (deviceToken) headers.authorization = `Device ${deviceToken}`;
     let res;
@@ -14,7 +14,7 @@ const cloudClient = (cloudUrl, { deviceToken } = {}) => {
         method,
         headers,
         body: body ? JSON.stringify(body) : undefined,
-        signal: AbortSignal.timeout(30000),
+        signal: AbortSignal.timeout(timeoutMs),
       });
     } catch (err) {
       const error = new Error(`Can't reach the server at ${base} — check the internet connection (${err.cause?.code || err.name})`);

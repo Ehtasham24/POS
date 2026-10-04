@@ -16,6 +16,7 @@ import { useLanguage } from "i18n/LanguageContext";
 import { useTimezone } from "timezone/TimezoneContext";
 import RefundReceiptModal from "categoriesComponents/RefundReceiptModal";
 import ContactSelect from "creditDebitComponents/ContactSelect";
+import LocalHistoryNote from "components/LocalHistoryNote";
 
 const REFUND_METHODS = ["cash", "card", "store_credit"];
 
@@ -91,6 +92,10 @@ export default function SalesHistoryPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [loading, setLoading] = useState(false);
+  // On a register answering from its own database (offline): the oldest sale it holds, "" if
+  // none. null when the full history was searched (the web, or a register that's online).
+  const [localHistoryFrom, setLocalHistoryFrom] = useState(null);
+  const [localHistoryReason, setLocalHistoryReason] = useState(null);
   const [voidTarget, setVoidTarget] = useState(null); // the sale line item being confirmed
   const [voidReason, setVoidReason] = useState("");
   const [voiding, setVoiding] = useState(false);
@@ -145,6 +150,8 @@ export default function SalesHistoryPage() {
       const data = await apiGet(`/api/BilledHistory?${params.toString()}`);
       // Backend already returns most-recent-first, one page (30 transactions) at a time
       setBatches(data.batches);
+      setLocalHistoryFrom(data.historySource === "local" ? data.historyFrom || "" : null);
+      setLocalHistoryReason(data.historyReason ?? null);
       setTotalPages(data.totalPages);
       setTotalCount(data.totalCount);
       setPage(data.page);
@@ -236,6 +243,11 @@ export default function SalesHistoryPage() {
   return (
     <>
       <AppShell title={t("salesHistory.title")}>
+        {localHistoryFrom !== null && (
+          <div className="mb-4 w-full max-w-4xl">
+            <LocalHistoryNote from={localHistoryFrom} reason={localHistoryReason} />
+          </div>
+        )}
         <div className="w-full max-w-4xl mb-4 flex flex-wrap items-end gap-4 bg-white-A700 dark:bg-gray-900 rounded-xl2 p-4 border border-surface-border dark:border-gray-700">
           <div>
             <label className="block text-gray-700 dark:text-gray-300 font-medium mb-1 text-sm">
@@ -552,6 +564,13 @@ export default function SalesHistoryPage() {
                                                 title={sale.void_reason || ""}
                                               >
                                                 {t("salesHistory.voidedBadge")}
+                                              </span>
+                                            ) : sale.remote ? (
+                                              // An older sale the register doesn't keep (read from
+                                              // the cloud): void/refund need it in the register's
+                                              // own database.
+                                              <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                                                {t("salesHistory.remoteSale")}
                                               </span>
                                             ) : (
                                               <>

@@ -14,18 +14,24 @@ const { runAsTenant } = require("../Db");
 //
 // Sets req.user = { id, username, displayName, role, ... } and req.shop = { id, tier } on
 // success — req.shop is null for a superadmin (migration 022), who belongs to no shop.
+//
+// A shop's register reading history from the cloud (Middleware/deviceReadThrough.js) has no
+// session cookie: that middleware has already checked the device and says who is signed in on
+// it, in req.deviceReadThrough. Everything below then applies to that person as usual.
 async function requireAuth(req, res, next) {
-  const token = req.cookies?.[COOKIE_NAME];
-  if (!token) return next(new ApiError(401, "Not authenticated"));
-
-  let decoded;
-  try {
-    decoded = verifyToken(token);
-  } catch (err) {
-    // Covers both an expired token and a tampered/invalid one — same response either
-    // way (the frontend's isAuthError handling, see utils/api.js, treats both as
-    // "log in again", it doesn't need to distinguish the reason).
-    return next(new ApiError(401, "Session expired — please log in again"));
+  const readThrough = req.deviceReadThrough;
+  let userId = readThrough?.userId;
+  if (!readThrough) {
+    const token = req.cookies?.[COOKIE_NAME];
+    if (!token) return next(new ApiError(401, "Not authenticated"));
+    try {
+      userId = verifyToken(token).id;
+    } catch (err) {
+      // Covers both an expired token and a tampered/invalid one — same response either
+      // way (the frontend's isAuthError handling, see utils/api.js, treats both as
+      // "log in again", it doesn't need to distinguish the reason).
+      return next(new ApiError(401, "Session expired — please log in again"));
+    }
   }
 
   // Re-checked against the DB on every request rather than trusted straight off the JWT
@@ -44,11 +50,11 @@ async function requireAuth(req, res, next) {
   // an *active* query.
   let user;
   try {
-    user = await findUserById(decoded.id);
+    user = await findUserById(userId);
   } catch (err) {
     return next(err instanceof ApiError ? err : new ApiError(503, "Database temporarily unavailable — please try again"));
   }
-  if (!user || !user.isActive) {
+  if (!user || !user.isActive || (readThrough && user.shopId !== readThrough.shopId)) {
     return next(new ApiError(401, "Account no longer active"));
   }
   // A shop being deactivated (e.g. a cancelled subscription) locks out every one of its

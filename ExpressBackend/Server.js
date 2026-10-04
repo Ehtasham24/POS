@@ -26,6 +26,7 @@ const routesHealth = require("./Routes/API/healthRoutes");
 const routesAdmin = require("./Routes/API/adminRoutes");
 const routesShopStatus = require("./Routes/API/shopStatusRoutes");
 const routesDevices = require("./Routes/API/deviceRoutes");
+const deviceReadThrough = require("./Middleware/deviceReadThrough");
 const errorHandler = require("./Middleware/errorHandler");
 const { startShiftAutoCloseSweep } = require("./Sevices/shiftSweep");
 const { recordEgress } = require("./Sevices/egressService");
@@ -125,6 +126,8 @@ const Server = async () => {
   server.use(routesPaymentNotifications); // phone-forwarder webhook, gated by shared secret not auth
   server.use(routesPaymentGateway); // JazzCash/Easypaisa: initiate gated by requireAuth per-route, callback verified by gateway signature not auth
   server.use(routesAuth); // public: login/logout; /me itself requires auth per-route
+  // A shop's register reading Sales History / Sales Report as its signed-in user (utils/readThrough.js)
+  if (!ON_DEVICE) server.use(deviceReadThrough);
   server.use(routesHealth); // public: connectivity ping target
   if (ON_DEVICE) server.use(global.posDevice.routes); // device status and first-run setup (device/deviceRoutes.js)
   server.use(routesUsers);

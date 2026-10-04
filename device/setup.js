@@ -126,9 +126,11 @@ const downloadShop = async ({ db, config, saveConfig, cloud }) => {
 const startSetup = (options) => {
   if (state.status === "running") return false;
   state = { status: "running", step: "starting" };
-  runSetup(options).catch((err) => {
-    progress({ status: "error", message: err.message });
-  });
+  runSetup(options)
+    .then(() => options.onDone?.())
+    .catch((err) => {
+      progress({ status: "error", message: err.message });
+    });
   return true;
 };
 

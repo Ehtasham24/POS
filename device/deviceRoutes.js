@@ -5,6 +5,7 @@
 const path = require("path");
 const express = require(require.resolve("express", { paths: [path.join(__dirname, "..", "ExpressBackend")] }));
 const { startSetup, setupState } = require("./setup");
+const { readThrough } = require("./readThrough");
 
 const APP_VERSION = require("./package.json").version;
 const PLATFORM = process.platform === "android" ? "android" : "windows";
@@ -31,6 +32,9 @@ const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync }) => {
     const state = sync()?.state();
     return Boolean(state?.online && state.lastSyncAt && Date.now() - new Date(state.lastSyncAt).getTime() < 60000);
   };
+
+  // Sales History and Sales Report from the cloud while online, this register's own otherwise.
+  routes.use(readThrough({ config, sync, onlineNow }));
 
   // Mounted ahead of the sales routes (Server.js), so it runs before checkout.
   routes.post("/api/sales/checkout", async (req, res, next) => {
@@ -118,6 +122,9 @@ const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync }) => {
         deviceName: name,
         platform: PLATFORM,
         appVersion: APP_VERSION,
+        // Sync straight away rather than at the worker's next tick: until a first sync, this
+        // register doesn't count as online (Sales History would answer from local data).
+        onDone: () => sync()?.syncNow(),
       });
       if (!started) return res.status(409).send({ message: "Setup is already running" });
       res.status(202).send(setupState());

@@ -15,6 +15,7 @@ import { useFeature } from "auth/useFeature";
 import useUrlFilterState from "hooks/useUrlFilterState";
 import useDebounce from "hooks/useDebounce";
 import { reportPost } from "./reportApi";
+import LocalHistoryNote from "components/LocalHistoryNote";
 
 // Recharts is the heaviest thing on this page — loaded as its own chunk, so the numbers
 // (tiles, tables) show up first on a slow connection and the charts follow.
@@ -178,6 +179,14 @@ const SalesDataComponent = () => {
         <div className="print-area">
           <ReportPrintHeader startDate={queryStart} endDate={queryEnd} filterType={filterType} paymentMethod={paymentMethod} />
 
+          {/* A register answering offline holds only recent sales: say so when the range
+              reaches back past them. */}
+          {summary?.historySource === "local" &&
+            (summary.historyReason === "sending" || !summary.historyFrom || new Date(queryStart) < new Date(summary.historyFrom)) && (
+              <div className="mb-4 printing:hidden">
+                <LocalHistoryNote from={summary.historyFrom} reason={summary.historyReason} />
+              </div>
+            )}
           <ReportKpis summary={summary} />
 
           <p className="mb-2 text-sm font-semibold text-gray-500 dark:text-gray-400">{t("report.paymentMediumBreakdown")}</p>
