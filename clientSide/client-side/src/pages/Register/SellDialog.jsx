@@ -23,8 +23,9 @@ export default function SellDialog({ product, categoryName, inCartQty, onClose, 
   const [lots, setLots] = useState(null); // null = not needed / still loading
   const [lot, setLot] = useState(product.lot || null);
   const [quantity, setQuantity] = useState("1");
+  // Starts empty: the price is chosen for each sale. The last one is offered below the field.
   const lastPrice = getLastPrice(product.productId);
-  const [price, setPrice] = useState(lastPrice ? String(lastPrice) : "");
+  const [price, setPrice] = useState("");
 
   useEffect(() => {
     if (!product.batch_tracked || product.lot) return;

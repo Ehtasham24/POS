@@ -10,10 +10,17 @@ const stockTone = (quantity, threshold) =>
     ? "bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-400"
     : "bg-surface-muted text-gray-600 dark:bg-gray-700 dark:text-gray-300";
 
+// No fixed selling price exists (it's agreed per sale and asked for on every tap), so a tile
+// never shows one as if it were: "Set price", plus the last price as a quiet hint.
+function PriceHint({ price }) {
+  const { t } = useLanguage();
+  return price ? t("register.lastShort", { amount: formatPKR(price) }) : t("register.setPrice");
+}
+
 // The register's product area. Grid = big tap targets for touch tills; list = denser rows
 // for keyboard/scanner users with large catalogs. Both show the same four things a cashier
-// decides on: which product (name + category colour), price, stock, and whether it's
-// already in the sale.
+// decides on: which product (name + category colour), the last price it went for, stock,
+// and whether it's already in the sale.
 export default function ProductGrid({
   products,
   view,
@@ -59,8 +66,8 @@ export default function ProductGrid({
                 <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${stockTone(qty, lowStockThreshold)}`}>
                   {qty <= 0 ? t("register.outOfStock") : t("register.left", { n: qty })}
                 </span>
-                <span className="w-28 shrink-0 whitespace-nowrap text-right text-sm font-semibold text-gray-800 dark:text-gray-100 sm:w-auto">
-                  {price ? formatPKR(price) : <span className="font-normal text-gray-400">{t("register.setPrice")}</span>}
+                <span className="w-28 shrink-0 whitespace-nowrap text-right text-xs text-gray-400 sm:w-auto">
+                  <PriceHint price={price} />
                 </span>
               </button>
             </li>
@@ -95,8 +102,8 @@ export default function ProductGrid({
                 {product.productname}
               </span>
               <span className="mt-auto flex items-end justify-between gap-2">
-                <span className="text-sm font-bold text-gray-800 dark:text-gray-100">
-                  {price ? formatPKR(price) : <span className="text-xs font-medium text-gray-400">{t("register.setPrice")}</span>}
+                <span className="min-w-0 truncate text-xs font-medium text-gray-400">
+                  <PriceHint price={price} />
                 </span>
                 <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-semibold ${stockTone(qty, lowStockThreshold)}`}>
                   {qty <= 0 ? t("register.outOfStock") : t("register.left", { n: qty })}

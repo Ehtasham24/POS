@@ -32,7 +32,7 @@ import useShiftStatus, { isShiftOpenTooLong } from "hooks/useShiftStatus";
 import { apiGet } from "utils/api";
 import * as offlineCache from "offline/cache";
 import { formatPKR } from "utils/money";
-import { loadLastPrices, priceFrom, rememberPrices, loadRegisterView, saveRegisterView } from "utils/posMemory";
+import { loadLastPrices, rememberPrices, loadRegisterView, saveRegisterView } from "utils/posMemory";
 import { buildCategoryColors } from "./categoryColors";
 import ProductGrid from "./ProductGrid";
 import SellDialog from "./SellDialog";
@@ -212,30 +212,12 @@ export default function RegisterPage() {
     pop(line.productId);
   };
 
-  // One tap sells at the price this product last went for on this till; the price stays
-  // editable in the sale. Batch products (which lot?) and never-sold products (what price?)
-  // open the dialog instead.
+  // Every tap asks for the price: products have no fixed selling price, it's agreed with
+  // each customer (the owner's rule), so the register never adds one at a remembered price on
+  // its own. The dialog offers the last price as a one-tap suggestion.
   const pick = (product) => {
     if (product.quantity <= 0) return;
-    const remembered = priceFrom(lastPrices, product.productId);
-    if (product.batch_tracked || product.lot || !remembered) {
-      setDialogProduct(product);
-      return;
-    }
-    if (inCartQty(product.productId) >= product.quantity) {
-      toast.warning(t("register.onlyNLeft", { n: product.quantity }));
-      return;
-    }
-    addLine({
-      id: product.productId,
-      productId: product.productId,
-      productname: product.productname,
-      category_id: product.category_id,
-      quantity: product.quantity,
-      sellingPrice: remembered,
-      sellingQuantity: 1,
-      costPrice: product.buyingprice,
-    });
+    setDialogProduct(product);
   };
 
   // Enter in search: an exact lot code (what a scanner sends) sells that lot; otherwise a
