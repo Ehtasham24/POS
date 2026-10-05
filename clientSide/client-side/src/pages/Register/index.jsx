@@ -22,7 +22,7 @@ import AddProductModal from "categoriesComponents/addProductModel";
 import AddCategoryModal from "categoriesComponents/addCategoryModal";
 import UpdateProductModal from "categoriesComponents/updateProductModal";
 import OpenShiftModal from "categoriesComponents/OpenShiftModal";
-import { addCart } from "cartRedux/cartSlice";
+import { addCart, stockKeyOf } from "cartRedux/cartSlice";
 import { useLanguage } from "i18n/LanguageContext";
 import { useAuth } from "auth/AuthContext";
 import { useToast } from "components/Toast/ToastContext";
@@ -36,6 +36,7 @@ import { loadLastPrices, rememberPrices, loadRegisterView, saveRegisterView } fr
 import { buildCategoryColors } from "./categoryColors";
 import ProductGrid from "./ProductGrid";
 import SellDialog from "./SellDialog";
+import RepeatPricePrompt from "./RepeatPricePrompt";
 
 // Same breakpoint as tailwind.config.js's `posSplit` screen.
 const SPLIT_QUERY = "(min-width: 860px)";
@@ -95,6 +96,8 @@ export default function RegisterPage() {
   const debouncedQuery = useDebounce(query, 250);
   const [lotMatches, setLotMatches] = useState([]);
   const [dialogProduct, setDialogProduct] = useState(null);
+  // A product tapped again while already in the sale: same price as here, or a new one?
+  const [repeatPick, setRepeatPick] = useState(null); // { product, prices }
   const [poppedId, setPoppedId] = useState(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
@@ -191,8 +194,9 @@ export default function RegisterPage() {
       .sort((a, b) => (b.quantity > 0) - (a.quantity > 0) || a.productname.localeCompare(b.productname));
   }, [products, query, activeCategoryId]);
 
+  // Units of one product (or lot) across all its lines in the sale (one line per price).
   const inCartQty = useCallback(
-    (lineId) => cart.find((line) => line.id === lineId)?.sellingQuantity || 0,
+    (stockKey) => cart.reduce((sum, line) => sum + (stockKeyOf(line) === stockKey ? line.sellingQuantity : 0), 0),
     [cart]
   );
   const inCartQtyFor = useCallback(
@@ -217,7 +221,34 @@ export default function RegisterPage() {
   // its own. The dialog offers the last price as a one-tap suggestion.
   const pick = (product) => {
     if (product.quantity <= 0) return;
+    // Already in this sale (a simple product — a batch one goes to the dialog to pick a lot):
+    // ask first whether it's the price it already has here.
+    const prices = product.batch_tracked || product.lot
+      ? []
+      : [...new Set(cart.filter((line) => stockKeyOf(line) === product.productId).map((line) => Number(line.sellingPrice)))];
+    if (prices.length) {
+      setRepeatPick({ product, prices });
+      return;
+    }
     setDialogProduct(product);
+  };
+
+  const addOneMore = (product, price) => {
+    setRepeatPick(null);
+    if (inCartQty(product.productId) >= product.quantity) {
+      toast.warning(t("register.onlyNLeft", { n: product.quantity }));
+      return;
+    }
+    addLine({
+      id: product.productId,
+      productId: product.productId,
+      productname: product.productname,
+      category_id: product.category_id,
+      quantity: product.quantity,
+      sellingPrice: price,
+      sellingQuantity: 1,
+      costPrice: product.buyingprice,
+    });
   };
 
   // Enter in search: an exact lot code (what a scanner sends) sells that lot; otherwise a
@@ -520,6 +551,19 @@ export default function RegisterPage() {
             />
           </div>
         </>
+      )}
+
+      {repeatPick && (
+        <RepeatPricePrompt
+          product={repeatPick.product}
+          prices={repeatPick.prices}
+          onSamePrice={(price) => addOneMore(repeatPick.product, price)}
+          onNewPrice={() => {
+            setDialogProduct(repeatPick.product);
+            setRepeatPick(null);
+          }}
+          onClose={() => setRepeatPick(null)}
+        />
       )}
 
       {dialogProduct && (

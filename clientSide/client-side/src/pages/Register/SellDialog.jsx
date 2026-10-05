@@ -52,9 +52,9 @@ export default function SellDialog({ product, categoryName, inCartQty, onClose, 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [product]);
 
-  const lineId = lot ? `lot-${lot.id}` : product.productId;
+  const stockKey = lot ? `lot-${lot.id}` : product.productId;
   const stock = Number(lot ? lot.qty_remaining : product.quantity) || 0;
-  const available = Math.max(0, stock - (inCartQty(lineId) || 0));
+  const available = Math.max(0, stock - (inCartQty(stockKey) || 0));
   const cost = Number(lot ? lot.buying_price : product.buyingprice) || 0;
   const qtyNum = parseInt(quantity, 10) || 0;
   const priceNum = parseInt(price, 10) || 0;
@@ -72,7 +72,7 @@ export default function SellDialog({ product, categoryName, inCartQty, onClose, 
   const submit = () => {
     if (!canAdd) return;
     onAdd({
-      id: lineId,
+      id: stockKey,
       productId: product.productId,
       productname: product.productname,
       category_id: product.category_id,

@@ -2,8 +2,14 @@ import { createSlice } from "@reduxjs/toolkit";
 
 // Cart line shape: { id, productId, productname, category_id, quantity (max sellable —
 // product.quantity for simple items, lot.qty_remaining for batch items), sellingPrice,
-// sellingQuantity, lotId?, lotCode? }. `id` is the product id for simple items or
-// `lot-{lotId}` for batch items, so the same physical lot never merges with another one.
+// sellingQuantity, lotId?, lotCode?, stockKey }. `stockKey` is the product id for simple
+// items or `lot-{lotId}` for batch items, so the same physical lot never merges with another
+// one. There's one line per stockKey and price: more of it at the same price joins that line,
+// at a different price it gets a line of its own (selling prices are agreed per sale), never
+// silently taking the existing line's price. `id` is the line's own: the stockKey for the
+// first line, made unique for the others.
+export const stockKeyOf = (line) => line.stockKey ?? line.id;
+
 const initialState = {
   carts: [],
 };
@@ -13,21 +19,24 @@ export const CartSlice = createSlice({
   initialState,
   reducers: {
     addCart(state, action) {
-      const addQty = action.payload.sellingQuantity || 1;
-      const existingProduct = state.carts.find(
-        (item) => item.id === action.payload.id
-      );
-      if (existingProduct) {
-        existingProduct.sellingQuantity = Math.min(
-          existingProduct.sellingQuantity + addQty,
-          existingProduct.quantity
-        );
-      } else {
-        state.carts.push({
-          ...action.payload,
-          sellingQuantity: Math.min(addQty, action.payload.quantity || addQty),
-        });
+      const line = action.payload;
+      const addQty = line.sellingQuantity || 1;
+      const stockKey = stockKeyOf(line);
+      const price = Number(line.sellingPrice);
+      const existing = state.carts.find((item) => stockKeyOf(item) === stockKey && Number(item.sellingPrice) === price);
+      if (existing) {
+        existing.sellingQuantity = Math.min(existing.sellingQuantity + addQty, existing.quantity);
+        return;
       }
+      const taken = new Set(state.carts.map((item) => item.id));
+      let id = stockKey;
+      for (let n = 2; taken.has(id); n++) id = `${stockKey}#${n}`;
+      state.carts.push({
+        ...line,
+        id,
+        stockKey,
+        sellingQuantity: Math.min(addQty, line.quantity || addQty),
+      });
     },
     clearCart(state) {
       state.carts = [];
