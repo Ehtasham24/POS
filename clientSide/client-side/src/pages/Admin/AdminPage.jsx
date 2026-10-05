@@ -5,7 +5,7 @@ import AdminHeader from "./AdminHeader";
 // heading row (title, one-line description, actions on the right) when it has one.
 export default function AdminPage({ title, heading, subtitle, actions, maxWidth = "max-w-6xl", children }) {
   return (
-    <div className="min-h-screen bg-surface-subtle dark:bg-gray-900">
+    <div className="min-h-screen bg-surface-subtle safe-pt safe-pb dark:bg-gray-900">
       <Helmet>
         <title>{title ? `${title} · Platform Admin` : "Platform Admin · POS System"}</title>
       </Helmet>

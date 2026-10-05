@@ -61,12 +61,12 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="relative flex min-h-screen items-center justify-center bg-surface-subtle px-4 dark:bg-gray-900">
+    <div className="relative flex min-h-screen items-center justify-center bg-surface-subtle px-4 safe-pt safe-pb dark:bg-gray-900">
       <button
         type="button"
         onClick={toggleTheme}
         aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-        className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
+        className="absolute right-4 safe-top-4 flex h-9 w-9 items-center justify-center rounded-lg text-gray-500 transition-colors hover:bg-surface-muted dark:text-gray-400 dark:hover:bg-gray-700"
       >
         {theme === "dark" ? <HiOutlineSun className="text-lg" /> : <HiOutlineMoon className="text-lg" />}
       </button>

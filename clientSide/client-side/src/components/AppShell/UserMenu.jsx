@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { HiOutlineUserCircle, HiOutlineArrowRightOnRectangle } from "react-icons/hi2";
 import { useAuth } from "auth/AuthContext";
 import { useLanguage } from "i18n/LanguageContext";
+import TextSizePicker from "components/TextSizePicker";
 
 // Sits next to OfflineStatusBadge/LowStockBell in both of AppShell's header clusters
 // (mobile top bar, page top bar) — same small-status-widget pattern those two already
@@ -51,7 +52,7 @@ export default function UserMenu() {
         </span>
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1.5 w-48 rounded-xl border border-surface-border bg-white-A700 py-1.5 shadow-modal dark:border-gray-700 dark:bg-gray-800">
+        <div className="absolute right-0 top-full z-30 mt-1.5 w-56 rounded-xl border border-surface-border bg-white-A700 py-1.5 shadow-modal dark:border-gray-700 dark:bg-gray-800">
           <div className="border-b border-surface-border px-3.5 py-2 dark:border-gray-700">
             <p className="truncate text-sm font-semibold text-gray-800 dark:text-gray-100">
               {user.displayName}
@@ -59,6 +60,11 @@ export default function UserMenu() {
             <p className="text-xs capitalize text-gray-500 dark:text-gray-400">
               {user.role === "owner" ? t("auth.roleOwner") : t("auth.roleCashier")}
             </p>
+          </div>
+          {/* Here as well as in Settings: Settings is the owner's, and a cashier needs this too. */}
+          <div className="border-b border-surface-border px-3.5 py-2.5 dark:border-gray-700">
+            <p className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{t("settings.textSizeTitle")}</p>
+            <TextSizePicker compact />
           </div>
           <button
             type="button"

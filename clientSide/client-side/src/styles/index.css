@@ -10,7 +10,12 @@
    of whether every individual source of overflow has been found. */
 html,
 body {
+  /* clip, not hidden: "hidden" on body makes it a scroll container of its own (that never
+     scrolls), and every position:sticky bar inside then stops sticking — the phone header
+     scrolled away with the page. "clip" cuts the overflow without that. hidden stays as the
+     fallback for browsers without clip. */
   overflow-x: hidden;
+  overflow-x: clip;
   max-width: 100%;
 }
 body {
@@ -120,4 +125,36 @@ table {
 .no-spin::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
+}
+
+/* Phones that draw the app under the status bar and the gesture bar — the Android app
+   (Capacitor, edge to edge) and an installed web app (viewport-fit=cover): these keep content
+   clear of them, while the header's own colour still fills the status bar. On the Android app
+   Capacitor supplies the sizes as --safe-area-inset-* (0 when it already made room natively);
+   elsewhere the browser's env() does; 0 on a desktop. */
+:root {
+  --safe-top: var(--safe-area-inset-top, env(safe-area-inset-top, 0px));
+  --safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px));
+}
+.safe-pt {
+  padding-top: var(--safe-top);
+}
+.safe-pb {
+  padding-bottom: var(--safe-bottom);
+}
+.safe-top-4 {
+  top: calc(1rem + var(--safe-top));
+}
+.safe-bottom-3 {
+  bottom: calc(0.75rem + var(--safe-bottom));
+}
+.safe-bottom-6 {
+  bottom: calc(1.5rem + var(--safe-bottom));
+}
+/* The desktop layout's page bar is the top of the screen only above the md breakpoint
+   (tailwind.config.js: md is max-width 1050px); below it the mobile header is. */
+@media (min-width: 1051px) {
+  .safe-pt-wide {
+    padding-top: var(--safe-top);
+  }
 }

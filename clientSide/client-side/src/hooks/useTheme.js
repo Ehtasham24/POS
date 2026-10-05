@@ -21,6 +21,9 @@ export default function useTheme() {
       root.classList.remove("dark");
     }
     localStorage.setItem(STORAGE_KEY, theme);
+    // In the Android app the status bar's icons sit on the page's own background (edge to
+    // edge): light icons on the dark theme, dark ones on the light (mobile MainActivity.java).
+    window.PosShell?.setTheme?.(theme);
   }, [theme]);
 
   const toggleTheme = () => {

@@ -70,7 +70,7 @@ export default function DeviceSetup() {
   const stepIndex = STEPS.indexOf(setup?.step);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-surface-subtle px-4 dark:bg-gray-900">
+    <div className="flex min-h-screen items-center justify-center bg-surface-subtle px-4 safe-pt safe-pb dark:bg-gray-900">
       <div className="w-full max-w-md rounded-2xl border border-surface-border bg-white-A700 p-8 shadow-card dark:border-gray-700 dark:bg-gray-800">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">
           <Logo className="h-12 w-12" />

@@ -7,6 +7,10 @@ import store from "./store/store";
 import { Provider } from "react-redux";
 import "./styles/font.css";
 import * as serviceWorkerRegistration from "./serviceWorkerRegistration";
+import { applyTextSize } from "./utils/textSize";
+
+// Before the first render, so the page never shows at one size and then jumps to another.
+applyTextSize();
 
 const container = document.getElementById("root");
 const root = createRoot(container);

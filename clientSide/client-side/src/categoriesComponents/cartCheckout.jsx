@@ -120,7 +120,7 @@ function CartCheckout() {
         onClick={handleClick}
         style={position ? { left: position.x, top: position.y, right: "auto", bottom: "auto" } : undefined}
         aria-label="Open cart (drag to move)"
-        className="fixed bottom-6 right-6 z-40 flex h-14 w-14 touch-none items-center justify-center rounded-full bg-primary-600 text-white-A700 shadow-modal transition-colors hover:bg-primary-700"
+        className="fixed safe-bottom-6 right-6 z-40 flex h-14 w-14 touch-none items-center justify-center rounded-full bg-primary-600 text-white-A700 shadow-modal transition-colors hover:bg-primary-700"
       >
         <HiOutlineShoppingCart className="text-2xl" />
         {itemCount > 0 && (
@@ -140,7 +140,7 @@ function CartCheckout() {
           {/* left-64/md:left-0 mirrors AppShell's own pl-64/md:pl-0 — clears the
               persistent desktop sidebar (visible above the "md" breakpoint, >1050px),
               which otherwise painted over the left edge of this sheet. */}
-          <div className="fixed left-64 right-0 bottom-0 z-50 flex h-[min(75vh,38rem)] flex-col rounded-t-2xl bg-white-A700 shadow-modal dark:bg-gray-800 md:left-0">
+          <div className="fixed left-64 right-0 bottom-0 z-50 flex h-[min(75vh,38rem)] flex-col rounded-t-2xl bg-white-A700 shadow-modal safe-pb dark:bg-gray-800 md:left-0">
             <div className="min-h-0 flex-1">
               <CartPanel onCheckedOut={() => setExpanded(false)} onClose={() => setExpanded(false)} />
             </div>

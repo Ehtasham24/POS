@@ -516,7 +516,7 @@ export default function RegisterPage() {
         <button
           type="button"
           onClick={() => setSheetOpen(true)}
-          className="fixed inset-x-3 bottom-3 z-30 flex h-14 items-center justify-between rounded-2xl bg-primary-600 px-5 text-white-A700 shadow-modal"
+          className="fixed inset-x-3 safe-bottom-3 z-30 flex h-14 items-center justify-between rounded-2xl bg-primary-600 px-5 text-white-A700 shadow-modal"
         >
           <span className="flex items-center gap-2 text-sm font-semibold">
             <HiOutlineShoppingCart className="text-lg" />
@@ -530,7 +530,7 @@ export default function RegisterPage() {
       {!isSplit && sheetOpen && (
         <>
           <div className="fixed inset-0 z-40 bg-gray-900/60" onClick={() => setSheetOpen(false)} />
-          <div className="fixed inset-x-0 bottom-0 z-50 flex h-[min(88vh,44rem)] flex-col rounded-t-2xl bg-white-A700 shadow-modal dark:bg-gray-800">
+          <div className="fixed inset-x-0 bottom-0 z-50 flex h-[min(88vh,44rem)] flex-col rounded-t-2xl bg-white-A700 shadow-modal safe-pb dark:bg-gray-800">
             <CartPanel
               onSold={refreshAfterChange}
               onCheckedOut={() => setSheetOpen(false)}

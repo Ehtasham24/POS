@@ -7,6 +7,7 @@ import {
   HiOutlineDocumentText,
   HiOutlineReceiptRefund,
   HiOutlineGlobeAlt,
+  HiOutlineMagnifyingGlassPlus,
 } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { useToast } from "components/Toast/ToastContext";
@@ -19,6 +20,7 @@ import { DEFAULT_RECEIPT_TERMS } from "utils/receiptDefaults";
 import UsersCard from "./UsersCard";
 import ForwarderCard from "./ForwarderCard";
 import { useFeature } from "auth/useFeature";
+import TextSizePicker from "components/TextSizePicker";
 
 const updateSetting = (key, value) => apiPut("/api/settings", { key, value: String(value) });
 
@@ -33,6 +35,28 @@ const SUPPORTED_TIMEZONES = (() => {
     return [];
   }
 })();
+
+// This device's text size (utils/textSize.js) — not a shop setting, so it applies at once and
+// needs no saving, and it doesn't wait for the shop's settings to load.
+function TextSizeCard() {
+  const { t } = useLanguage();
+  return (
+    <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
+      <div className="flex items-start gap-4">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
+          <HiOutlineMagnifyingGlassPlus className="text-xl text-primary-600 dark:text-primary-400" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <h2 className="font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">{t("settings.textSizeTitle")}</h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{t("settings.textSizeDesc")}</p>
+          <div className="mt-4">
+            <TextSizePicker />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function PrinterCard() {
   const toast = useToast();
@@ -228,7 +252,10 @@ export default function SettingsPage() {
   if (!settings) {
     return (
       <AppShell title={t("settings.title")}>
-        <p className="text-gray-500 dark:text-gray-400">{t("settings.loading")}</p>
+        <div className="mx-auto flex max-w-2xl flex-col gap-6">
+          <TextSizeCard />
+          <p className="text-gray-500 dark:text-gray-400">{t("settings.loading")}</p>
+        </div>
       </AppShell>
     );
   }
@@ -236,6 +263,7 @@ export default function SettingsPage() {
   return (
     <AppShell title={t("settings.title")}>
       <div className="mx-auto flex max-w-2xl flex-col gap-6">
+        <TextSizeCard />
         <div className="rounded-2xl border border-surface-border bg-white-A700 p-6 shadow-card dark:border-gray-800 dark:bg-gray-800">
           <div className="flex items-start gap-4">
             <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-primary-50 dark:bg-gray-700">
