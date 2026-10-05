@@ -1,14 +1,12 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
-const { shopTimeToUtc } = require("../utils/shopTime");
+const { shopTimeToUtc, systemTimeZone, isKnownTimeZone } = require("../utils/shopTime");
 const { withCache, invalidate } = require("../utils/cache");
 
 // This machine's own OS timezone — the sensible zero-configuration default ("by default use
 // whichever timezone the system is running in"). Resolved once at startup, not per-call: it
-// can't change while the process is running.
-const DEFAULT_TIMEZONE = Intl.DateTimeFormat().resolvedOptions().timeZone;
-const VALID_TIMEZONES = new Set(Intl.supportedValuesOf("timeZone"));
-const isValidTimezone = (tz) => typeof tz === "string" && VALID_TIMEZONES.has(tz);
+// can't change while the process is running. (utils/shopTime.js: also on Android, without Intl.)
+const DEFAULT_TIMEZONE = systemTimeZone();
 
 // Tiny key-value table, but read constantly — not just by the Settings page: every
 // sales list/report/void query calls getBusinessTimezone() below (sometimes more than
@@ -39,14 +37,14 @@ const getSettings = async (shopId) => {
 // silently break every date-boundary check in the app.
 const getBusinessTimezone = async (shopId) => {
   const settings = await getSettings(shopId);
-  return isValidTimezone(settings.timezone) ? settings.timezone : DEFAULT_TIMEZONE;
+  return (await isKnownTimeZone(settings.timezone)) ? settings.timezone : DEFAULT_TIMEZONE;
 };
 
 // A date filter's two ends, typed on the shop's own clock, as the UTC times the sale/stock
 // columns hold — see utils/shopTime.js for why comparing them directly was wrong.
 const shopRangeToUtc = async (startDate, endDate, shopId) => {
   const timeZone = await getBusinessTimezone(shopId);
-  const range = [startDate, endDate].map((value) => (value ? shopTimeToUtc(value, timeZone) : null));
+  const range = await Promise.all([startDate, endDate].map((value) => (value ? shopTimeToUtc(value, timeZone) : null)));
   if (range.includes(null)) {
     throw new ApiError(400, "Invalid date inputs. Please provide valid start and end dates.");
   }
@@ -59,7 +57,7 @@ const updateSetting = async (key, value, shopId) => {
   // offers real IANA zone names as options (Intl.supportedValuesOf('timeZone') on the
   // frontend too) so this should never actually trigger from normal use; it's here in case
   // something else ever calls this endpoint directly.
-  if (key === "timezone" && value && !isValidTimezone(value)) {
+  if (key === "timezone" && value && !(await isKnownTimeZone(value))) {
     throw new ApiError(400, `"${value}" is not a recognized timezone`);
   }
 
@@ -73,4 +71,4 @@ const updateSetting = async (key, value, shopId) => {
   return result.rows[0];
 };
 
-module.exports = { getSettings, updateSetting, getBusinessTimezone, shopRangeToUtc, isValidTimezone, DEFAULT_TIMEZONE };
+module.exports = { getSettings, updateSetting, getBusinessTimezone, shopRangeToUtc, DEFAULT_TIMEZONE };

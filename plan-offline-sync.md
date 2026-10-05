@@ -48,9 +48,29 @@ Status: phases 1–4 done for Windows and its installer built (2026-10-02); the 
   Bank/QR payments are cloud-only in this plan; before they ever run on a device, switch it to
   one transaction with a SAVEPOINT around the sale.
 
-**Still to do in phase 0:** Android build (Capacitor + nodejs-mobile, on a phone or an
-emulator); then the PGlite vs SQLite decision (so far PGlite has passed everything). Windows
-goes first: phases 1–5 for Windows, then Android (owner's decision, 2026-10-02).
+**Android, phase 0 (done, 2026-10-05):** `mobile/` is a Capacitor 8 app; capacitor-nodejs
+(nodejs-mobile, Node 18.20.4) runs the same device runtime, backend and PGlite inside it
+(`mobile/node/index.js`), and `www/index.html` opens the POS from it once it answers. Built with
+`npm run apk` in `mobile/` (arm64 only, ~76 MB), installed with `npm run phone`. On a Redmi 13
+(Android 16): owner sign-in, 40 checkouts at median 61ms / p95 127ms, Sales History 51ms, and 5
+force-stops in the middle of selling with every confirmed receipt present and stock + units sold
+equal to opening stock (9/9). **PGlite stays; no SQLite needed.** Found on the way:
+- nodejs-mobile has no `Intl`. The backend's timezone work (`utils/shopTime.js`) falls back to
+  the database's own timezone data there (`AT TIME ZONE`, `pg_timezone_names`); the cloud keeps
+  using Intl. The device smoke test passes 22/22 with Intl removed.
+- Android's build unpacks `*.gz` assets (PGlite's extension bundles); `bundle-node.js` ships them
+  as `*.gz.keep` and `node/index.js` names them back.
+- capacitor-nodejs copied the whole Node project out of the APK on every launch (~11s);
+  `scripts/patch-plugin.js` (postinstall) makes it copy only after an install or update.
+- Start time: ~10s (first start after install ~20s): ~4s opening PGlite, ~2.5s loading the
+  backend's files, the rest Android and Node starting. Bundling the backend into one file is the
+  next saving.
+- No app-data backup (`allowBackup=false`): a restored copy on another phone would sell as the
+  same register. Plain HTTP is allowed to 127.0.0.1 only.
+
+Still to do for Android: the setup screen against the real cloud (the prototype makes a local
+shop, `m_owner` / `M-Owner-123`), the device token in the Android Keystore, the phone's own
+timezone as the default, an app icon, and a release (signed) build.
 
 **Phase 1 (done, 2026-10-02):** migration 032 applied to the cloud — `shops.max_devices`
 (admin console, shop edit form), `devices`, `sync_log`, `sync_rejections`, a `uuid` on every

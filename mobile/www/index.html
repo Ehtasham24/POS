@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>POS</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #f8fafc; --ink: #1f2937; --muted: #6b7280; --accent: #4f46e5; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #111827; --ink: #f3f4f6; --muted: #9ca3af; --accent: #818cf8; } }
+      html, body { height: 100%; margin: 0; }
+      body { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px;
+             background: var(--bg); color: var(--ink); font: 15px/1.4 system-ui, sans-serif; padding: 0 16px; text-align: center; }
+      .spinner { width: 40px; height: 40px; border-radius: 50%; border: 4px solid color-mix(in srgb, var(--accent) 20%, transparent);
+                 border-top-color: var(--accent); animation: spin 0.9s linear infinite; }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      #status { color: var(--muted); }
+      #error { display: none; max-width: 100%; white-space: pre-wrap; text-align: left; font: 12px/1.4 monospace; color: #dc2626;
+               max-height: 50vh; overflow: auto; }
+    </style>
+  </head>
+  <body>
+    <div class="spinner" id="spinner"></div>
+    <div><strong>POS</strong></div>
+    <div id="status">Starting the register…</div>
+    <pre id="error"></pre>
+    <script>
+      // The backend (nodejs/index.js) starts with the app; this waits until it answers, then
+      // opens the POS from it. The first start creates the database and takes longer.
+      const BACKEND = "http://127.0.0.1:4100";
+      const status = document.getElementById("status");
+      const errorBox = document.getElementById("error");
+      const started = Date.now();
+
+      const showError = (message) => {
+        document.getElementById("spinner").style.display = "none";
+        status.textContent = "The register couldn't start.";
+        errorBox.style.display = "block";
+        errorBox.textContent += message + "\n";
+      };
+      const nodejs = window.Capacitor?.Plugins?.CapacitorNodeJS;
+      nodejs?.addListener("startup-error", (event) => showError(String(event.args?.[0] ?? "")));
+
+      const wait = async () => {
+        for (;;) {
+          try {
+            // no-cors: only "is it answering" matters here, and the page's own origin differs.
+            await fetch(`${BACKEND}/api/health`, { mode: "no-cors", cache: "no-store" });
+            location.replace(`${BACKEND}/`);
+            return;
+          } catch {
+            const seconds = Math.round((Date.now() - started) / 1000);
+            if (seconds > 8) status.textContent = `Starting the register… (${seconds}s — the first start sets up the database)`;
+            await new Promise((r) => setTimeout(r, 300));
+          }
+        }
+      };
+      wait();
+    </script>
+  </body>
+</html>

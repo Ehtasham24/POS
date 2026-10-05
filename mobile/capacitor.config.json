@@ -1,0 +1,16 @@
+{
+  "appId": "pk.pos.register",
+  "appName": "POS",
+  "webDir": "www",
+  "server": {
+    "androidScheme": "http",
+    "cleartext": true,
+    "allowNavigation": ["127.0.0.1"]
+  },
+  "plugins": {
+    "CapacitorNodeJS": {
+      "nodeDir": "nodejs",
+      "startMode": "auto"
+    }
+  }
+}

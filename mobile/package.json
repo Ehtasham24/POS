@@ -1,0 +1,21 @@
+{
+  "name": "pos-mobile",
+  "version": "0.0.1",
+  "private": true,
+  "description": "The POS register on Android: the same backend and local database as the Windows app (../device), run by nodejs-mobile inside a Capacitor app. See ../plan-offline-sync.md.",
+  "scripts": {
+    "bundle-node": "node scripts/bundle-node.js",
+    "sync": "npm run bundle-node && npx cap sync android",
+    "apk": "npm run sync && node scripts/gradle.js assembleDebug",
+    "phone": "npm run apk && node scripts/install.js",
+    "postinstall": "node scripts/patch-plugin.js"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "capacitor-nodejs": "https://github.com/hampoelz/capacitor-nodejs/releases/download/v1.0.0-beta.10/capacitor-nodejs.tgz"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2"
+  }
+}
