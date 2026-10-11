@@ -29,6 +29,10 @@ const Contacts = lazyPage(() => import("pages/Contacts"));
 const StoreCredit = lazyPage(() => import("pages/StoreCredit"));
 const BankPayments = lazyPage(() => import("pages/BankPayments"));
 const Shifts = lazyPage(() => import("pages/Shifts"));
+const Support = lazyPage(() => import("pages/Support"));
+const SupportTicket = lazyPage(() => import("pages/Support/Ticket"));
+const AdminTickets = lazyPage(() => import("pages/Admin/Tickets"));
+const AdminTicket = lazyPage(() => import("pages/Admin/TicketDetail"));
 const AdminOverview = lazyPage(() => import("pages/Admin/Overview"));
 const AdminShops = lazyPage(() => import("pages/Admin"));
 const AdminHealth = lazyPage(() => import("pages/Admin/Health"));
@@ -100,6 +104,8 @@ function App() {
                     ["/admin/usage", AdminUsage],
                     ["/admin/activity", AdminActivity],
                     ["/admin/announcements", AdminAnnouncements],
+                    ["/admin/tickets", AdminTickets],
+                    ["/admin/tickets/:id", AdminTicket],
                     ["/admin/estimator", AdminEstimator],
                   ].map(([path, Page]) => (
                     <Route
@@ -134,6 +140,21 @@ function App() {
                       </ProtectedRoute>
                     }
                   />
+                  {/* Any staff member (pages/Support). */}
+                  {[
+                    ["/support", Support],
+                    ["/support/:id", SupportTicket],
+                  ].map(([path, Page]) => (
+                    <Route
+                      key={path}
+                      path={path}
+                      element={
+                        <ProtectedRoute>
+                          <Page />
+                        </ProtectedRoute>
+                      }
+                    />
+                  ))}
                   <Route
                     path="/sales-history"
                     element={

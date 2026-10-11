@@ -246,6 +246,24 @@ async function main() {
       shrinkAsShop1.body
     );
 
+    console.log("\n=== Support tickets isolation ===");
+    const ticket = await api(shop2Token, "POST", "/api/support/tickets", {
+      kind: "bug",
+      title: "Isolation test ticket",
+      body: "Only shop 2 may see this.",
+    });
+    check("Shop 2 can open a support ticket", ticket.status === 201, ticket.body);
+    const ticketsAsShop1 = await api(shop1Token, "GET", "/api/support/tickets");
+    check(
+      "Shop 1's support tickets never include shop 2's",
+      Array.isArray(ticketsAsShop1.body) && !ticketsAsShop1.body.some((t) => String(t.id) === String(ticket.body?.id)),
+      ticketsAsShop1.body
+    );
+    const ticketAsShop1 = await api(shop1Token, "GET", `/api/support/tickets/${ticket.body?.id}`);
+    check("Shop 1 can't open shop 2's ticket (404)", ticketAsShop1.status === 404, ticketAsShop1.body);
+    const replyAsShop1 = await api(shop1Token, "POST", `/api/support/tickets/${ticket.body?.id}/messages`, { body: "not mine" });
+    check("Shop 1 can't reply on shop 2's ticket (404)", replyAsShop1.status === 404, replyAsShop1.body);
+
     console.log("\n=== Product delete cross-shop safety (Failure Mode 4 fix) ===");
     // Give shop 1 a product with the SAME name shop 2 has ("Pepsi"), so we can prove
     // deleting shop 1's "Pepsi" never touches shop 2's.
@@ -717,6 +735,10 @@ async function main() {
       if (created.announcementId) await pool.query(`DELETE FROM announcements WHERE id = $1`, [created.announcementId]);
       if (created.deviceId) await pool.query(`DELETE FROM devices WHERE id = $1`, [created.deviceId]);
       for (const table of [
+        "support_ticket_reads",
+        "support_attachments",
+        "support_ticket_events",
+        "support_tickets",
         "bank_payment_intents",
         "store_credit_redemptions",
         "party_transactions",

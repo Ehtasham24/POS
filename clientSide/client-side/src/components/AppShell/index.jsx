@@ -12,6 +12,7 @@ import ShopNotices from "./ShopNotices";
 import OfflineStatusBadge from "./OfflineStatusBadge";
 import DeviceSyncStatus, { DeviceSyncNotice } from "./DeviceSyncStatus";
 import UserMenu from "./UserMenu";
+import SupportBadge from "./SupportBadge";
 import CartCheckout from "categoriesComponents/cartCheckout";
 
 // `fullBleed` (the Register): the page gets exactly the viewport below the top bar, with no
@@ -84,6 +85,7 @@ export default function AppShell({ title, actions, hideSearch, fullBleed = false
               <StorageWarningBadge />
               <PendingBankPaymentsBell />
               <LowStockBell />
+              <SupportBadge />
               <UserMenu />
             </div>
           </div>
@@ -116,6 +118,7 @@ export default function AppShell({ title, actions, hideSearch, fullBleed = false
                 <StorageWarningBadge />
                 <PendingBankPaymentsBell />
                 <LowStockBell />
+                <SupportBadge />
                 <UserMenu />
               </div>
             </div>

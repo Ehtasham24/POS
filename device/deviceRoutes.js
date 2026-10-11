@@ -88,6 +88,7 @@ const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync }) => {
       res.send({
         device: true,
         platform: PLATFORM,
+        appVersion: APP_VERSION,
         setUp: rows.length > 0,
         registered: Boolean(config.deviceToken),
         shopName: rows[0]?.name ?? null,

@@ -21,12 +21,14 @@ import {
   auditDetails,
   DeviceStateChip,
 } from "./shared";
+import { TicketsTable } from "./Tickets";
 
 const TABS = [
   ["summary", "Summary"],
   ["users", "Users"],
   ["billing", "Billing"],
   ["devices", "Devices"],
+  ["tickets", "Tickets"],
   ["activity", "Activity"],
 ];
 
@@ -462,6 +464,12 @@ export default function ShopDetail({ shopId, onClose, onChanged }) {
                   ))}
                 </ul>
               )}
+            </div>
+          )}
+
+          {tab === "tickets" && (
+            <div className={cardClass}>
+              <TicketsTable shopId={shopId} compact />
             </div>
           )}
 

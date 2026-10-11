@@ -12,6 +12,7 @@ import {
   HiOutlineClock,
   HiOutlineArchiveBoxXMark,
   HiOutlineComputerDesktop,
+  HiOutlineLifebuoy,
 } from "react-icons/hi2";
 
 // `roles` omitted = visible to everyone logged in (Owner and Cashier alike). A Cashier's
@@ -133,5 +134,14 @@ export const navItems = [
     labelKey: "nav.settings",
     icon: HiOutlineCog6Tooth,
     roles: ["owner"],
+  },
+  // Bug reports and feature requests to the platform (pages/Support). Any staff: a cashier sees
+  // the tickets they opened, the owner all of the shop's. On a register it goes through to the
+  // cloud (device/readThrough.js) and needs the internet.
+  {
+    to: "/support",
+    label: "Support",
+    labelKey: "nav.support",
+    icon: HiOutlineLifebuoy,
   },
 ];

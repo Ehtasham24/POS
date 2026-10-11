@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate, NavLink } from "react-router-dom";
 import {
   HiOutlineArrowRightOnRectangle,
@@ -12,13 +12,15 @@ import {
   HiOutlineHeart,
   HiOutlineClipboardDocumentList,
   HiOutlineMegaphone,
+  HiOutlineLifebuoy,
 } from "react-icons/hi2";
 import Logo from "components/Logo";
 import { Modal } from "components";
 import { useToast } from "components/Toast/ToastContext";
 import { useAuth } from "auth/AuthContext";
 import useTheme from "hooks/useTheme";
-import { apiPatch } from "utils/api";
+import { apiGet, apiPatch } from "utils/api";
+import { ADMIN_TICKETS_CHANGED_EVENT } from "./ticketEvents";
 import { inputClass, labelClass } from "./shared";
 import PasswordResetRequestsBadge from "./PasswordResetRequestsBadge";
 
@@ -31,6 +33,7 @@ const NAV_TABS = [
   { to: "/admin/usage", label: "Usage", icon: HiOutlineChartBar, end: false },
   { to: "/admin/activity", label: "Activity", icon: HiOutlineClipboardDocumentList, end: false },
   { to: "/admin/announcements", label: "Announcements", icon: HiOutlineMegaphone, end: false },
+  { to: "/admin/tickets", label: "Tickets", icon: HiOutlineLifebuoy, end: false, countsUnreadTickets: true },
   { to: "/admin/estimator", label: "Estimator", icon: HiOutlineCalculator, end: false },
 ];
 
@@ -44,7 +47,30 @@ const tabClass = ({ isActive }) =>
 // Shared by every /admin/* page (Shops, Usage) — logo/title, the Shops<->Usage nav tabs
 // (the "top navbar" both pages live under), and the three account-level actions (theme,
 // change password, logout) that don't belong to either page specifically.
+// Tickets with a shop message the admin hasn't read — shown on the Tickets tab.
+const TICKETS_POLL_MS = 60000;
+function useUnreadTickets() {
+  const [count, setCount] = useState(0);
+  useEffect(() => {
+    let alive = true;
+    const refresh = () =>
+      apiGet("/api/admin/support/unread")
+        .then((data) => alive && setCount(Number(data?.count) || 0))
+        .catch(() => {});
+    refresh();
+    const interval = setInterval(refresh, TICKETS_POLL_MS);
+    window.addEventListener(ADMIN_TICKETS_CHANGED_EVENT, refresh);
+    return () => {
+      alive = false;
+      clearInterval(interval);
+      window.removeEventListener(ADMIN_TICKETS_CHANGED_EVENT, refresh);
+    };
+  }, []);
+  return count;
+}
+
 export default function AdminHeader() {
+  const unreadTickets = useUnreadTickets();
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const toast = useToast();
@@ -126,10 +152,15 @@ export default function AdminHeader() {
           </div>
         </div>
         <nav className="flex gap-1 overflow-x-auto whitespace-nowrap px-6 sm:px-4">
-          {NAV_TABS.map(({ to, label, icon: Icon, end }) => (
+          {NAV_TABS.map(({ to, label, icon: Icon, end, countsUnreadTickets }) => (
             <NavLink key={to} to={to} end={end} className={tabClass}>
               <Icon className="text-base" />
               {label}
+              {countsUnreadTickets && unreadTickets > 0 && (
+                <span className="flex h-5 min-w-5 items-center justify-center rounded-full bg-primary-600 px-1 text-[11px] font-bold text-white-A700">
+                  {unreadTickets}
+                </span>
+              )}
             </NavLink>
           ))}
         </nav>

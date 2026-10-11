@@ -25,6 +25,7 @@ const routesUsers = require("./Routes/API/usersRoutes");
 const routesHealth = require("./Routes/API/healthRoutes");
 const routesAdmin = require("./Routes/API/adminRoutes");
 const routesShopStatus = require("./Routes/API/shopStatusRoutes");
+const routesSupport = require("./Routes/API/supportRoutes");
 const routesDevices = require("./Routes/API/deviceRoutes");
 const deviceReadThrough = require("./Middleware/deviceReadThrough");
 const errorHandler = require("./Middleware/errorHandler");
@@ -77,8 +78,13 @@ const Server = async () => {
   // Middleware to parse URL-encoded bodies
   server.use(express.urlencoded({ extended: true }));
   // Raised from the default 100kb so a base64-encoded company logo (stored as a
-  // settings value) fits comfortably through the generic /api/settings endpoint.
-  server.use(express.json({ limit: "2mb" }));
+  // settings value) fits comfortably through the generic /api/settings endpoint. Support
+  // tickets carry up to three screenshots (2 MB each, base64) — their routes alone get more.
+  const jsonBody = express.json({ limit: "2mb" });
+  const supportJsonBody = express.json({ limit: "9mb" });
+  server.use((req, res, next) =>
+    (/^\/api\/(admin\/)?support\//.test(req.path) ? supportJsonBody : jsonBody)(req, res, next)
+  );
 
   // Egress tracking (migration 024) and the Health page's request metrics
   // (monitoringService.js) — mounted before every route so it wraps the whole request, but
@@ -145,6 +151,7 @@ const Server = async () => {
   server.use(routesStockAdjustments);
   server.use(routesAdmin); // platform-level (requireSuperAdmin) — no shop context, see adminRoutes.js
   server.use(routesShopStatus);
+  server.use(routesSupport);
   server.use(routesDevices);
 
   // Serve static files from the React app

@@ -12,6 +12,9 @@
 // The cloud only knows about sales this register has already sent. So before asking it, anything
 // still waiting to go up is sent first; if that can't be done quickly, the register answers
 // itself rather than show a history missing its newest sales.
+//
+// Support tickets go the same way but only ever to the cloud (they aren't kept here): offline,
+// or on a register not connected to a cloud shop, they answer 503 saying so.
 const { cloudClient } = require("./cloudClient");
 const { readThroughSpec, lookupVia, swapParams, swapIds } = require("../ExpressBackend/utils/readThrough");
 const { verifyToken, COOKIE_NAME } = require("../ExpressBackend/utils/auth");
@@ -51,8 +54,37 @@ const readThrough = ({ config, sync, onlineNow }) => {
     return rows[0]?.uuid ?? null;
   };
 
+  const cloudUnavailable = (res, message) => res.status(503).send({ code: "NEEDS_CLOUD", message });
+
+  // A support request, passed on as it came (query, body, or a picture's bytes back).
+  const passToCloud = async (req, res, spec) => {
+    if (!config.deviceToken) return cloudUnavailable(res, "Support needs this register to be connected to the shop's online account.");
+    const userUuid = await signedInUuid(req);
+    if (!userUuid) return res.status(401).send({ message: "Not authenticated" });
+    let response;
+    try {
+      response = await fetch(String(config.cloudUrl).replace(/\/+$/, "") + req.originalUrl, {
+        method: req.method,
+        headers: { "content-type": "application/json", authorization: `Device ${config.deviceToken}`, "x-pos-user": userUuid },
+        body: req.method === "GET" ? undefined : JSON.stringify(req.body || {}),
+        signal: AbortSignal.timeout(CLOUD_TIMEOUT_MS),
+      });
+    } catch {
+      return cloudUnavailable(res, "Support needs the internet — connect and try again.");
+    }
+    // The cloud not accepting this register isn't the person being signed out here: a 401
+    // passed on would log them out of the register.
+    if (response.status === 401) return cloudUnavailable(res, "The online account didn't accept this register — check its connection on the Devices page.");
+    const buffer = Buffer.from(await response.arrayBuffer());
+    res.status(response.status);
+    res.set("content-type", response.headers.get("content-type") || (spec.binary ? "application/octet-stream" : "application/json"));
+    if (spec.binary && response.ok) res.set("cache-control", "private, max-age=86400");
+    res.send(buffer);
+  };
+
   return async (req, res, next) => {
     const spec = readThroughSpec(req.method, req.path);
+    if (spec?.cloudOnly) return passToCloud(req, res, spec).catch(next);
     if (!spec || !config.deviceToken) return next();
     try {
       // Just started, no sync tried yet: whether it's online isn't known — find out (briefly)

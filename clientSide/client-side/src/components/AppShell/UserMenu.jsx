@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { HiOutlineUserCircle, HiOutlineArrowRightOnRectangle } from "react-icons/hi2";
+import { useLocation, useNavigate } from "react-router-dom";
+import { HiOutlineUserCircle, HiOutlineArrowRightOnRectangle, HiOutlineLifebuoy } from "react-icons/hi2";
 import { useAuth } from "auth/AuthContext";
 import { useLanguage } from "i18n/LanguageContext";
 import TextSizePicker from "components/TextSizePicker";
@@ -13,6 +13,7 @@ export default function UserMenu() {
   const { user, logout } = useAuth();
   const { t } = useLanguage();
   const navigate = useNavigate();
+  const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
   const containerRef = useRef(null);
 
@@ -66,6 +67,18 @@ export default function UserMenu() {
             <p className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">{t("settings.textSizeTitle")}</p>
             <TextSizePicker compact />
           </div>
+          {/* A report opened from here remembers the page it was opened on. */}
+          <button
+            type="button"
+            onClick={() => {
+              setOpen(false);
+              navigate(`/support?new=1&from=${encodeURIComponent(pathname)}`);
+            }}
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-surface-subtle dark:text-gray-200 dark:hover:bg-gray-700"
+          >
+            <HiOutlineLifebuoy className="text-base" />
+            {t("support.reportProblem")}
+          </button>
           <button
             type="button"
             onClick={handleLogout}

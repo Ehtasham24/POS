@@ -39,6 +39,9 @@ function CartCheckout() {
   const pathname = useLocation().pathname;
   const isSellingPage =
     pathname === "/" || pathname.startsWith("/categories/") || pathname.startsWith("/productlist/");
+  // The support pages end in a reply box whose Send button sits where this floats on a phone,
+  // and nobody sells from there.
+  const isSupportPage = pathname.startsWith("/support");
 
   // Draggable on any pointer device (touch/mouse/pen) so it can be pulled out of the way
   // when it happens to sit on top of other floating/fixed UI — e.g. Credit/Debit's legend
@@ -106,7 +109,7 @@ function CartCheckout() {
     setExpanded(true);
   };
 
-  if (isSellingPage) return null;
+  if (isSellingPage || isSupportPage) return null;
 
   return (
     <>

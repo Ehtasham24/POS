@@ -35,7 +35,24 @@ const READ_THROUGH = {
 // matches nothing — rather than the raw id, which there would be some other row.
 const NO_MATCH = "-1";
 
-const readThroughSpec = (method, path) => READ_THROUGH[`${method} ${path}`] || null;
+// Support tickets (Sevices/supportService.js) exist only in the cloud: a register always
+// passes these on, and offline says they need the internet rather than answer from its own
+// database. Ticket ids are the cloud's own here — the register keeps no copy to renumber.
+// `binary`: a picture, passed on as bytes.
+const CLOUD_ONLY = [
+  ["GET", /^\/api\/support\/tickets$/],
+  ["POST", /^\/api\/support\/tickets$/],
+  ["GET", /^\/api\/support\/tickets\/\d+$/],
+  ["POST", /^\/api\/support\/tickets\/\d+\/messages$/],
+  ["GET", /^\/api\/support\/unread$/],
+  ["GET", /^\/api\/support\/attachments\/\d+$/, { binary: true }],
+];
+
+const readThroughSpec = (method, path) => {
+  if (READ_THROUGH[`${method} ${path}`]) return READ_THROUGH[`${method} ${path}`];
+  const cloudOnly = CLOUD_ONLY.find(([m, pattern]) => m === method && pattern.test(path));
+  return cloudOnly ? { cloudOnly: true, ...cloudOnly[2] } : null;
+};
 
 // lookup(table, keys) → Map of key → counterpart, here by one column and there by another
 // (id → uuid, or uuid → id). Table and column names only ever come from READ_THROUGH and the
