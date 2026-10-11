@@ -40,14 +40,20 @@ const GetAttachment = asyncHandler(async (req, res) => {
 
 // --- Platform admin ---
 const AdminListTickets = asyncHandler(async (req, res) => {
-  const { state, kind, shopId, q, page } = req.query;
-  res.send(await support.adminListTickets({ state, kind, shopId, q, page }));
+  const { state, kind, priority, shopId, q, page, hideDuplicates } = req.query;
+  res.send(await support.adminListTickets({ state, kind, priority, shopId, q, page, hideDuplicates: hideDuplicates === "1" }));
 });
 const AdminGetTicket = asyncHandler(async (req, res) => {
   res.send(await support.adminGetTicket(req.params.id));
 });
 const AdminSetStatus = asyncHandler(async (req, res) => {
   res.send(await support.adminSetStatus(req.user, req.params.id, { status: req.body?.status }));
+});
+const AdminUpdateTicket = asyncHandler(async (req, res) => {
+  // Only the fields sent are changed (duplicateOf: null unlinks, so "sent" ≠ "truthy").
+  const body = req.body || {};
+  const changes = Object.fromEntries(["priority", "adminNote", "duplicateOf"].filter((key) => key in body).map((key) => [key, body[key]]));
+  res.send(await support.adminUpdateTicket(req.user, req.params.id, changes));
 });
 const AdminGetUnreadCount = asyncHandler(async (req, res) => {
   res.send({ count: await support.adminUnreadCount() });
@@ -65,6 +71,7 @@ module.exports = {
   AdminListTickets,
   AdminGetTicket,
   AdminSetStatus,
+  AdminUpdateTicket,
   AdminGetUnreadCount,
   AdminGetAttachment,
 };

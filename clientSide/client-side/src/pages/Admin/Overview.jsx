@@ -125,7 +125,11 @@ export default function AdminOverview() {
                       </Link>
                     ) : null}
                     <span>{item.message}</span>
-                    {item.kind === "security" || item.kind === "errors" ? (
+                    {item.link ? (
+                      <Link to={item.link} className="ml-auto text-xs font-semibold underline-offset-2 hover:underline">
+                        Open
+                      </Link>
+                    ) : item.kind === "security" || item.kind === "errors" ? (
                       <Link to="/admin/health" className="ml-auto text-xs font-semibold underline-offset-2 hover:underline">
                         Open Health
                       </Link>

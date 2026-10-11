@@ -15,6 +15,7 @@ const { listLoginEvents, loginSecuritySummary } = require("./loginSecurityServic
 const { listAudit } = require("./auditService");
 const monitoring = require("./monitoringService");
 const { listDevices, devicesNeedingAttention } = require("./deviceService");
+const { adminAttentionCounts: supportAttentionCounts } = require("./supportService");
 
 const VALID_TIERS = Object.keys(TIER_RANK);
 
@@ -487,10 +488,10 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 // The admin console's landing page: the whole platform at a glance, and the short list of
 // things that need the admin's attention (billing, shops gone quiet, sign-in attacks,
-// server errors, storage). Sales days are on the platform's own clock (DEFAULT_TIMEZONE).
+// server errors, storage, support tickets left waiting). Sales days are on the platform's own clock (DEFAULT_TIMEZONE).
 const getPlatformOverview = async () => {
   const tz = DEFAULT_TIMEZONE;
-  const [shopRows, userRows, daily, topShops, pendingResets, dbSize, dbCapacity, logins] = await Promise.all([
+  const [shopRows, userRows, daily, topShops, pendingResets, dbSize, dbCapacity, logins, tickets] = await Promise.all([
     pool.query(
       `SELECT s.id, s.name, s.tier, s.is_active, s.created_at, ${DUE_ON_SQL} AS due_on, ${SHOP_ACTIVITY_SQL}
        FROM shops s`
@@ -526,6 +527,7 @@ const getPlatformOverview = async () => {
     getActualDatabaseSizeBytes(),
     getTotalDbCapacityBytes(),
     loginSecuritySummary(),
+    supportAttentionCounts(),
   ]);
 
   const shops = shopRows.rows;
@@ -538,8 +540,9 @@ const getPlatformOverview = async () => {
   });
 
   const attention = [];
-  const flag = (severity, kind, message, shop) =>
-    attention.push({ severity, kind, message, shopId: shop?.id ?? null, shopName: shop?.name ?? null });
+  // `link`: where in the console to deal with it, when that isn't the shop itself.
+  const flag = (severity, kind, message, shop, link = null) =>
+    attention.push({ severity, kind, message, shopId: shop?.id ?? null, shopName: shop?.name ?? null, link });
   const dormantCutoff = Date.now() - DORMANT_DAYS * DAY_MS;
   for (const shop of shops.filter((s) => s.is_active)) {
     const billing = subscriptionStatus(shop.due_on);
@@ -563,6 +566,10 @@ const getPlatformOverview = async () => {
   if (locked.length) flag("critical", "security", `Locked after repeated wrong passwords: ${locked.join(", ")}`);
   const serverErrors = monitoring.snapshot().lastHour.serverErrors;
   if (serverErrors > 0) flag("critical", "errors", `${serverErrors} server error(s) in the last hour`);
+  if (tickets.urgent > 0) flag("critical", "tickets", `${tickets.urgent} urgent support ticket(s) not resolved yet`, null, "/admin/tickets?priority=urgent");
+  if (tickets.stale > 0) {
+    flag("warning", "tickets", `${tickets.stale} support ticket(s) waiting more than ${tickets.staleDays} days with no status update`, null, "/admin/tickets?state=stale");
+  }
   const dbPercent = dbCapacity ? (dbSize / dbCapacity) * 100 : 0;
   if (dbPercent >= 75) flag(dbPercent >= 90 ? "critical" : "warning", "storage", `Database is ${Math.round(dbPercent)}% full`);
   attention.sort((a, b) => (a.severity === b.severity ? 0 : a.severity === "critical" ? -1 : 1));

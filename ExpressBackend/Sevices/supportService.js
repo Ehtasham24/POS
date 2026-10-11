@@ -2,7 +2,7 @@ const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { recentServerErrorsFor } = require("./monitoringService");
 
-// Support tickets (migrations 034, 035): a shop's bug reports and feature requests, tracked
+// Support tickets (migrations 034–036): a shop's bug reports and feature requests, tracked
 // by status. The shop describes the problem once (text, screenshots, and the app's
 // diagnostic log if they allow it); the platform admin moves it through the statuses, and the
 // shop follows that. There's no conversation on a ticket.
@@ -15,10 +15,19 @@ const { recentServerErrorsFor } = require("./monitoringService");
 // History is the event list: the report's description is its first message, and every status
 // change after it is another event (from what, to what, when) — the status on the ticket is
 // never changed without one.
+//
+// Triage is the admin's alone, and never shown to the shop: a priority, a private note, and
+// marking a ticket as a duplicate of another (often another shop's report of the same
+// problem). A duplicate follows its main ticket's status, so every shop that reported the
+// problem sees it move when the admin moves the main one.
 
 const KINDS = ["bug", "feature"];
 const STATUSES = ["open", "in_review", "planned", "in_progress", "resolved", "wont_fix"];
 const CLOSED = ["resolved", "wont_fix"];
+const PRIORITIES = ["urgent", "high", "normal", "low"];
+const MAX_ADMIN_NOTE = 2000;
+// A ticket still "open" (nobody has moved it) after this long is waiting too long.
+const STALE_DAYS = 3;
 const MAX_ATTACHMENTS = 3;
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const MAX_BODY = 5000;
@@ -90,6 +99,12 @@ const buildDiagnostics = ({ client, device, shopId }) => {
   if (Buffer.byteLength(JSON.stringify(out)) > MAX_DIAGNOSTICS_BYTES) delete out.device;
   return out;
 };
+
+// A bug report whose log shows the app breaking — an uncaught error, a server error, or errors
+// the server logged for the shop — starts at high priority.
+const looksBroken = (diagnostics) =>
+  diagnostics?.server?.errors?.length > 0 ||
+  (diagnostics?.client?.entries || []).some((e) => e.type === "error" || (e.type === "api" && e.status >= 500));
 
 // --- Shared writes and reads ------------------------------------------------------------
 
@@ -168,10 +183,14 @@ const visibility = (user, params) => {
   return where;
 };
 
-const findVisibleTicket = async (db, user, ticketId, { lock = false } = {}) => {
+// What the shop may see of a ticket: never its diagnostics' content (only whether they were
+// sent) nor the admin's triage (priority, note, duplicate).
+const findVisibleTicket = async (db, user, ticketId) => {
   const params = [idOf(ticketId)];
   const { rows } = await db.query(
-    `SELECT t.* FROM support_tickets t WHERE t.id = $1 AND ${visibility(user, params)}${lock ? " FOR UPDATE" : ""}`,
+    `SELECT t.id, t.shop_id, t.kind, t.title, t.status, t.opened_by, t.context, t.created_at, t.last_event_at,
+            t.last_event_side, t.diagnostics IS NOT NULL AS has_diagnostics
+     FROM support_tickets t WHERE t.id = $1 AND ${visibility(user, params)}`,
     params
   );
   if (!rows[0]) throw new ApiError(404, "Ticket not found");
@@ -192,17 +211,13 @@ const createTicket = async (user, { kind, title, body, attachments, context, dia
   );
   if (recent[0].n >= NEW_TICKETS_PER_HOUR) throw new ApiError(429, "You've opened a lot of tickets in the last hour — please wait a little before opening another");
 
+  const kept = diagnostics == null ? null : buildDiagnostics({ client: diagnostics, device: deviceReport, shopId: user.shopId });
+  const priority = kind === "bug" && looksBroken(kept) ? "high" : "normal";
   return withTransaction(async (client) => {
     const { rows } = await client.query(
-      `INSERT INTO support_tickets (shop_id, kind, title, opened_by, context, diagnostics) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
-      [
-        user.shopId,
-        kind,
-        cleanTitle,
-        user.id,
-        cleanContext(context),
-        diagnostics == null ? null : buildDiagnostics({ client: diagnostics, device: deviceReport, shopId: user.shopId }),
-      ]
+      `INSERT INTO support_tickets (shop_id, kind, title, opened_by, context, diagnostics, priority)
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+      [user.shopId, kind, cleanTitle, user.id, cleanContext(context), kept, priority]
     );
     const ticketId = rows[0].id;
     await insertMessage(client, { ticketId, shopId: user.shopId, authorId: user.id, side: "shop", body: cleanBody, attachments: files });
@@ -251,9 +266,7 @@ const getShopTicket = async (user, ticketId) => {
     loadEvents(pool, ticket.id),
   ]);
   await markShopRead(pool, { ticketId: ticket.id, userId: user.id, shopId: user.shopId });
-  // The diagnostics are for the admin; the shop sees whether they were sent, not their content.
-  const { admin_read_at: _adminRead, diagnostics, ...visible } = ticket;
-  return { ...visible, has_diagnostics: diagnostics != null, opened_by_name: opener[0]?.display_name ?? null, events };
+  return { ...ticket, opened_by_name: opener[0]?.display_name ?? null, events };
 };
 
 // Tickets whose status changed since this user last looked (the header badge).
@@ -283,12 +296,22 @@ const getShopAttachment = async (user, attachmentId) => {
 
 // --- Platform admin side (every shop; runs outside any shop context) --------------------
 
-const adminListTickets = async ({ state = "active", kind, shopId, q, page = 1 } = {}) => {
+// Most pressing first when sorting.
+const PRIORITY_RANK_SQL = `array_position(ARRAY['urgent', 'high', 'normal', 'low'], t.priority)`;
+// Open, untouched by the admin, and old: waiting too long (the Overview flags these).
+const STALE_SQL = `(t.status = 'open' AND t.duplicate_of IS NULL AND t.created_at < NOW() - INTERVAL '${STALE_DAYS} days')`;
+
+// state: a status, "active"/"closed"/"all", or "stale" (STALE_SQL). `hideDuplicates` leaves out
+// tickets that follow another (they're listed on their main ticket). `q` matches the title, the
+// shop's name, or a ticket number ("42" or "#42").
+const adminListTickets = async ({ state = "active", kind, priority, shopId, q, hideDuplicates = false, page = 1 } = {}) => {
   const params = [];
   const conditions = ["TRUE"];
   if (STATUSES.includes(state)) {
     params.push(state);
     conditions.push(`t.status = $${params.length}`);
+  } else if (state === "stale") {
+    conditions.push(STALE_SQL);
   } else {
     const filter = stateFilter(state, params);
     if (filter) conditions.push(filter);
@@ -297,26 +320,43 @@ const adminListTickets = async ({ state = "active", kind, shopId, q, page = 1 } 
     params.push(kind);
     conditions.push(`t.kind = $${params.length}`);
   }
+  if (PRIORITIES.includes(priority)) {
+    params.push(priority);
+    conditions.push(`t.priority = $${params.length}`);
+  }
   if (shopId) {
     params.push(Number(shopId));
     conditions.push(`t.shop_id = $${params.length}`);
   }
-  if (q && String(q).trim()) {
-    params.push(`%${String(q).trim()}%`);
-    conditions.push(`(t.title ILIKE $${params.length} OR s.name ILIKE $${params.length})`);
+  if (hideDuplicates) conditions.push("t.duplicate_of IS NULL");
+  const search = String(q ?? "").trim();
+  if (search) {
+    params.push(`%${search}%`);
+    let match = `t.title ILIKE $${params.length} OR s.name ILIKE $${params.length}`;
+    const number = /^#?(\d{1,15})$/.exec(search);
+    if (number) {
+      params.push(Number(number[1]));
+      match += ` OR t.id = $${params.length}`;
+    }
+    conditions.push(`(${match})`);
   }
   const where = conditions.join(" AND ");
   const safePage = Math.max(1, parseInt(page, 10) || 1);
   const [{ rows }, { rows: count }] = await Promise.all([
     pool.query(
-      `SELECT t.id, t.kind, t.title, t.status, t.created_at, t.last_event_at, t.last_event_side, t.shop_id,
-              s.name AS shop_name, u.display_name AS opened_by_name, u.role AS opened_by_role,
-              (t.last_event_side = 'shop' AND (t.admin_read_at IS NULL OR t.admin_read_at < t.last_event_at)) AS unread
+      `SELECT t.id, t.kind, t.title, t.status, t.priority, t.duplicate_of, t.created_at, t.last_event_at, t.last_event_side,
+              t.shop_id, s.name AS shop_name, u.display_name AS opened_by_name, u.role AS opened_by_role,
+              (t.last_event_side = 'shop' AND (t.admin_read_at IS NULL OR t.admin_read_at < t.last_event_at)) AS unread,
+              ${STALE_SQL} AS stale, dup.reports AS duplicate_count, dup.shops AS shops_affected
        FROM support_tickets t
        JOIN shops s ON s.id = t.shop_id
        LEFT JOIN users u ON u.id = t.opened_by
+       CROSS JOIN LATERAL (
+         SELECT COUNT(*)::int - 1 AS reports, COUNT(DISTINCT x.shop_id)::int AS shops
+         FROM support_tickets x WHERE x.id = t.id OR x.duplicate_of = t.id
+       ) dup
        WHERE ${where}
-       ORDER BY unread DESC, t.last_event_at DESC
+       ORDER BY unread DESC, ${PRIORITY_RANK_SQL}, t.last_event_at DESC
        LIMIT ${ADMIN_PAGE_SIZE} OFFSET ${(safePage - 1) * ADMIN_PAGE_SIZE}`,
       params
     ),
@@ -332,33 +372,107 @@ const findTicket = async (db, ticketId, { lock = false } = {}) => {
   return rows[0];
 };
 
+// Tickets linked to this one, as the admin's ticket page lists them: its main ticket (when it's a
+// duplicate) or its duplicates (when it's a main one).
+const LINKED_SQL = `SELECT t.id, t.title, t.status, t.created_at, t.shop_id, s.name AS shop_name
+                    FROM support_tickets t JOIN shops s ON s.id = t.shop_id`;
+
 const adminGetTicket = async (ticketId) => {
   const ticket = await findTicket(pool, ticketId);
-  const [{ rows: meta }, events] = await Promise.all([
+  const [{ rows: meta }, events, { rows: linked }] = await Promise.all([
     pool.query(
       `SELECT s.name AS shop_name, s.tier AS shop_tier, u.display_name AS opened_by_name, u.username AS opened_by_username, u.role AS opened_by_role
        FROM shops s LEFT JOIN users u ON u.id = $2 WHERE s.id = $1`,
       [ticket.shop_id, ticket.opened_by]
     ),
     loadEvents(pool, ticket.id),
+    ticket.duplicate_of
+      ? pool.query(`${LINKED_SQL} WHERE t.id = $1`, [ticket.duplicate_of])
+      : pool.query(`${LINKED_SQL} WHERE t.duplicate_of = $1 ORDER BY t.id`, [ticket.id]),
   ]);
   await pool.query(`UPDATE support_tickets SET admin_read_at = NOW() WHERE id = $1`, [ticket.id]);
-  return { ...ticket, ...meta[0], events };
+  const duplicates = ticket.duplicate_of ? [] : linked;
+  return {
+    ...ticket,
+    ...meta[0],
+    events,
+    main_ticket: ticket.duplicate_of ? linked[0] ?? null : null,
+    duplicates,
+    shops_affected: new Set([ticket.shop_id, ...duplicates.map((d) => d.shop_id)].map(String)).size,
+  };
 };
 
-// The admin moves the ticket to another status; the shop sees the change (and is told once).
-const adminSetStatus = async (admin, ticketId, { status }) => {
-  if (!STATUSES.includes(status)) throw new ApiError(400, `Unknown status "${status}"`);
-  await withTransaction(async (client) => {
-    const ticket = await findTicket(client, ticketId, { lock: true });
-    if (ticket.status === status) throw new ApiError(400, "The ticket already has that status");
+// Moves each of `tickets` (locked rows) to `status`, with a history event on each that changes;
+// the shops see it (and are told once).
+const moveTickets = async (client, admin, tickets, status) => {
+  for (const ticket of tickets.filter((t) => t.status !== status)) {
     await insertStatusChange(client, { ticketId: ticket.id, shopId: ticket.shop_id, authorId: admin.id, side: "admin", from: ticket.status, to: status });
     await client.query(
       `UPDATE support_tickets SET status = $2, last_event_at = NOW(), last_event_side = 'admin', admin_read_at = NOW() WHERE id = $1`,
       [ticket.id, status]
     );
+  }
+};
+
+const lockDuplicatesOf = async (client, ticketId) =>
+  (await client.query(`SELECT * FROM support_tickets WHERE duplicate_of = $1 ORDER BY id FOR UPDATE`, [ticketId])).rows;
+
+// The admin moves the ticket to another status, and its duplicates with it. A duplicate itself
+// follows its main ticket, so it's moved there (or unlinked first).
+const adminSetStatus = async (admin, ticketId, { status }) => {
+  if (!STATUSES.includes(status)) throw new ApiError(400, `Unknown status "${status}"`);
+  await withTransaction(async (client) => {
+    const ticket = await findTicket(client, ticketId, { lock: true });
+    if (ticket.duplicate_of) throw new ApiError(400, `This ticket follows #${ticket.duplicate_of} — change the status there, or unlink it first`);
+    if (ticket.status === status) throw new ApiError(400, "The ticket already has that status");
+    await moveTickets(client, admin, [ticket, ...(await lockDuplicatesOf(client, ticket.id))], status);
   });
   return adminGetTicket(ticketId);
+};
+
+// Marks `ticket` (locked) as a duplicate of `targetId` — or of that one's main ticket, when it's
+// itself a duplicate — or unlinks it (null). Its own duplicates move along to the new main
+// ticket, and all of them take that ticket's status.
+const setDuplicateOf = async (client, admin, ticket, targetId) => {
+  if (targetId == null) {
+    await client.query(`UPDATE support_tickets SET duplicate_of = NULL WHERE id = $1`, [ticket.id]);
+    return;
+  }
+  let main = await findTicket(client, targetId, { lock: true });
+  if (main.duplicate_of) main = await findTicket(client, main.duplicate_of, { lock: true });
+  if (String(main.id) === String(ticket.id)) throw new ApiError(400, "A ticket can't be a duplicate of itself (or of its own duplicate)");
+  const followers = [ticket, ...(await lockDuplicatesOf(client, ticket.id))];
+  await client.query(`UPDATE support_tickets SET duplicate_of = $2 WHERE id = ANY($1::bigint[])`, [followers.map((f) => f.id), main.id]);
+  await moveTickets(client, admin, followers, main.status);
+};
+
+// The admin's triage: any of priority, the private note, and which ticket this duplicates
+// (`duplicateOf`: a ticket id, or null to unlink). Only the keys sent are changed.
+const adminUpdateTicket = async (admin, ticketId, changes = {}) => {
+  const has = (key) => Object.prototype.hasOwnProperty.call(changes, key);
+  if (has("priority") && !PRIORITIES.includes(changes.priority)) throw new ApiError(400, `Unknown priority "${changes.priority}"`);
+  const note = has("adminNote") ? String(changes.adminNote ?? "").trim() : undefined;
+  if (note && note.length > MAX_ADMIN_NOTE) throw new ApiError(400, `The note can be at most ${MAX_ADMIN_NOTE} characters`);
+  const duplicateOf = has("duplicateOf") && changes.duplicateOf != null ? idOf(changes.duplicateOf) : null;
+
+  await withTransaction(async (client) => {
+    const ticket = await findTicket(client, ticketId, { lock: true });
+    if (has("priority")) await client.query(`UPDATE support_tickets SET priority = $2 WHERE id = $1`, [ticket.id, changes.priority]);
+    if (note !== undefined) await client.query(`UPDATE support_tickets SET admin_note = $2 WHERE id = $1`, [ticket.id, note || null]);
+    if (has("duplicateOf")) await setDuplicateOf(client, admin, ticket, duplicateOf);
+  });
+  return adminGetTicket(ticketId);
+};
+
+// For the Overview's "needs attention": tickets waiting too long, and urgent ones not done.
+const adminAttentionCounts = async () => {
+  const { rows } = await pool.query(
+    `SELECT COUNT(*) FILTER (WHERE ${STALE_SQL})::int AS stale,
+            COUNT(*) FILTER (WHERE t.priority = 'urgent' AND t.duplicate_of IS NULL AND NOT t.status = ANY($1::text[]))::int AS urgent
+     FROM support_tickets t`,
+    [CLOSED]
+  );
+  return { ...rows[0], staleDays: STALE_DAYS };
 };
 
 const adminUnreadCount = async () => {
@@ -378,6 +492,7 @@ const adminGetAttachment = async (attachmentId) => {
 module.exports = {
   KINDS,
   STATUSES,
+  PRIORITIES,
   createTicket,
   listShopTickets,
   getShopTicket,
@@ -386,6 +501,8 @@ module.exports = {
   adminListTickets,
   adminGetTicket,
   adminSetStatus,
+  adminUpdateTicket,
+  adminAttentionCounts,
   adminUnreadCount,
   adminGetAttachment,
 };

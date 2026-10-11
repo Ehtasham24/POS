@@ -21,12 +21,14 @@ const FILTERS = ["active", "closed", "all"];
 // Reporting a problem or asking for a feature (Sevices/supportService.js). The report records
 // where it came from, and — unless the person unticks it — the app's diagnostic log of the last
 // half hour (utils/diagnosticsLog.js), so whoever looks into it can see what happened.
-function NewTicketModal({ fromPage, onClose, onCreated }) {
+// `afterProblem`: opened from the offer to report something that just broke (ProblemPrompt,
+// ErrorBoundary) — a bug report, titled already; the person says what they were doing.
+function NewTicketModal({ fromPage, afterProblem = false, onClose, onCreated }) {
   const { t } = useLanguage();
   const toast = useToast();
   const device = useDeviceStatus();
   const [kind, setKind] = useState("bug");
-  const [title, setTitle] = useState("");
+  const [title, setTitle] = useState(() => (afterProblem ? t("support.problemTitle") : ""));
   const [body, setBody] = useState("");
   const [pictures, setPictures] = useState([]);
   const [saving, setSaving] = useState(false);
@@ -83,6 +85,9 @@ function NewTicketModal({ fromPage, onClose, onCreated }) {
   return (
     <Modal isOpen onClose={onClose} title={t("support.newTicket")} maxWidth="max-w-lg">
       <form onSubmit={submit} className="flex flex-col gap-4">
+        {afterProblem && (
+          <p className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">{t("support.problemNotice")}</p>
+        )}
         <div className="flex gap-2">
           {kindButton("bug", HiOutlineBugAnt, t("support.kindBug"), t("support.kindBugHint"))}
           {kindButton("feature", HiOutlineLightBulb, t("support.kindFeature"), t("support.kindFeatureHint"))}
@@ -98,7 +103,7 @@ function NewTicketModal({ fromPage, onClose, onCreated }) {
             minLength={3}
             maxLength={150}
             required
-            autoFocus
+            autoFocus={!afterProblem}
             placeholder={kind === "bug" ? t("support.titleBugPlaceholder") : t("support.titleFeaturePlaceholder")}
             className={inputClass}
           />
@@ -114,7 +119,8 @@ function NewTicketModal({ fromPage, onClose, onCreated }) {
             rows={5}
             maxLength={5000}
             required
-            placeholder={kind === "bug" ? t("support.bodyBugPlaceholder") : t("support.bodyFeaturePlaceholder")}
+            autoFocus={afterProblem}
+            placeholder={afterProblem ? t("support.problemBodyPlaceholder") : kind === "bug" ? t("support.bodyBugPlaceholder") : t("support.bodyFeaturePlaceholder")}
             className={inputClass}
           />
         </div>
@@ -168,8 +174,9 @@ export default function SupportPage() {
   const [tickets, setTickets] = useState(null);
   const [error, setError] = useState(null);
   // ?new=1 (the account menu's "Report a problem") opens the form at once; ?from= is the page
-  // it was opened from.
+  // it was opened from; ?problem=1, the offer to report something that just broke.
   const [creating, setCreating] = useState(searchParams.get("new") === "1");
+  const [afterProblem, setAfterProblem] = useState(searchParams.get("problem") === "1");
   const fromPage = searchParams.get("from");
   const timeAgo = timeAgoIn(t);
 
@@ -257,7 +264,11 @@ export default function SupportPage() {
       {creating && (
         <NewTicketModal
           fromPage={fromPage}
-          onClose={() => setCreating(false)}
+          afterProblem={afterProblem}
+          onClose={() => {
+            setCreating(false);
+            setAfterProblem(false);
+          }}
           onCreated={(id) => {
             window.dispatchEvent(new CustomEvent(SUPPORT_CHANGED_EVENT));
             navigate(`/support/${id}`);

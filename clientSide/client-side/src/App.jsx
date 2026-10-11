@@ -12,6 +12,7 @@ import { LanguageProvider } from "i18n/LanguageContext";
 import { AuthProvider } from "auth/AuthContext";
 import { TimezoneProvider } from "timezone/TimezoneContext";
 import ProtectedRoute from "components/ProtectedRoute";
+import ErrorBoundary from "components/ErrorBoundary";
 import { tryAutoReconnect } from "utils/thermalPrinter/connection";
 
 // The register and login are what almost every session opens first, so they ship in the main
@@ -84,187 +85,189 @@ function App() {
             <Router>
               <Suspense fallback={<PageLoading />}>
                 <DiagnosticsRouteLogger />
-                <Routes>
-                  <Route path="/login" element={<LoginPage />} />
-                  {/* A shop's own device (the Windows/Android app) before its first-run setup —
+                <ErrorBoundary>
+                  <Routes>
+                    <Route path="/login" element={<LoginPage />} />
+                    {/* A shop's own device (the Windows/Android app) before its first-run setup —
                       Login sends it here; on the web this page just returns to Login. */}
-                  <Route path="/device-setup" element={<DeviceSetup />} />
-                  {/* Separate from /login, deliberately — see pages/AdminLogin's own
+                    <Route path="/device-setup" element={<DeviceSetup />} />
+                    {/* Separate from /login, deliberately — see pages/AdminLogin's own
                       top comment for why the two used to be one shared screen and no
                       longer are. */}
-                  <Route path="/admin/login" element={<AdminLoginPage />} />
-                  {/* Reached only via ProtectedRoute's own mustChangePassword redirect (a
+                    <Route path="/admin/login" element={<AdminLoginPage />} />
+                    {/* Reached only via ProtectedRoute's own mustChangePassword redirect (a
                       temp password issued by an admin-approved forgot-password request) —
                       not linked from anywhere, and not reachable once the flag is cleared. */}
-                  <Route
-                    path="/set-new-password"
-                    element={
-                      <ProtectedRoute>
-                        <SetNewPasswordPage />
-                      </ProtectedRoute>
-                    }
-                  />
-                  {/* Platform admin console (migration 022) — a superadmin's only route.
+                    <Route
+                      path="/set-new-password"
+                      element={
+                        <ProtectedRoute>
+                          <SetNewPasswordPage />
+                        </ProtectedRoute>
+                      }
+                    />
+                    {/* Platform admin console (migration 022) — a superadmin's only route.
                       ProtectedRoute's adminOnly boundary keeps a shop's own Owner/Cashier out
                       of this exactly as strictly as it keeps a superadmin out of every route
                       below it. */}
-                  {[
-                    ["/admin", AdminOverview],
-                    ["/admin/shops", AdminShops],
-                    ["/admin/health", AdminHealth],
-                    ["/admin/usage", AdminUsage],
-                    ["/admin/activity", AdminActivity],
-                    ["/admin/announcements", AdminAnnouncements],
-                    ["/admin/tickets", AdminTickets],
-                    ["/admin/tickets/:id", AdminTicket],
-                    ["/admin/estimator", AdminEstimator],
-                  ].map(([path, Page]) => (
-                    <Route
-                      key={path}
-                      path={path}
-                      element={
-                        <ProtectedRoute adminOnly>
-                          <Page />
-                        </ProtectedRoute>
-                      }
-                    />
-                  ))}
-                  {/* The register. "/categories/:id" and "/productlist/:id" are older deep links
+                    {[
+                      ["/admin", AdminOverview],
+                      ["/admin/shops", AdminShops],
+                      ["/admin/health", AdminHealth],
+                      ["/admin/usage", AdminUsage],
+                      ["/admin/activity", AdminActivity],
+                      ["/admin/announcements", AdminAnnouncements],
+                      ["/admin/tickets", AdminTickets],
+                      ["/admin/tickets/:id", AdminTicket],
+                      ["/admin/estimator", AdminEstimator],
+                    ].map(([path, Page]) => (
+                      <Route
+                        key={path}
+                        path={path}
+                        element={
+                          <ProtectedRoute adminOnly>
+                            <Page />
+                          </ProtectedRoute>
+                        }
+                      />
+                    ))}
+                    {/* The register. "/categories/:id" and "/productlist/:id" are older deep links
                       (Global Search still navigates to the first) — they open the same screen
                       with that category's tab selected. */}
-                  {["/", "/categories/:prodNum", "/productlist/:prodNum"].map((path) => (
+                    {["/", "/categories/:prodNum", "/productlist/:prodNum"].map((path) => (
+                      <Route
+                        key={path}
+                        path={path}
+                        element={
+                          <ProtectedRoute>
+                            <Register />
+                          </ProtectedRoute>
+                        }
+                      />
+                    ))}
                     <Route
-                      key={path}
-                      path={path}
+                      path="/report"
                       element={
-                        <ProtectedRoute>
-                          <Register />
+                        <ProtectedRoute roles={OWNER_ONLY}>
+                          <SalesDataComponent />
                         </ProtectedRoute>
                       }
                     />
-                  ))}
-                  <Route
-                    path="/report"
-                    element={
-                      <ProtectedRoute roles={OWNER_ONLY}>
-                        <SalesDataComponent />
-                      </ProtectedRoute>
-                    }
-                  />
-                  {/* Any staff member (pages/Support). */}
-                  {[
-                    ["/support", Support],
-                    ["/support/:id", SupportTicket],
-                  ].map(([path, Page]) => (
+                    {/* Any staff member (pages/Support). */}
+                    {[
+                      ["/support", Support],
+                      ["/support/:id", SupportTicket],
+                    ].map(([path, Page]) => (
+                      <Route
+                        key={path}
+                        path={path}
+                        element={
+                          <ProtectedRoute>
+                            <Page />
+                          </ProtectedRoute>
+                        }
+                      />
+                    ))}
                     <Route
-                      key={path}
-                      path={path}
+                      path="/sales-history"
                       element={
                         <ProtectedRoute>
-                          <Page />
+                          <SalesHistory />
                         </ProtectedRoute>
                       }
                     />
-                  ))}
-                  <Route
-                    path="/sales-history"
-                    element={
-                      <ProtectedRoute>
-                        <SalesHistory />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/credit-debit"
-                    element={
-                      <ProtectedRoute roles={OWNER_ONLY} feature="partyLedger">
-                        <CreditDebit />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/settings"
-                    element={
-                      <ProtectedRoute roles={OWNER_ONLY}>
-                        <Settings />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/company"
-                    element={
-                      <ProtectedRoute roles={OWNER_ONLY}>
-                        <Company />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/inventory"
-                    element={
-                      <ProtectedRoute roles={OWNER_ONLY}>
-                        <Inventory />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/stock-adjustments"
-                    element={
-                      <ProtectedRoute roles={OWNER_ONLY} feature="stockAdjustments">
-                        <StockAdjustments />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/contacts"
-                    element={
-                      <ProtectedRoute roles={OWNER_ONLY} feature="contacts">
-                        <Contacts />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/store-credit"
-                    element={
-                      <ProtectedRoute roles={OWNER_ONLY} feature="storeCredit">
-                        <StoreCredit />
-                      </ProtectedRoute>
-                    }
-                  />
-                  {/* No roles restriction — confirming/cancelling a bank-transfer payment is
+                    <Route
+                      path="/credit-debit"
+                      element={
+                        <ProtectedRoute roles={OWNER_ONLY} feature="partyLedger">
+                          <CreditDebit />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/settings"
+                      element={
+                        <ProtectedRoute roles={OWNER_ONLY}>
+                          <Settings />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/company"
+                      element={
+                        <ProtectedRoute roles={OWNER_ONLY}>
+                          <Company />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/inventory"
+                      element={
+                        <ProtectedRoute roles={OWNER_ONLY}>
+                          <Inventory />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/stock-adjustments"
+                      element={
+                        <ProtectedRoute roles={OWNER_ONLY} feature="stockAdjustments">
+                          <StockAdjustments />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/contacts"
+                      element={
+                        <ProtectedRoute roles={OWNER_ONLY} feature="contacts">
+                          <Contacts />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/store-credit"
+                      element={
+                        <ProtectedRoute roles={OWNER_ONLY} feature="storeCredit">
+                          <StoreCredit />
+                        </ProtectedRoute>
+                      }
+                    />
+                    {/* No roles restriction — confirming/cancelling a bank-transfer payment is
                       any-staff, same trust level as refunds (see Routes/API/bankPaymentRoutes.js).
                       Route renamed from /bank-payments to reflect the page now covering all 3
                       payment mediums, not just the bank-transfer queue it still manages.
                       Smart-tier+ (`bankTransfer`) — a Basic shop has no bank-transfer QR queue
                       to manage. */}
-                  <Route
-                    path="/payment-mediums"
-                    element={
-                      <ProtectedRoute feature="bankTransfer">
-                        <BankPayments />
-                      </ProtectedRoute>
-                    }
-                  />
-                  {/* No roles restriction — shift open/close is self-service for any staff;
+                    <Route
+                      path="/payment-mediums"
+                      element={
+                        <ProtectedRoute feature="bankTransfer">
+                          <BankPayments />
+                        </ProtectedRoute>
+                      }
+                    />
+                    {/* No roles restriction — shift open/close is self-service for any staff;
                       shiftService.js scopes what each role can see/act on. Advanced-tier only
                       (`shifts`). */}
-                  <Route
-                    path="/shifts"
-                    element={
-                      <ProtectedRoute feature="shifts">
-                        <Shifts />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route
-                    path="/devices"
-                    element={
-                      <ProtectedRoute roles={OWNER_ONLY}>
-                        <Devices />
-                      </ProtectedRoute>
-                    }
-                  />
-                  <Route path="*" element={<NotFound />} />
-                </Routes>
+                    <Route
+                      path="/shifts"
+                      element={
+                        <ProtectedRoute feature="shifts">
+                          <Shifts />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route
+                      path="/devices"
+                      element={
+                        <ProtectedRoute roles={OWNER_ONLY}>
+                          <Devices />
+                        </ProtectedRoute>
+                      }
+                    />
+                    <Route path="*" element={<NotFound />} />
+                  </Routes>
+                </ErrorBoundary>
               </Suspense>
             </Router>
           </AuthProvider>

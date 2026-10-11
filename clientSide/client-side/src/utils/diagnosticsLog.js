@@ -14,6 +14,10 @@
 //
 // Kept in localStorage so it survives a reload (often the first thing tried when something
 // breaks), trimmed to the last WINDOW_MS and MAX_ENTRIES. Losing it never matters.
+//
+// When something breaks for real — an uncaught error, or a server error on something the person
+// did — it's also raised as a "problem", and the app offers to report it
+// (components/AppShell/ProblemPrompt.jsx, components/ErrorBoundary.jsx).
 const STORAGE_KEY = "pos-diagnostics";
 const MAX_ENTRIES = 400;
 const WINDOW_MS = 30 * 60 * 1000;
@@ -53,14 +57,16 @@ let entries = (() => {
 })();
 
 let saveTimer = null;
+// Written at once — before the page is left for the report after a crash.
+export const flushDiagnostics = () => {
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+  } catch {}
+};
 const save = () => {
-  if (saveTimer) return;
-  saveTimer = setTimeout(() => {
-    saveTimer = null;
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-    } catch {}
-  }, 1000);
+  if (!saveTimer) saveTimer = setTimeout(flushDiagnostics, 1000);
 };
 
 const trim = () => {
@@ -84,18 +90,54 @@ const BACKGROUND_PATHS = [
   "/api/bank-payments/intents",
 ];
 
+// --- Problems ---------------------------------------------------------------------------
+// The latest thing that broke, until it's reported or waved off. Not raised for a register
+// being offline (503: it needs the internet for that) or for errors browsers report that
+// aren't the app's (ResizeObserver, cross-origin "Script error.").
+const IGNORED_ERRORS = /ResizeObserver loop|^Script error\.?$/i;
+let problem = null;
+const problemListeners = new Set();
+
+const setProblem = (next) => {
+  problem = next;
+  problemListeners.forEach((listener) => listener(problem));
+};
+const raiseProblem = (message) => {
+  if (IGNORED_ERRORS.test(message)) return;
+  setProblem({ message: text(message).slice(0, 200), t: Date.now() });
+};
+export const currentProblem = () => problem;
+export const clearProblem = () => setProblem(null);
+export const onProblem = (listener) => {
+  problemListeners.add(listener);
+  return () => problemListeners.delete(listener);
+};
+
 // One server request, from utils/api.js. `status` is null when it never got an answer.
 export const logRequest = ({ method, path, status, ms, error }) => {
   const bare = String(path).split("?")[0];
-  const ok = status != null && status < 400;
-  if (ok && method === "GET" && BACKGROUND_PATHS.some((p) => bare === p || bare.startsWith(`${p}/`))) return;
+  const background = method === "GET" && BACKGROUND_PATHS.some((p) => bare === p || bare.startsWith(`${p}/`));
+  if (background && status != null && status < 400) return;
   logEvent("api", { method, path: redactPath(path), status, ms: Math.round(ms), error: error ? text(error) : undefined });
+  if (!background && status >= 500 && status !== 503) raiseProblem(`${method} ${bare} failed (${status})${error ? `: ${text(error)}` : ""}`);
 };
 
 export const logEvent = (type, data = {}) => {
   entries.push({ t: Date.now(), type, ...data });
   trim();
   save();
+};
+
+// An error the app didn't handle: logged with its stack, and raised as a problem to report.
+export const logError = (error, { prefix = "", where, componentStack } = {}) => {
+  const message = text(error);
+  logEvent("error", {
+    message: `${prefix}${message}`,
+    where,
+    stack: error?.stack ? String(error.stack).slice(0, 1500) : undefined,
+    componentStack: componentStack ? String(componentStack).slice(0, 1500) : undefined,
+  });
+  raiseProblem(message);
 };
 
 let installed = false;
@@ -109,12 +151,10 @@ export const installDiagnostics = () => {
   const build = [...document.scripts].map((s) => s.src).find((src) => /\/static\/js\/main\./.test(src));
   logEvent("app", { message: "App started", build: build ? build.split("/").pop() : "dev" });
 
-  window.addEventListener("error", (e) =>
-    logEvent("error", { message: text(e.error || e.message), where: e.filename ? `${e.filename.split("/").pop()}:${e.lineno}:${e.colno}` : undefined, stack: e.error?.stack ? String(e.error.stack).slice(0, 1500) : undefined })
-  );
-  window.addEventListener("unhandledrejection", (e) =>
-    logEvent("error", { message: `Unhandled: ${text(e.reason)}`, stack: e.reason?.stack ? String(e.reason.stack).slice(0, 1500) : undefined })
-  );
+  window.addEventListener("error", (e) => {
+    logError(e.error || e.message, { where: e.filename ? `${e.filename.split("/").pop()}:${e.lineno}:${e.colno}` : undefined });
+  });
+  window.addEventListener("unhandledrejection", (e) => logError(e.reason, { prefix: "Unhandled: " }));
   window.addEventListener("online", () => logEvent("network", { message: "Online" }));
   window.addEventListener("offline", () => logEvent("network", { message: "Offline" }));
   for (const level of ["error", "warn"]) {

@@ -9,6 +9,7 @@ const {
   AdminListTickets,
   AdminGetTicket,
   AdminSetStatus,
+  AdminUpdateTicket,
   AdminGetUnreadCount,
   AdminGetAttachment,
 } = require("../../Controller/supportController");
@@ -29,6 +30,7 @@ routes.get("/api/support/attachments/:id", requireAuth, requireShopUser, GetAtta
 
 routes.get("/api/admin/support/tickets", requireAuth, requireSuperAdmin, AdminListTickets);
 routes.get("/api/admin/support/tickets/:id", requireAuth, requireSuperAdmin, AdminGetTicket);
+routes.patch("/api/admin/support/tickets/:id", requireAuth, requireSuperAdmin, AdminUpdateTicket);
 routes.patch("/api/admin/support/tickets/:id/status", requireAuth, requireSuperAdmin, AdminSetStatus);
 routes.get("/api/admin/support/unread", requireAuth, requireSuperAdmin, AdminGetUnreadCount);
 routes.get("/api/admin/support/attachments/:id", requireAuth, requireSuperAdmin, AdminGetAttachment);

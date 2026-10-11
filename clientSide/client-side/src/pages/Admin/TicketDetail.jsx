@@ -7,14 +7,23 @@ import { useToast } from "components/Toast/ToastContext";
 import { apiGet, apiPatch, API_BASE_URL } from "utils/api";
 import AdminPage from "./AdminPage";
 import DiagnosticsViewer from "./DiagnosticsViewer";
+import { TriageCard, DuplicatesCard } from "./TicketTriage";
 import { cardClass, inputClass, buttonClass, formatDateTime } from "./shared";
-import { STATUS_LABEL } from "./Tickets";
+import { STATUS_LABEL, PriorityBadge } from "./Tickets";
 import { ADMIN_TICKETS_CHANGED_EVENT } from "./ticketEvents";
 
-const CONTEXT_LABEL = { page: "Page", platform: "App", appVersion: "Version", screen: "Screen", language: "Language", userAgent: "Browser" };
+const CONTEXT_LABEL = {
+  page: "Page",
+  platform: "App",
+  appVersion: "Version",
+  screen: "Screen",
+  language: "Language",
+  userAgent: "Browser",
+};
 
 // One ticket for the platform admin: the report and who sent it from where, its diagnostics,
-// and the status — which is all the shop sees change (there's no conversation on a ticket).
+// the status — which is all the shop sees change (there's no conversation on a ticket) — and
+// the admin's own triage: priority, a private note, and linking duplicates of the same problem.
 export default function AdminTicketPage() {
   const { id } = useParams();
   const toast = useToast();
@@ -30,18 +39,33 @@ export default function AdminTicketPage() {
   };
 
   useEffect(() => {
-    apiGet(`/api/admin/support/tickets/${id}`).then(show).catch((err) => setError(err.message));
+    apiGet(`/api/admin/support/tickets/${id}`)
+      .then(show)
+      .catch((err) => setError(err.message));
   }, [id]);
 
   const saveStatus = async () => {
     setSaving(true);
     try {
       show(await apiPatch(`/api/admin/support/tickets/${id}/status`, { status }));
-      toast.success("Status updated — the shop will see it");
+      toast.success(
+        ticket.duplicates.length ? "Status updated on this ticket and its duplicates — the shops will see it" : "Status updated — the shop will see it"
+      );
     } catch (err) {
       toast.error(err.message);
     } finally {
       setSaving(false);
+    }
+  };
+
+  // Triage (priority, note, duplicate-of); errors are shown, and rethrown so the card stays as it was.
+  const updateTicket = async (changes) => {
+    try {
+      show(await apiPatch(`/api/admin/support/tickets/${id}`, changes));
+      toast.success("Saved");
+    } catch (err) {
+      toast.error(err.message);
+      throw err;
     }
   };
 
@@ -59,7 +83,10 @@ export default function AdminTicketPage() {
           <div className={`${cardClass} p-4`}>
             <div className="flex flex-wrap items-start justify-between gap-2">
               <h1 className="min-w-0 break-words font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">{ticket.title}</h1>
-              <TicketStatusBadge status={ticket.status} />
+              <span className="flex shrink-0 items-center gap-1.5">
+                <PriorityBadge priority={ticket.priority} />
+                <TicketStatusBadge status={ticket.status} />
+              </span>
             </div>
             <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
               <TicketKindBadge kind={ticket.kind} />
@@ -93,19 +120,28 @@ export default function AdminTicketPage() {
               <div className={`${cardClass} p-4`}>
                 <h2 className="mb-3 text-sm font-bold text-gray-800 dark:text-gray-100">Status</h2>
                 <TicketProgress status={ticket.status} />
-                <div className="mt-4 flex flex-col gap-2">
-                  <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass} aria-label="New status">
-                    {TICKET_STATUSES.map((s) => (
-                      <option key={s} value={s}>
-                        {STATUS_LABEL[s]}
-                      </option>
-                    ))}
-                  </select>
-                  <button type="button" onClick={saveStatus} disabled={saving || status === ticket.status} className={buttonClass.primary}>
-                    {saving ? "Saving…" : "Update status"}
-                  </button>
-                </div>
+                {ticket.main_ticket ? (
+                  <p className="mt-4 text-xs text-gray-500 dark:text-gray-400">Follows #{ticket.main_ticket.id} — change the status there.</p>
+                ) : (
+                  <div className="mt-4 flex flex-col gap-2">
+                    <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass} aria-label="New status">
+                      {TICKET_STATUSES.map((s) => (
+                        <option key={s} value={s}>
+                          {STATUS_LABEL[s]}
+                        </option>
+                      ))}
+                    </select>
+                    <button type="button" onClick={saveStatus} disabled={saving || status === ticket.status} className={buttonClass.primary}>
+                      {saving ? "Saving…" : "Update status"}
+                    </button>
+                    {ticket.duplicates.length > 0 && (
+                      <p className="text-xs text-gray-500 dark:text-gray-400">Also moves its {ticket.duplicates.length} duplicate(s).</p>
+                    )}
+                  </div>
+                )}
               </div>
+              <TriageCard ticket={ticket} onUpdate={updateTicket} />
+              <DuplicatesCard ticket={ticket} onUpdate={updateTicket} />
               <div className={`${cardClass} p-4`}>
                 <h2 className="mb-3 text-sm font-bold text-gray-800 dark:text-gray-100">History</h2>
                 <TicketHistory ticket={ticket} formatTime={formatDateTime} />
