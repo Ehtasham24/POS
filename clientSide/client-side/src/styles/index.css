@@ -18,8 +18,15 @@ body {
   overflow-x: clip;
   max-width: 100%;
 }
-/* What shows past the page's edges when it's pulled beyond the top or bottom (the browser's
-   elastic overscroll): the page's own background (surface-subtle / gray-900), not white. */
+/* No elastic overscroll: at the top or bottom the page simply stops, instead of being pulled
+   past its edges (touchpad/touch "bounce", Android's stretch). It also turns off a phone
+   browser's pull-to-refresh, which would otherwise reload the register mid-sale. Inner
+   scrolling areas (the order panel, tables) keep their own behaviour. */
+html,
+body {
+  overscroll-behavior: none;
+}
+/* The page's own background (surface-subtle / gray-900) behind it, never white. */
 html {
   background-color: #f8fafc;
   color-scheme: light;
