@@ -1,17 +1,20 @@
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
+const { recentServerErrorsFor } = require("./monitoringService");
 
-// Support tickets (migration 034): a shop's bug reports and feature requests, and the
-// conversation about each one with the platform admin.
+// Support tickets (migrations 034, 035): a shop's bug reports and feature requests, tracked
+// by status. The shop describes the problem once (text, screenshots, and the app's
+// diagnostic log if they allow it); the platform admin moves it through the statuses, and the
+// shop follows that. There's no conversation on a ticket.
 //
 // Who sees what: any staff member can open a ticket; a cashier sees the ones they opened, the
 // owner every ticket of the shop. Shop-side reads and writes run in the shop's own context
 // (requireAuth → Db.js tenant), so row-level security keeps them to the shop as well. The
 // admin side spans every shop and runs as the platform admin, outside any shop context.
 //
-// History is the event list: the report's description is its first message, and every later
-// message and status change is another event — nothing on the ticket is overwritten without
-// an event saying so.
+// History is the event list: the report's description is its first message, and every status
+// change after it is another event (from what, to what, when) — the status on the ticket is
+// never changed without one.
 
 const KINDS = ["bug", "feature"];
 const STATUSES = ["open", "in_review", "planned", "in_progress", "resolved", "wont_fix"];
@@ -20,6 +23,10 @@ const MAX_ATTACHMENTS = 3;
 const MAX_ATTACHMENT_BYTES = 2 * 1024 * 1024;
 const MAX_BODY = 5000;
 const NEW_TICKETS_PER_HOUR = 10;
+// The diagnostics a ticket keeps: the server's own errors for the shop from this far back,
+// and at most this much of what the app sends (oldest log entries dropped first).
+const SERVER_ERRORS_WINDOW_MS = 60 * 60 * 1000;
+const MAX_DIAGNOSTICS_BYTES = 400 * 1024;
 const ADMIN_PAGE_SIZE = 30;
 
 // --- Input ------------------------------------------------------------------------------
@@ -61,6 +68,26 @@ const cleanContext = (context) => {
   for (const field of CONTEXT_FIELDS) {
     if (context?.[field] != null) out[field] = String(context[field]).slice(0, 300);
   }
+  return out;
+};
+
+// What goes on a ticket for the admin (migration 035): the app's log and environment as the app
+// sent it (`client`), a register's own report when the ticket came through one (`device` —
+// only then: the register adds it, device/readThrough.js), and this server's errors for the
+// shop over the last hour (`server`). Shown to the admin only, as text. Capped in size by
+// dropping the oldest log entries.
+const buildDiagnostics = ({ client, device, shopId }) => {
+  const isObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const out = {
+    server: { errors: recentServerErrorsFor(shopId, SERVER_ERRORS_WINDOW_MS), windowMinutes: SERVER_ERRORS_WINDOW_MS / 60000 },
+  };
+  if (isObject(client)) out.client = { ...client, entries: Array.isArray(client.entries) ? [...client.entries] : [] };
+  if (isObject(device)) out.device = device;
+  while (Buffer.byteLength(JSON.stringify(out)) > MAX_DIAGNOSTICS_BYTES && out.client?.entries?.length) {
+    out.client.entries.splice(0, Math.max(1, Math.ceil(out.client.entries.length / 10)));
+    out.client.truncated = true;
+  }
+  if (Buffer.byteLength(JSON.stringify(out)) > MAX_DIAGNOSTICS_BYTES) delete out.device;
   return out;
 };
 
@@ -151,7 +178,9 @@ const findVisibleTicket = async (db, user, ticketId, { lock = false } = {}) => {
   return rows[0];
 };
 
-const createTicket = async (user, { kind, title, body, attachments, context }) => {
+// `diagnostics` is what the app sends (null when the person chose not to); `deviceReport` is
+// only ever passed by the controller for a ticket that came through a register.
+const createTicket = async (user, { kind, title, body, attachments, context, diagnostics, deviceReport }) => {
   if (!KINDS.includes(kind)) throw new ApiError(400, "Choose whether this is a bug or a feature request");
   const cleanTitle = requireText(title, { name: "Title", min: 3, max: 150 });
   const cleanBody = requireText(body, { name: "Description", min: 1, max: MAX_BODY });
@@ -165,8 +194,15 @@ const createTicket = async (user, { kind, title, body, attachments, context }) =
 
   return withTransaction(async (client) => {
     const { rows } = await client.query(
-      `INSERT INTO support_tickets (shop_id, kind, title, opened_by, context) VALUES ($1, $2, $3, $4, $5) RETURNING id`,
-      [user.shopId, kind, cleanTitle, user.id, cleanContext(context)]
+      `INSERT INTO support_tickets (shop_id, kind, title, opened_by, context, diagnostics) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [
+        user.shopId,
+        kind,
+        cleanTitle,
+        user.id,
+        cleanContext(context),
+        diagnostics == null ? null : buildDiagnostics({ client: diagnostics, device: deviceReport, shopId: user.shopId }),
+      ]
     );
     const ticketId = rows[0].id;
     await insertMessage(client, { ticketId, shopId: user.shopId, authorId: user.id, side: "shop", body: cleanBody, attachments: files });
@@ -196,8 +232,7 @@ const listShopTickets = async (user, { state = "all" } = {}) => {
   const { rows } = await pool.query(
     `SELECT t.id, t.kind, t.title, t.status, t.created_at, t.last_event_at, t.last_event_side,
             u.display_name AS opened_by_name, t.opened_by = $1 AS mine,
-            (t.last_event_side = 'admin' AND (r.read_at IS NULL OR r.read_at < t.last_event_at)) AS unread,
-            (SELECT COUNT(*)::int FROM support_ticket_events e WHERE e.ticket_id = t.id AND e.kind = 'message') AS messages
+            (t.last_event_side = 'admin' AND (r.read_at IS NULL OR r.read_at < t.last_event_at)) AS unread
      FROM support_tickets t
      LEFT JOIN users u ON u.id = t.opened_by
      LEFT JOIN support_ticket_reads r ON r.ticket_id = t.id AND r.user_id = $1
@@ -216,30 +251,12 @@ const getShopTicket = async (user, ticketId) => {
     loadEvents(pool, ticket.id),
   ]);
   await markShopRead(pool, { ticketId: ticket.id, userId: user.id, shopId: user.shopId });
-  const { admin_read_at: _adminRead, ...visible } = ticket;
-  return { ...visible, opened_by_name: opener[0]?.display_name ?? null, events };
+  // The diagnostics are for the admin; the shop sees whether they were sent, not their content.
+  const { admin_read_at: _adminRead, diagnostics, ...visible } = ticket;
+  return { ...visible, has_diagnostics: diagnostics != null, opened_by_name: opener[0]?.display_name ?? null, events };
 };
 
-// A reply on a resolved or declined ticket reopens it: the shop is saying it isn't done.
-const replyAsShop = async (user, ticketId, { body, attachments }) => {
-  const cleanBody = requireText(body, { name: "Message", min: 1, max: MAX_BODY });
-  const files = decodeAttachments(attachments);
-  await withTransaction(async (client) => {
-    const ticket = await findVisibleTicket(client, user, ticketId, { lock: true });
-    await insertMessage(client, { ticketId: ticket.id, shopId: user.shopId, authorId: user.id, side: "shop", body: cleanBody, attachments: files });
-    if (CLOSED.includes(ticket.status)) {
-      await insertStatusChange(client, { ticketId: ticket.id, shopId: user.shopId, authorId: user.id, side: "shop", from: ticket.status, to: "open" });
-    }
-    await client.query(
-      `UPDATE support_tickets SET last_event_at = NOW(), last_event_side = 'shop', status = CASE WHEN status = ANY($2::text[]) THEN 'open' ELSE status END WHERE id = $1`,
-      [ticket.id, CLOSED]
-    );
-    await markShopRead(client, { ticketId: ticket.id, userId: user.id, shopId: user.shopId });
-  });
-  return getShopTicket(user, ticketId);
-};
-
-// Tickets with an answer this user hasn't seen yet (the header badge).
+// Tickets whose status changed since this user last looked (the header badge).
 const shopUnreadCount = async (user) => {
   const params = [user.id];
   const where = visibility(user, params);
@@ -294,8 +311,7 @@ const adminListTickets = async ({ state = "active", kind, shopId, q, page = 1 } 
     pool.query(
       `SELECT t.id, t.kind, t.title, t.status, t.created_at, t.last_event_at, t.last_event_side, t.shop_id,
               s.name AS shop_name, u.display_name AS opened_by_name, u.role AS opened_by_role,
-              (t.last_event_side = 'shop' AND (t.admin_read_at IS NULL OR t.admin_read_at < t.last_event_at)) AS unread,
-              (SELECT COUNT(*)::int FROM support_ticket_events e WHERE e.ticket_id = t.id AND e.kind = 'message') AS messages
+              (t.last_event_side = 'shop' AND (t.admin_read_at IS NULL OR t.admin_read_at < t.last_event_at)) AS unread
        FROM support_tickets t
        JOIN shops s ON s.id = t.shop_id
        LEFT JOIN users u ON u.id = t.opened_by
@@ -330,27 +346,16 @@ const adminGetTicket = async (ticketId) => {
   return { ...ticket, ...meta[0], events };
 };
 
-// One call for the admin's reply and/or status change, so both land as one step in the
-// history and the shop is told once.
-const adminUpdateTicket = async (admin, ticketId, { body, attachments, status }) => {
-  const hasBody = String(body ?? "").trim().length > 0;
-  const files = decodeAttachments(attachments);
-  if (status != null && !STATUSES.includes(status)) throw new ApiError(400, `Unknown status "${status}"`);
-  if (!hasBody && files.length) throw new ApiError(400, "Write a message to go with the pictures");
+// The admin moves the ticket to another status; the shop sees the change (and is told once).
+const adminSetStatus = async (admin, ticketId, { status }) => {
+  if (!STATUSES.includes(status)) throw new ApiError(400, `Unknown status "${status}"`);
   await withTransaction(async (client) => {
     const ticket = await findTicket(client, ticketId, { lock: true });
-    const changesStatus = status != null && status !== ticket.status;
-    if (!hasBody && !changesStatus) throw new ApiError(400, "Write a message or change the status");
-    if (hasBody) {
-      const cleanBody = requireText(body, { name: "Message", min: 1, max: MAX_BODY });
-      await insertMessage(client, { ticketId: ticket.id, shopId: ticket.shop_id, authorId: admin.id, side: "admin", body: cleanBody, attachments: files });
-    }
-    if (changesStatus) {
-      await insertStatusChange(client, { ticketId: ticket.id, shopId: ticket.shop_id, authorId: admin.id, side: "admin", from: ticket.status, to: status });
-    }
+    if (ticket.status === status) throw new ApiError(400, "The ticket already has that status");
+    await insertStatusChange(client, { ticketId: ticket.id, shopId: ticket.shop_id, authorId: admin.id, side: "admin", from: ticket.status, to: status });
     await client.query(
       `UPDATE support_tickets SET status = $2, last_event_at = NOW(), last_event_side = 'admin', admin_read_at = NOW() WHERE id = $1`,
-      [ticket.id, changesStatus ? status : ticket.status]
+      [ticket.id, status]
     );
   });
   return adminGetTicket(ticketId);
@@ -376,12 +381,11 @@ module.exports = {
   createTicket,
   listShopTickets,
   getShopTicket,
-  replyAsShop,
   shopUnreadCount,
   getShopAttachment,
   adminListTickets,
   adminGetTicket,
-  adminUpdateTicket,
+  adminSetStatus,
   adminUnreadCount,
   adminGetAttachment,
 };

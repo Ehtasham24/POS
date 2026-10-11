@@ -43,7 +43,6 @@ const CLOUD_ONLY = [
   ["GET", /^\/api\/support\/tickets$/],
   ["POST", /^\/api\/support\/tickets$/],
   ["GET", /^\/api\/support\/tickets\/\d+$/],
-  ["POST", /^\/api\/support\/tickets\/\d+\/messages$/],
   ["GET", /^\/api\/support\/unread$/],
   ["GET", /^\/api\/support\/attachments\/\d+$/, { binary: true }],
 ];

@@ -1,4 +1,5 @@
 import React, { createContext, useCallback, useContext, useRef, useState } from "react";
+import { logEvent } from "utils/diagnosticsLog";
 import {
   HiOutlineCheckCircle,
   HiOutlineXCircle,
@@ -33,6 +34,8 @@ export function ToastProvider({ children }) {
 
   const show = useCallback(
     (message, type = "info") => {
+      // What the user was told when something went wrong — for a support ticket's log.
+      if (type === "error" || type === "warning") logEvent("toast", { level: type, message: String(message).slice(0, 500) });
       const id = ++idRef.current;
       setToasts((prev) => [...prev, { id, message, type }]);
       setTimeout(() => dismiss(id), 4000);

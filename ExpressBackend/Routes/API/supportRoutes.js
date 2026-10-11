@@ -4,12 +4,11 @@ const {
   ListTickets,
   CreateTicket,
   GetTicket,
-  ReplyToTicket,
   GetUnreadCount,
   GetAttachment,
   AdminListTickets,
   AdminGetTicket,
-  AdminUpdateTicket,
+  AdminSetStatus,
   AdminGetUnreadCount,
   AdminGetAttachment,
 } = require("../../Controller/supportController");
@@ -25,13 +24,12 @@ const requireShopUser = (req, res, next) => (req.shop ? next() : next(new ApiErr
 routes.get("/api/support/tickets", requireAuth, requireShopUser, ListTickets);
 routes.post("/api/support/tickets", requireAuth, requireShopUser, CreateTicket);
 routes.get("/api/support/tickets/:id", requireAuth, requireShopUser, GetTicket);
-routes.post("/api/support/tickets/:id/messages", requireAuth, requireShopUser, ReplyToTicket);
 routes.get("/api/support/unread", requireAuth, requireShopUser, GetUnreadCount);
 routes.get("/api/support/attachments/:id", requireAuth, requireShopUser, GetAttachment);
 
 routes.get("/api/admin/support/tickets", requireAuth, requireSuperAdmin, AdminListTickets);
 routes.get("/api/admin/support/tickets/:id", requireAuth, requireSuperAdmin, AdminGetTicket);
-routes.post("/api/admin/support/tickets/:id", requireAuth, requireSuperAdmin, AdminUpdateTicket);
+routes.patch("/api/admin/support/tickets/:id/status", requireAuth, requireSuperAdmin, AdminSetStatus);
 routes.get("/api/admin/support/unread", requireAuth, requireSuperAdmin, AdminGetUnreadCount);
 routes.get("/api/admin/support/attachments/:id", requireAuth, requireSuperAdmin, AdminGetAttachment);
 

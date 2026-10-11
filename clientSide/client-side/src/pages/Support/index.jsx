@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { HiOutlinePlus, HiOutlineLifebuoy, HiOutlineBugAnt, HiOutlineLightBulb, HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
+import { HiOutlinePlus, HiOutlineLifebuoy, HiOutlineBugAnt, HiOutlineLightBulb } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { EmptyState, Modal, SkeletonRows } from "components";
 import { TicketStatusBadge, TicketKindBadge, PicturePicker, toAttachments } from "components/Support";
@@ -9,6 +9,7 @@ import { useToast } from "components/Toast/ToastContext";
 import { useAuth } from "auth/AuthContext";
 import useDeviceStatus from "hooks/useDeviceStatus";
 import { apiGet, apiPost } from "utils/api";
+import { snapshotDiagnostics, diagnosticsSummary } from "utils/diagnosticsLog";
 import { timeAgoIn } from "utils/timeAgo";
 import { SUPPORT_CHANGED_EVENT } from "./events";
 
@@ -18,7 +19,8 @@ const labelClass = "mb-1 block text-sm font-semibold text-gray-800 dark:text-gra
 const FILTERS = ["active", "closed", "all"];
 
 // Reporting a problem or asking for a feature (Sevices/supportService.js). The report records
-// where it came from, so whoever answers knows the page, the app and the version.
+// where it came from, and — unless the person unticks it — the app's diagnostic log of the last
+// half hour (utils/diagnosticsLog.js), so whoever looks into it can see what happened.
 function NewTicketModal({ fromPage, onClose, onCreated }) {
   const { t } = useLanguage();
   const toast = useToast();
@@ -28,6 +30,8 @@ function NewTicketModal({ fromPage, onClose, onCreated }) {
   const [body, setBody] = useState("");
   const [pictures, setPictures] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [includeLogs, setIncludeLogs] = useState(true);
+  const [logSummary] = useState(diagnosticsSummary);
 
   const submit = async (e) => {
     e.preventDefault();
@@ -46,6 +50,7 @@ function NewTicketModal({ fromPage, onClose, onCreated }) {
           screen: `${window.innerWidth}x${window.innerHeight}`,
           language: document.documentElement.lang || undefined,
         },
+        diagnostics: includeLogs ? snapshotDiagnostics(device) : undefined,
       });
       toast.success(t("support.created"));
       onCreated(created.id);
@@ -117,6 +122,20 @@ function NewTicketModal({ fromPage, onClose, onCreated }) {
           <p className={labelClass}>{t("support.pictures")}</p>
           <PicturePicker pictures={pictures} onChange={setPictures} disabled={saving} />
         </div>
+        <label className="flex items-start gap-3 rounded-xl bg-surface-subtle p-3 dark:bg-gray-900">
+          <input
+            type="checkbox"
+            checked={includeLogs}
+            onChange={(e) => setIncludeLogs(e.target.checked)}
+            className="mt-0.5 h-4 w-4 shrink-0 rounded border-gray-400 text-primary-600 focus:ring-primary-500"
+          />
+          <span className="text-sm">
+            <span className="font-semibold text-gray-800 dark:text-gray-100">{t("support.includeLogs")}</span>
+            <span className="mt-0.5 block text-xs text-gray-500 dark:text-gray-400">
+              {t("support.includeLogsHint", { n: logSummary.count, minutes: logSummary.windowMinutes })}
+            </span>
+          </span>
+        </label>
         <div className="flex justify-end gap-2">
           <button
             type="button"
@@ -226,9 +245,6 @@ export default function SupportPage() {
                     <TicketKindBadge kind={ticket.kind} />
                     <span>#{ticket.id}</span>
                     {!ticket.mine && <span>· {ticket.opened_by_name}</span>}
-                    <span className="inline-flex items-center gap-1">
-                      · <HiOutlineChatBubbleLeftRight /> {ticket.messages}
-                    </span>
                     <span>· {timeAgo(ticket.last_event_at)}</span>
                   </span>
                 </Link>

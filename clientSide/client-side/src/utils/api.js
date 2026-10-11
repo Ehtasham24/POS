@@ -8,6 +8,7 @@
 // .env.development (REACT_APP_API_BASE_URL=http://localhost:4000), since the CRA dev
 // server and the API run on different ports there.
 import { clearRequestCache } from "utils/requestCache";
+import { logRequest } from "utils/diagnosticsLog";
 
 export const API_BASE_URL = process.env.REACT_APP_API_BASE_URL || "";
 
@@ -43,10 +44,13 @@ const request = async (method, path, body, opts = {}) => {
     : null;
   options.signal = controller.signal;
 
+  // Every request goes into the diagnostic log a support ticket can carry (utils/diagnosticsLog.js).
+  const started = performance.now();
   let response;
   try {
     response = await fetch(`${API_BASE_URL}${path}`, options);
   } catch (error) {
+    logRequest({ method, path, status: null, ms: performance.now() - started, error: timedOut ? "timed out" : error.message });
     // fetch() itself throwing (vs. resolving with a non-2xx response) means the request
     // never reached the server at all — no connection, wrong host, DNS failure, a timeout.
     // Tagged so callers (e.g. the offline-aware checkout flow) can tell "the network is
@@ -61,6 +65,7 @@ const request = async (method, path, body, opts = {}) => {
 
   if (!response.ok) {
     const errData = await response.json().catch(() => ({}));
+    logRequest({ method, path, status: response.status, ms: performance.now() - started, error: errData.message || response.statusText });
     const error = new Error(errData.message || response.statusText || "Request failed");
     // Machine-readable reason, when the server gives one (e.g. VOUCHER_NEEDS_INTERNET).
     error.code = errData.code;
@@ -78,6 +83,8 @@ const request = async (method, path, body, opts = {}) => {
     }
     throw error;
   }
+
+  logRequest({ method, path, status: response.status, ms: performance.now() - started });
 
   // Anything that wrote (a sale, a refund, a void, an edit) may have changed numbers a cached
   // read is holding (utils/requestCache.js) — drop them so the next view is fresh.

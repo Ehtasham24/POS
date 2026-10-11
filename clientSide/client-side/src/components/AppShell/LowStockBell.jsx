@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { HiOutlineBell, HiOutlineExclamationTriangle, HiOutlinePlusCircle, HiOutlineXCircle } from "react-icons/hi2";
 import { apiGet } from "utils/api";
+import { useAuth } from "auth/AuthContext";
 import { useLanguage } from "i18n/LanguageContext";
 import RestockModal from "categoriesComponents/RestockModal";
 import { INVENTORY_CHANGED_EVENT } from "pages/Inventory/events";
@@ -31,6 +32,10 @@ const loadReadState = () => {
 // Clicking an alert opens RestockModal for that product, so the stock can be topped up
 // right there; the Inventory page (if open) is told to refetch afterwards.
 export default function LowStockBell() {
+  // Stock levels are the owner's (/api/inventory is owner-only): for anyone else this asked
+  // every minute and was refused every time.
+  const { user } = useAuth();
+  const isOwner = user?.role === "owner";
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const { t } = useLanguage();
@@ -52,10 +57,12 @@ export default function LowStockBell() {
   };
 
   useEffect(() => {
+    if (!isOwner) return undefined;
     fetchAlerts();
     const interval = setInterval(fetchAlerts, POLL_MS);
     return () => clearInterval(interval);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOwner]);
 
   useEffect(() => {
     if (!open) return;
@@ -102,6 +109,8 @@ export default function LowStockBell() {
       return next;
     });
   };
+
+  if (!isOwner) return null;
 
   return (
     <div className="relative" ref={containerRef}>

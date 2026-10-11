@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { HiOutlineChatBubbleLeftRight } from "react-icons/hi2";
 import { SkeletonRows, Pagination } from "components";
 import { TicketStatusBadge, TicketKindBadge, TICKET_STATUSES } from "components/Support";
 import useDebounce from "hooks/useDebounce";
@@ -17,7 +16,7 @@ const STATUS_LABEL = {
   wont_fix: "Won't do",
 };
 
-// The tickets as rows (newest activity first, ones with an unseen shop message on top). Used
+// The tickets as rows (newest activity first, ones not looked at yet on top). Used
 // here and on a shop's detail panel (`shopId`).
 export function TicketsTable({ shopId, state = "all", kind = "", q = "", compact = false }) {
   const [data, setData] = useState(null);
@@ -51,7 +50,7 @@ export function TicketsTable({ shopId, state = "all", kind = "", q = "", compact
             <Link to={`/admin/tickets/${ticket.id}`} className="flex flex-col gap-1 px-4 py-3 hover:bg-surface-subtle dark:hover:bg-gray-700/60">
               <span className="flex items-start justify-between gap-3">
                 <span className="flex min-w-0 items-center gap-2">
-                  {ticket.unread && <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary-600" title="New message from the shop" />}
+                  {ticket.unread && <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-primary-600" title="New ticket, not looked at yet" />}
                   <span className={`truncate text-sm ${ticket.unread ? "font-bold" : "font-medium"} text-gray-800 dark:text-gray-100`}>{ticket.title}</span>
                 </span>
                 <TicketStatusBadge status={ticket.status} />
@@ -62,9 +61,6 @@ export function TicketsTable({ shopId, state = "all", kind = "", q = "", compact
                 {!compact && <span className="font-medium text-gray-700 dark:text-gray-300">· {ticket.shop_name}</span>}
                 <span>
                   · {ticket.opened_by_name} ({ticket.opened_by_role})
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  · <HiOutlineChatBubbleLeftRight /> {ticket.messages}
                 </span>
                 <span>· {timeAgo(ticket.last_event_at)}</span>
               </span>

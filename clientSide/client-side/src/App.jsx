@@ -5,7 +5,8 @@ import LoginPage from "pages/Login";
 import NotFound from "pages/NotFound";
 import lazyPage, { preloadPages } from "utils/lazyPage";
 import PageLoading from "components/PageLoading";
-import { BrowserRouter as Router, Route, Routes } from "react-router-dom";
+import { BrowserRouter as Router, Route, Routes, useLocation } from "react-router-dom";
+import { logEvent, redactPath } from "utils/diagnosticsLog";
 import { ToastProvider } from "components/Toast/ToastContext";
 import { LanguageProvider } from "i18n/LanguageContext";
 import { AuthProvider } from "auth/AuthContext";
@@ -51,6 +52,15 @@ const SetNewPasswordPage = lazyPage(() => import("pages/SetNewPassword"));
 // getBilledHistory), so it isn't wrapped with a roles restriction here.
 const OWNER_ONLY = ["owner"];
 
+// Each page opened goes into the diagnostic log (utils/diagnosticsLog.js).
+function DiagnosticsRouteLogger() {
+  const { pathname, search } = useLocation();
+  useEffect(() => {
+    logEvent("nav", { path: redactPath(`${pathname}${search}`) });
+  }, [pathname, search]);
+  return null;
+}
+
 function App() {
   // Best-effort silent reconnect to a previously-paired thermal printer (Chromium only,
   // no-ops elsewhere) — see utils/thermalPrinter/connection.js.
@@ -73,6 +83,7 @@ function App() {
             <CartPersistence />
             <Router>
               <Suspense fallback={<PageLoading />}>
+                <DiagnosticsRouteLogger />
                 <Routes>
                   <Route path="/login" element={<LoginPage />} />
                   {/* A shop's own device (the Windows/Android app) before its first-run setup —

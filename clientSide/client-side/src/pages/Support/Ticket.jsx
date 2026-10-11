@@ -1,20 +1,22 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { HiOutlineArrowLeft } from "react-icons/hi2";
+import { HiOutlineArrowLeft, HiOutlineDocumentMagnifyingGlass } from "react-icons/hi2";
 import AppShell from "components/AppShell";
 import { SkeletonRows } from "components";
-import { TicketStatusBadge, TicketKindBadge, TicketTimeline, MessageComposer, toAttachments, CLOSED_STATUSES } from "components/Support";
+import { TicketStatusBadge, TicketKindBadge, TicketProgress, TicketReport, TicketHistory } from "components/Support";
 import { useLanguage } from "i18n/LanguageContext";
-import { useToast } from "components/Toast/ToastContext";
 import { useTimezone } from "timezone/TimezoneContext";
-import { apiGet, apiPost, API_BASE_URL } from "utils/api";
+import { apiGet, API_BASE_URL } from "utils/api";
 import { SUPPORT_CHANGED_EVENT } from "./events";
 
-// One ticket: its history and the reply box. Opening it marks the answers in it as seen.
+const cardClass = "rounded-2xl border border-surface-border bg-white-A700 p-4 dark:border-gray-700 dark:bg-gray-800";
+const headingClass = "mb-3 text-sm font-semibold text-gray-800 dark:text-gray-100";
+
+// One ticket, as the shop follows it: where it stands, what was reported, and when its
+// status changed. Opening it marks any status change in it as seen.
 export default function SupportTicketPage() {
   const { id } = useParams();
   const { t } = useLanguage();
-  const toast = useToast();
   const { formatDateTime } = useTimezone();
   const [ticket, setTicket] = useState(null);
   const [error, setError] = useState(null);
@@ -33,15 +35,6 @@ export default function SupportTicketPage() {
     };
   }, [id]);
 
-  const reply = async ({ body, pictures }) => {
-    try {
-      setTicket(await apiPost(`/api/support/tickets/${id}/messages`, { body, attachments: toAttachments(pictures) }));
-    } catch (err) {
-      toast.error(err.message);
-      throw err;
-    }
-  };
-
   const formatTime = (value) => formatDateTime(value, { dateStyle: "medium", timeStyle: "short" });
 
   return (
@@ -58,7 +51,7 @@ export default function SupportTicketPage() {
           </div>
         ) : (
           <>
-            <div className="rounded-2xl border border-surface-border bg-white-A700 p-4 dark:border-gray-700 dark:bg-gray-800">
+            <div className={cardClass}>
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <h2 className="min-w-0 break-words font-poppins text-lg font-bold text-gray-800 dark:text-gray-100">{ticket.title}</h2>
                 <TicketStatusBadge status={ticket.status} />
@@ -66,21 +59,25 @@ export default function SupportTicketPage() {
               <p className="mt-2 flex flex-wrap items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
                 <TicketKindBadge kind={ticket.kind} />
                 <span>#{ticket.id}</span>
-                <span>· {t("support.openedBy", { name: ticket.opened_by_name || "—", when: formatTime(ticket.created_at) })}</span>
+              </p>
+              <div className="mt-5">
+                <TicketProgress status={ticket.status} />
+              </div>
+            </div>
+
+            <div className={cardClass}>
+              <h3 className={headingClass}>{t("support.report")}</h3>
+              <TicketReport events={ticket.events} attachmentUrl={(attachmentId) => `${API_BASE_URL}/api/support/attachments/${attachmentId}`} />
+              <p className="mt-3 flex items-center gap-1.5 text-xs text-gray-500 dark:text-gray-400">
+                <HiOutlineDocumentMagnifyingGlass className="text-sm" />
+                {ticket.has_diagnostics ? t("support.diagnosticsSent") : t("support.diagnosticsNotSent")}
               </p>
             </div>
 
-            <TicketTimeline
-              events={ticket.events}
-              viewer="shop"
-              attachmentUrl={(attachmentId) => `${API_BASE_URL}/api/support/attachments/${attachmentId}`}
-              formatTime={formatTime}
-            />
-
-            {CLOSED_STATUSES.includes(ticket.status) && (
-              <p className="text-center text-xs text-gray-500 dark:text-gray-400">{t("support.closedHint")}</p>
-            )}
-            <MessageComposer onSend={reply} />
+            <div className={cardClass}>
+              <h3 className={headingClass}>{t("support.statusHistory")}</h3>
+              <TicketHistory ticket={ticket} formatTime={formatTime} />
+            </div>
           </>
         )}
       </div>

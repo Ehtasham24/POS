@@ -2,6 +2,8 @@ const support = require("../Sevices/supportService");
 const asyncHandler = require("../utils/asyncHandler");
 
 // Support tickets (Sevices/supportService.js): the shop's side, then the platform admin's.
+// A register's own report (sync state, its server errors) is taken only when the ticket really
+// came through a register (Middleware/deviceReadThrough.js set req.deviceReadThrough).
 
 const sendPicture = (res, { mime, data }) => {
   res.set({ "Content-Type": mime, "Cache-Control": "private, max-age=86400", "X-Content-Type-Options": "nosniff" });
@@ -13,15 +15,21 @@ const ListTickets = asyncHandler(async (req, res) => {
   res.send(await support.listShopTickets(req.user, { state: req.query.state }));
 });
 const CreateTicket = asyncHandler(async (req, res) => {
-  const { kind, title, body, attachments, context } = req.body || {};
-  res.status(201).send(await support.createTicket(req.user, { kind, title, body, attachments, context }));
+  const { kind, title, body, attachments, context, diagnostics, deviceReport } = req.body || {};
+  res.status(201).send(
+    await support.createTicket(req.user, {
+      kind,
+      title,
+      body,
+      attachments,
+      context,
+      diagnostics,
+      deviceReport: req.deviceReadThrough ? deviceReport : undefined,
+    })
+  );
 });
 const GetTicket = asyncHandler(async (req, res) => {
   res.send(await support.getShopTicket(req.user, req.params.id));
-});
-const ReplyToTicket = asyncHandler(async (req, res) => {
-  const { body, attachments } = req.body || {};
-  res.send(await support.replyAsShop(req.user, req.params.id, { body, attachments }));
 });
 const GetUnreadCount = asyncHandler(async (req, res) => {
   res.send({ count: await support.shopUnreadCount(req.user) });
@@ -38,9 +46,8 @@ const AdminListTickets = asyncHandler(async (req, res) => {
 const AdminGetTicket = asyncHandler(async (req, res) => {
   res.send(await support.adminGetTicket(req.params.id));
 });
-const AdminUpdateTicket = asyncHandler(async (req, res) => {
-  const { body, attachments, status } = req.body || {};
-  res.send(await support.adminUpdateTicket(req.user, req.params.id, { body, attachments, status }));
+const AdminSetStatus = asyncHandler(async (req, res) => {
+  res.send(await support.adminSetStatus(req.user, req.params.id, { status: req.body?.status }));
 });
 const AdminGetUnreadCount = asyncHandler(async (req, res) => {
   res.send({ count: await support.adminUnreadCount() });
@@ -53,12 +60,11 @@ module.exports = {
   ListTickets,
   CreateTicket,
   GetTicket,
-  ReplyToTicket,
   GetUnreadCount,
   GetAttachment,
   AdminListTickets,
   AdminGetTicket,
-  AdminUpdateTicket,
+  AdminSetStatus,
   AdminGetUnreadCount,
   AdminGetAttachment,
 };

@@ -2,24 +2,26 @@ import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { HiOutlineArrowLeft } from "react-icons/hi2";
 import { SkeletonRows } from "components";
-import { TicketStatusBadge, TicketKindBadge, TicketTimeline, MessageComposer, toAttachments, TICKET_STATUSES } from "components/Support";
+import { TicketStatusBadge, TicketKindBadge, TicketProgress, TicketReport, TicketHistory, TICKET_STATUSES } from "components/Support";
 import { useToast } from "components/Toast/ToastContext";
-import { apiGet, apiPost, API_BASE_URL } from "utils/api";
+import { apiGet, apiPatch, API_BASE_URL } from "utils/api";
 import AdminPage from "./AdminPage";
-import { cardClass, inputClass, formatDateTime } from "./shared";
+import DiagnosticsViewer from "./DiagnosticsViewer";
+import { cardClass, inputClass, buttonClass, formatDateTime } from "./shared";
 import { STATUS_LABEL } from "./Tickets";
 import { ADMIN_TICKETS_CHANGED_EVENT } from "./ticketEvents";
 
 const CONTEXT_LABEL = { page: "Page", platform: "App", appVersion: "Version", screen: "Screen", language: "Language", userAgent: "Browser" };
 
-// One ticket for the platform admin: who sent it from where, the conversation, and the reply
-// box with the status picker — a reply and a status change go together as one update.
+// One ticket for the platform admin: the report and who sent it from where, its diagnostics,
+// and the status — which is all the shop sees change (there's no conversation on a ticket).
 export default function AdminTicketPage() {
   const { id } = useParams();
   const toast = useToast();
   const [ticket, setTicket] = useState(null);
   const [error, setError] = useState(null);
   const [status, setStatus] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const show = (data) => {
     setTicket(data);
@@ -31,18 +33,20 @@ export default function AdminTicketPage() {
     apiGet(`/api/admin/support/tickets/${id}`).then(show).catch((err) => setError(err.message));
   }, [id]);
 
-  const send = async ({ body, pictures }) => {
+  const saveStatus = async () => {
+    setSaving(true);
     try {
-      show(await apiPost(`/api/admin/support/tickets/${id}`, { body: body || undefined, attachments: toAttachments(pictures), status }));
-      toast.success("Sent to the shop");
+      show(await apiPatch(`/api/admin/support/tickets/${id}/status`, { status }));
+      toast.success("Status updated — the shop will see it");
     } catch (err) {
       toast.error(err.message);
-      throw err;
+    } finally {
+      setSaving(false);
     }
   };
 
   return (
-    <AdminPage title={ticket ? `#${ticket.id} ${ticket.title}` : "Ticket"} maxWidth="max-w-4xl">
+    <AdminPage title={ticket ? `#${ticket.id} ${ticket.title}` : "Ticket"} maxWidth="max-w-5xl">
       <Link to="/admin/tickets" className="mb-4 inline-flex items-center gap-1.5 text-sm font-medium text-primary-600 hover:underline dark:text-primary-400">
         <HiOutlineArrowLeft /> All tickets
       </Link>
@@ -67,8 +71,11 @@ export default function AdminTicketPage() {
               </span>
               <span>· {formatDateTime(ticket.created_at)}</span>
             </p>
+            <div className="mt-4">
+              <TicketReport events={ticket.events} attachmentUrl={(attachmentId) => `${API_BASE_URL}/api/admin/support/attachments/${attachmentId}`} />
+            </div>
             {Object.keys(ticket.context || {}).length > 0 && (
-              <dl className="mt-3 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 rounded-lg bg-surface-subtle p-3 text-xs dark:bg-gray-900">
+              <dl className="mt-4 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 rounded-lg bg-surface-subtle p-3 text-xs dark:bg-gray-900">
                 {Object.entries(ticket.context).map(([key, value]) => (
                   <div key={key} className="contents">
                     <dt className="font-semibold text-gray-600 dark:text-gray-300">{CONTEXT_LABEL[key] || key}</dt>
@@ -79,30 +86,32 @@ export default function AdminTicketPage() {
             )}
           </div>
 
-          <TicketTimeline
-            events={ticket.events}
-            viewer="admin"
-            attachmentUrl={(attachmentId) => `${API_BASE_URL}/api/admin/support/attachments/${attachmentId}`}
-            formatTime={formatDateTime}
-          />
+          <div className="grid grid-cols-[1fr,18rem] items-start gap-4 md:grid-cols-1">
+            <DiagnosticsViewer ticketId={ticket.id} diagnostics={ticket.diagnostics} />
 
-          <MessageComposer
-            onSend={send}
-            allowEmpty={status !== ticket.status}
-            placeholder="Reply to the shop… (or just change the status)"
-            extra={
-              <label className="flex items-center gap-2 text-sm text-gray-600 dark:text-gray-300">
-                Status
-                <select value={status} onChange={(e) => setStatus(e.target.value)} className={`${inputClass} w-auto`}>
-                  {TICKET_STATUSES.map((s) => (
-                    <option key={s} value={s}>
-                      {STATUS_LABEL[s]}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            }
-          />
+            <div className="flex flex-col gap-4">
+              <div className={`${cardClass} p-4`}>
+                <h2 className="mb-3 text-sm font-bold text-gray-800 dark:text-gray-100">Status</h2>
+                <TicketProgress status={ticket.status} />
+                <div className="mt-4 flex flex-col gap-2">
+                  <select value={status} onChange={(e) => setStatus(e.target.value)} className={inputClass} aria-label="New status">
+                    {TICKET_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {STATUS_LABEL[s]}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" onClick={saveStatus} disabled={saving || status === ticket.status} className={buttonClass.primary}>
+                    {saving ? "Saving…" : "Update status"}
+                  </button>
+                </div>
+              </div>
+              <div className={`${cardClass} p-4`}>
+                <h2 className="mb-3 text-sm font-bold text-gray-800 dark:text-gray-100">History</h2>
+                <TicketHistory ticket={ticket} formatTime={formatDateTime} />
+              </div>
+            </div>
+          </div>
         </div>
       )}
     </AdminPage>

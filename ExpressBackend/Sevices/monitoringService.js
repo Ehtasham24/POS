@@ -83,6 +83,15 @@ const recordServerError = ({ method, path, status, message, shopId, userId }) =>
   recentErrors.length = Math.min(recentErrors.length, RECENT_ERRORS_KEPT);
 };
 
+// One shop's server errors from the last `withinMs` (what this process still remembers):
+// attached to that shop's support tickets, so the admin sees what the server logged — the
+// real message, which the user may only have seen as "something went wrong". shopId null:
+// every shop's (a register, which only ever serves one).
+const recentServerErrorsFor = (shopId, withinMs) => {
+  const since = Date.now() - withinMs;
+  return recentErrors.filter((e) => (shopId == null || e.shopId === shopId) && e.at.getTime() >= since);
+};
+
 // Wraps a background job's run so the Health page can show when it last ran and whether it
 // worked. Rethrows, so the job's own error handling is unchanged.
 const trackJob = async (name, run) => {
@@ -180,4 +189,13 @@ const snapshot = () => {
 // The event-loop numbers cover the last few minutes, not the whole uptime.
 setInterval(() => eventLoop.reset(), 5 * 60 * 1000).unref();
 
-module.exports = { recordRequest, recordServerError, trackJob, onlineShopIds, shopLastSeenAt, snapshot, ONLINE_WINDOW_MS };
+module.exports = {
+  recordRequest,
+  recordServerError,
+  recentServerErrorsFor,
+  trackJob,
+  onlineShopIds,
+  shopLastSeenAt,
+  snapshot,
+  ONLINE_WINDOW_MS,
+};

@@ -1,6 +1,7 @@
 // Support tickets from a register (device/readThrough.js): they live only in the cloud, so the
 // register passes every request on — opening a ticket, the list, a picture's bytes — as the
-// person signed in on it; offline it says the internet is needed, without signing them out.
+// person signed in on it, adding its own report (sync state, its server's errors) when the
+// person sends diagnostics; offline it says the internet is needed, without signing them out.
 // One register against a TEMPORARY cloud shop (removed at the end).
 //
 //   node scripts/support-test.js     (the cloud backend must be running: POS_CLOUD_URL,
@@ -51,14 +52,20 @@ const check = (label, ok, detail) => {
       body: "The cash drawer stays shut after a sale.",
       attachments: [{ data: PNG }],
       context: { page: "/", platform: "windows", appVersion: "0.0.1" },
+      diagnostics: { capturedAt: new Date().toISOString(), entries: [{ t: new Date().toISOString(), type: "nav", path: "/" }] },
     });
     check("A register opens a ticket (it lands in the cloud)", opened.status === 201 && opened.body.id, opened.body);
-    const { rows } = await cloudDb.query(`SELECT shop_id, opened_by, context FROM support_tickets WHERE id = $1`, [opened.body.id]);
+    const { rows } = await cloudDb.query(`SELECT shop_id, opened_by, context, diagnostics FROM support_tickets WHERE id = $1`, [opened.body.id]);
     const [{ id: cloudOwnerId }] = (await cloudDb.query(`SELECT id FROM users WHERE username = $1`, [owner.username])).rows;
     check("…for the register's shop, as the person signed in on it", rows[0]?.shop_id === shopId && rows[0].opened_by === cloudOwnerId && rows[0].context.platform === "windows", rows[0]);
+    const report = rows[0]?.diagnostics?.device;
+    check("The register added its own report: name, prefix, sync state, its server errors", report?.receiptPrefix === "P1" && report.sync && Array.isArray(report.serverErrors) && rows[0].diagnostics.client.entries.length === 1, rows[0]?.diagnostics);
+    const plain = await A.api("POST", "/api/support/tickets", { kind: "feature", title: "Bigger buttons", body: "Please." });
+    const { rows: plainRows } = await cloudDb.query(`SELECT diagnostics FROM support_tickets WHERE id = $1`, [plain.body.id]);
+    check("Without diagnostics, the register adds nothing either", plain.status === 201 && plainRows[0].diagnostics === null, plainRows[0]);
 
     const list = await A.api("GET", "/api/support/tickets");
-    check("The register lists it", list.status === 200 && list.body.length === 1, list.body);
+    check("The register lists them", list.status === 200 && list.body.length === 2, list.body);
     const detail = await A.api("GET", `/api/support/tickets/${opened.body.id}`);
     const attachmentId = detail.body.events?.[0]?.attachments?.[0]?.id;
     check("…and opens it, picture included", detail.status === 200 && attachmentId, detail.body);
@@ -66,11 +73,11 @@ const check = (label, ok, detail) => {
     const bytes = Buffer.from(await picture.arrayBuffer());
     check("The picture comes through as PNG bytes", picture.status === 200 && picture.headers.get("content-type") === "image/png" && bytes[1] === 0x50, { status: picture.status, type: picture.headers.get("content-type") });
 
-    await cloudCall(adminToken, "POST", `/api/admin/support/tickets/${opened.body.id}`, { body: "Is the drawer cable plugged into the printer?", status: "in_review" });
+    await cloudCall(adminToken, "PATCH", `/api/admin/support/tickets/${opened.body.id}/status`, { status: "in_review" });
     const unread = await A.api("GET", "/api/support/unread");
-    check("The admin's answer shows as new on the register", unread.status === 200 && unread.body.count === 1, unread.body);
-    const reply = await A.api("POST", `/api/support/tickets/${opened.body.id}/messages`, { body: "Yes, it is." });
-    check("The register replies", reply.status === 200 && reply.body.events.at(-1).body === "Yes, it is.", reply.body);
+    check("The admin's status change shows as new on the register", unread.status === 200 && unread.body.count === 1, unread.body);
+    const after = await A.api("GET", `/api/support/tickets/${opened.body.id}`);
+    check("…and the register sees the new status", after.body.status === "in_review", after.body.status);
 
     await line.cut();
     const offline = await A.api("GET", "/api/support/tickets");

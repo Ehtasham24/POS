@@ -56,6 +56,20 @@ const readThrough = ({ config, sync, onlineNow }) => {
 
   const cloudUnavailable = (res, message) => res.status(503).send({ code: "NEEDS_CLOUD", message });
 
+  // What this register adds to a support ticket whose sender allowed diagnostics: its sync
+  // state and its own backend's errors of the last hour (the cloud never sees those otherwise).
+  const deviceReport = () => {
+    const { recentServerErrorsFor } = require("../ExpressBackend/Sevices/monitoringService");
+    return {
+      deviceName: config.deviceName ?? null,
+      receiptPrefix: config.receiptPrefix ?? null,
+      appVersion: require("./package.json").version,
+      lastSyncAt: config.lastSyncAt ?? null,
+      sync: sync()?.state() ?? null,
+      serverErrors: recentServerErrorsFor(null, 60 * 60 * 1000),
+    };
+  };
+
   // A support request, passed on as it came (query, body, or a picture's bytes back).
   const passToCloud = async (req, res, spec) => {
     if (!config.deviceToken) return cloudUnavailable(res, "Support needs this register to be connected to the shop's online account.");
@@ -66,7 +80,14 @@ const readThrough = ({ config, sync, onlineNow }) => {
       response = await fetch(String(config.cloudUrl).replace(/\/+$/, "") + req.originalUrl, {
         method: req.method,
         headers: { "content-type": "application/json", authorization: `Device ${config.deviceToken}`, "x-pos-user": userUuid },
-        body: req.method === "GET" ? undefined : JSON.stringify(req.body || {}),
+        body:
+          req.method === "GET"
+            ? undefined
+            : JSON.stringify(
+                req.method === "POST" && req.path === "/api/support/tickets" && req.body?.diagnostics
+                  ? { ...req.body, deviceReport: deviceReport() }
+                  : req.body || {}
+              ),
         signal: AbortSignal.timeout(CLOUD_TIMEOUT_MS),
       });
     } catch {
