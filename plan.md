@@ -1,5 +1,204 @@
 # Bank-Transfer QR Checkout with Gmail Auto-Confirmation
 
+## ▶ Resuming: making the phone forwarder robust (2026-10-16)
+
+The owner wants to finish this feature **in-house**: no payment gateway, no third-party
+webhook. The shop's own phone (the one with the bank/wallet account) keeps catching the
+"payment received" SMS / app notification / email and telling the server. This section is
+the plan for making that path safe enough to trust. It supersedes the "Next step when
+resumed" note below. Everything after this section is history; it was written before shops
+were isolated from each other. Since then the forwarder secret has become per shop
+(`forwarderSecretService.js`, `requireForwarderSecret.js`) and every intent carries
+`shop_id`.
+
+### What can go wrong today (found in the code)
+
+1. **A payment can be lost.** The phone POSTs once, the moment the SMS/notification
+   arrives (`ForwarderApi.kt`, `NotificationForwarderService.kt`, `SmsReceiver.kt`). If the
+   internet or the server is down at that moment, the event is gone for good. Only the
+   heartbeat retries.
+2. **One payment can confirm two sales.** The same transfer usually arrives 2–3 times: the
+   SMS, the bank app's notification, and the email notification. Android also re-posts
+   updated notifications. The first signal confirms sale A. If sale B is pending at the
+   same amount, the second signal confirms B as well, although the money only came once.
+   There is no dedupe of any kind.
+3. **Someone else's transfer can confirm a sale.** Matching is amount-only within 72 hours
+   (`matchingService.js`). Suppose a friend sends Rs 500 while a Rs 500 sale is pending.
+   The sale is auto-confirmed.
+4. **The webhook is plain HTTP** (the second listener on port 4001). The shared secret
+   travels in clear text. Anyone who sees one request can forge "Rs 5000 received" and
+   confirm any pending sale.
+5. **"Phone alive" is only half the truth.** The heartbeat comes from WorkManager. It keeps
+   saying "alive" when the notification listener has been unbound, notification access was
+   revoked, or the battery optimiser killed the listener. In those states nothing is being
+   forwarded.
+6. **Unmatched and unparseable messages are thrown away.** Afterwards nobody can see that
+   money did arrive, so a person can't attach it to a sale by hand.
+
+### The design: four rules
+
+**A. Never lose an event: an outbox on the phone.**
+- Every captured SMS or notification is first written to a local SQLite (Room) table, with
+  a phone-generated `eventId` (UUID) that never changes across retries.
+- A sender drains the table:
+  - it tries at once;
+  - otherwise it uses a WorkManager one-time job with a network constraint and exponential
+    backoff;
+  - it keeps retrying until the server answers 2xx (or 4xx for "bad request", which is
+    final).
+- Delivered rows are kept 7 days for the app's own "recent events" screen, then pruned.
+- `NotificationListenerService.onListenerDisconnected` → `requestRebind()`.
+- On first setup, the app asks the owner to exempt it from battery optimisation and shows
+  whether that is granted.
+
+**B. Never count a payment twice: an event ledger on the server** (migration 037).
+
+```sql
+CREATE TABLE payment_notifications (
+  id            BIGSERIAL PRIMARY KEY,
+  shop_id       INTEGER NOT NULL REFERENCES shops(id),   -- from the forwarder secret, never the body
+  event_id      UUID NOT NULL,                           -- the phone's; same on every retry
+  source        TEXT NOT NULL,                           -- 'sms:8558', 'com.techlogix.mobilinkcustomer', …
+  raw_text      TEXT NOT NULL,
+  captured_at   TIMESTAMPTZ NOT NULL,                    -- phone clock (bounded, see D)
+  received_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  parser        TEXT,
+  amount        NUMERIC(12,2),
+  bank_tid      TEXT,                                    -- the bank's transaction id, when the text has one
+  outcome       TEXT NOT NULL,                           -- confirmed | ambiguous | suggested | unmatched |
+                                                         -- duplicate | unparseable | not_incoming |
+                                                         -- linked_manually | ignored
+  intent_id     INTEGER REFERENCES bank_payment_intents(id),
+  duplicate_of  BIGINT REFERENCES payment_notifications(id),
+  UNIQUE (shop_id, event_id)
+);
+-- One bank transaction = one row that counts, however many channels reported it.
+CREATE UNIQUE INDEX ... ON payment_notifications (shop_id, bank_tid)
+  WHERE bank_tid IS NOT NULL AND duplicate_of IS NULL;
+-- + index (shop_id, received_at DESC) for the inbox; RLS policy + pos_app grant like every shop table.
+```
+
+- A retry with the same `event_id` returns the first answer and does nothing else.
+- An event whose `bank_tid` is already recorded becomes `duplicate` (pointing at the first
+  one) and never confirms anything.
+- **Without a TID:** same shop, same amount, a different source, within 3 minutes → treated
+  as the same payment (`duplicate`). Only the first event can ever auto-confirm.
+- Every event is stored with its outcome, matched or not. Nothing is discarded.
+- The whole handling of one event runs in one transaction. The ledger insert, the dedupe
+  check (`FOR UPDATE` on the candidate intent) and `confirmIntent` all commit together, so
+  two channels arriving in the same second still serialize.
+
+**C. Never confirm the wrong sale: stricter matching.**
+- **A unique amount per pending intent.** A Raast QR carries paisa. Each new intent gets
+  `expected_amount` = sale amount + a random 0.01–0.99 offset that no other open intent of
+  the shop is using. The uniqueness is enforced by a partial unique index on
+  `(shop_id, expected_amount) WHERE status IN ('awaiting_payment','ambiguous')`. The
+  customer's app pays exactly what the QR says. A friend's round Rs 500 then matches
+  nothing, and two Rs 500 sales stop being ambiguous.
+  - The sale itself is still recorded at the cart amount.
+  - The extra paisa is shown on the intent ("QR amount").
+  - Whether the offset goes up or down is the owner's call (default: up, under Re 1).
+- **Auto-confirm only within 30 minutes** of the intent's creation. A match between 30
+  minutes and 72 hours becomes `suggested`: it is shown for a person to accept, never
+  confirmed automatically.
+- **Direction and sender checks stay, and get stricter:**
+  - only "received/credited", never "sent" (as now);
+  - SMS only from allowlisted shortcodes (JazzCash 8558, Easypaisa 3737, Meezan/RAAST
+    8079, …);
+  - notifications only from the selected bank/wallet packages.
+- **One parser per bank/wallet**, replacing the generic fallback for the ones the owner
+  uses: JazzCash, Meezan, then Easypaisa.
+  - Each extracts amount, TID, direction and counterparty.
+  - Each has a fixture test file of real (redacted) messages: received, sent, promotional
+    and OTP.
+  - `generic.js` stays as a fallback, but an event parsed only by it can at most become
+    `suggested`, never auto-confirmed.
+
+**D. Know at once when it's broken.**
+- **Transport:**
+  - The phone posts to the cloud over HTTPS. The plain-HTTP listener on port 4001 is
+    removed, or kept for local development only behind an env flag.
+  - Every request is signed:
+    - `X-Forwarder-Timestamp` is sent with each request;
+    - `X-Forwarder-Signature` = HMAC-SHA256(secret, timestamp + "." + body);
+    - the server rejects anything more than 5 minutes off.
+  - The secret itself never travels after setup.
+  - `captured_at` is accepted only within ±10 minutes of the server's clock; otherwise the
+    server time is used and the event is flagged.
+- **A heartbeat that reports real state:**
+  - listener connected;
+  - notification access, SMS permission and battery-optimisation exemption;
+  - outbox depth and age of the oldest unsent event;
+  - app version;
+  - when the last SMS/notification was captured.
+- **Staleness rules:** the forwarder counts as down if any of these holds:
+  - the heartbeat is older than 20 minutes;
+  - the listener is disconnected;
+  - a permission is missing;
+  - an event has waited in the outbox for more than 5 minutes.
+- **Where it shows:**
+  - a warning on the Pending Bank Payments page and in the header bell;
+  - the platform admin's Health page (per shop).
+- **A "Received payments" inbox** (a tab on Pending Bank Payments). It lists every event
+  with its outcome ("Rs 500.07 · 3:02 PM · JazzCash · not matched"). Staff can:
+  - **attach** an unmatched or suggested event to a pending intent. This goes through the
+    same `confirmIntent`, with the event id recorded as `linked_manually`;
+  - **ignore** it, as not a sale.
+
+### Order of work
+
+1. **Server first. It needs no phone changes and removes the worst risks (2, 3, 6):**
+   - migration 037 (ledger + `expected_amount`);
+   - dedupe;
+   - unique QR amounts;
+   - the 30-minute auto-confirm window and `suggested`;
+   - the Received payments inbox.
+
+   The current phone app keeps working, because the server generates an `event_id` when
+   the phone doesn't send one.
+2. **Phone app:**
+   - outbox + retries + `eventId`;
+   - HMAC signing over HTTPS to the cloud;
+   - the rich heartbeat and `requestRebind`;
+   - the battery-optimisation prompt.
+
+   The Android toolchain is on this machine now (it was used for the POS phone build), so
+   this can finally be compiled and tested on the real phone.
+3. **Per-bank parsers with fixtures.** Needs 2–3 real redacted SMS/notification texts per
+   bank/wallet the shop uses (received and sent).
+4. Then drop port 4001 and the old unsigned secret header.
+
+### Verification
+
+Each item below is to be run, not just read.
+- **Retries:** send the same `event_id` twice → one row, one outcome.
+- **Dedupe across channels:** SMS + app notification + email of one payment with the same
+  TID → one confirmation, two `duplicate` rows. The same again without a TID inside 3
+  minutes → also one confirmation.
+- **Unique amounts:**
+  - two Rs 500 sales get two different QR amounts, and each confirms only its own;
+  - a round Rs 500 from someone else → `unmatched`, visible in the inbox, nothing confirmed.
+- **Window:** a match 45 minutes after the intent → `suggested`, not confirmed. Accepting it
+  in the inbox confirms the sale once.
+- **Transport:** an unsigned or stale-timestamp request → 401. A replayed signed request
+  with an old timestamp → 401.
+- **Phone:**
+  - server down while three payments arrive → all three are delivered after it comes back,
+    each confirmed once;
+  - revoking notification access → the Pending Bank Payments warning appears within one
+    heartbeat;
+  - force-stopping the app → the heartbeat goes stale and the warning shows.
+- **Isolation:** run `verify-shop-isolation.js` with two shops' forwarders. Neither can see
+  or confirm the other's intents or events.
+
+### Open question for the owner
+
+Do customers always pay by **scanning the QR** (the amount is filled in for them), or do
+some read the IBAN and type the amount by hand? Unique paisa amounts only work when the
+amount comes from the QR. If people type amounts, matching needs another key: a short
+reference the customer types in the transfer's note, if the bank shows the note in its SMS.
+That would need real samples to check.
+
 ## ⏸ Paused here (2026-08-22)
 
 Feature is functionally complete and live-tested on a real phone (see the SMS+email
