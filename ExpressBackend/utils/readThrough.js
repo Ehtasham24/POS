@@ -35,11 +35,17 @@ const READ_THROUGH = {
 // matches nothing — rather than the raw id, which there would be some other row.
 const NO_MATCH = "-1";
 
-// Support tickets (Sevices/supportService.js) exist only in the cloud: a register always
-// passes these on, and offline says they need the internet rather than answer from its own
-// database. Ticket ids are the cloud's own here — the register keeps no copy to renumber.
+// Requests only the cloud can answer: support tickets (Sevices/supportService.js), which exist
+// only there, and changing a password (users are the cloud's, synced down to registers). A
+// register always passes these on, and offline says they need the internet rather than answer
+// from its own database. Ticket ids are the cloud's own here — the register keeps no copy to
+// renumber.
 // `binary`: a picture, passed on as bytes.
+// `syncAfter`: the change comes back to this register through the sync feed, and the page reads
+// it right after (a new password, and the must-change flag it clears), so pull before answering.
 const CLOUD_ONLY = [
+  ["PATCH", /^\/api\/auth\/password$/, { syncAfter: true }],
+  ["PATCH", /^\/api\/auth\/set-new-password$/, { syncAfter: true }],
   ["GET", /^\/api\/support\/tickets$/],
   ["POST", /^\/api\/support\/tickets$/],
   ["GET", /^\/api\/support\/tickets\/\d+$/],

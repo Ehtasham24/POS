@@ -62,19 +62,37 @@ const findUserById = async (id) => {
   return rows[0] ? toPublicUser(rows[0]) : null;
 };
 
-// The "I logged in with a temp password, now pick a real one" step — no current-password
-// check, unlike changeSuperAdminPassword (adminService.js), since reaching this endpoint
-// already proves identity via requireAuth on the session the temp password itself created.
-// Clears must_change_password so ProtectedRoute (clientSide) stops redirecting here.
-const setNewPassword = async (userId, newPassword) => {
+// Stores a new password and clears must_change_password, so ProtectedRoute (clientSide) stops
+// sending the user to the set-new-password page. On a register the new hash arrives through
+// the sync feed (users is synced), so offline sign-in takes the new password too.
+const storePassword = async (userId, newPassword) => {
   if (!newPassword || newPassword.length < 8) {
     throw new ApiError(400, "New password must be at least 8 characters");
   }
   const passwordHash = await hashPassword(newPassword);
-  await pool.query(
-    `UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1`,
-    [userId, passwordHash]
-  );
+  await pool.query(`UPDATE users SET password_hash = $2, must_change_password = false WHERE id = $1`, [userId, passwordHash]);
 };
 
-module.exports = { login, findUserById, hashPassword, setNewPassword };
+// The "I logged in with a temp password, now pick a real one" step — no current-password
+// check, unlike changePassword below, since reaching this endpoint already proves identity via
+// requireAuth on the session the temp password itself created. Only while a new password is
+// actually required: otherwise any open session (or a register's device token, passing a
+// request on as one of its staff) could replace a password without knowing it.
+const setNewPassword = async (userId, newPassword) => {
+  const { rows } = await pool.query(`SELECT must_change_password FROM users WHERE id = $1`, [userId]);
+  if (!rows[0]?.must_change_password) throw new ApiError(400, "No new password is required — use Change password instead");
+  await storePassword(userId, newPassword);
+};
+
+// Anyone signed in changing their own password (the account menu): the current one first, so
+// a session left open on a shared counter can't be used to take the account over.
+const changePassword = async (userId, currentPassword, newPassword) => {
+  const { rows } = await pool.query(`SELECT password_hash FROM users WHERE id = $1`, [userId]);
+  if (!rows[0] || !currentPassword || !(await comparePassword(currentPassword, rows[0].password_hash))) {
+    throw new ApiError(400, "Your current password isn't right");
+  }
+  if (currentPassword === newPassword) throw new ApiError(400, "The new password must be different from the current one");
+  await storePassword(userId, newPassword);
+};
+
+module.exports = { login, findUserById, hashPassword, setNewPassword, changePassword };

@@ -13,8 +13,10 @@
 // still waiting to go up is sent first; if that can't be done quickly, the register answers
 // itself rather than show a history missing its newest sales.
 //
-// Support tickets go the same way but only ever to the cloud (they aren't kept here): offline,
-// or on a register not connected to a cloud shop, they answer 503 saying so.
+// Support tickets and password changes go only ever to the cloud (tickets aren't kept here, and
+// users are the cloud's): offline, or on a register not connected to a cloud shop, they answer
+// 503 saying so. A password change is pulled back down before answering, so the new password
+// works here at once, offline sign-in included.
 const { cloudClient } = require("./cloudClient");
 const { readThroughSpec, lookupVia, swapParams, swapIds } = require("../ExpressBackend/utils/readThrough");
 const { verifyToken, COOKIE_NAME } = require("../ExpressBackend/utils/auth");
@@ -24,6 +26,9 @@ const SEND_FIRST_MS = 5000;
 // date): passed on as it is, not retried locally.
 const PASS_ON_STATUSES = new Set([400, 403, 404]);
 const CLOUD_TIMEOUT_MS = 15000;
+// How long a cloud-only change waits for its result to come back down before answering anyway
+// (the next regular sync brings it).
+const SYNC_AFTER_MS = 8000;
 
 const isPlainObject = (value) => value !== null && typeof value === "object" && !Array.isArray(value);
 
@@ -70,9 +75,9 @@ const readThrough = ({ config, sync, onlineNow }) => {
     };
   };
 
-  // A support request, passed on as it came (query, body, or a picture's bytes back).
+  // A cloud-only request, passed on as it came (query, body, or a picture's bytes back).
   const passToCloud = async (req, res, spec) => {
-    if (!config.deviceToken) return cloudUnavailable(res, "Support needs this register to be connected to the shop's online account.");
+    if (!config.deviceToken) return cloudUnavailable(res, "This needs the register to be connected to the shop's online account.");
     const userUuid = await signedInUuid(req);
     if (!userUuid) return res.status(401).send({ message: "Not authenticated" });
     let response;
@@ -91,12 +96,13 @@ const readThrough = ({ config, sync, onlineNow }) => {
         signal: AbortSignal.timeout(CLOUD_TIMEOUT_MS),
       });
     } catch {
-      return cloudUnavailable(res, "Support needs the internet — connect and try again.");
+      return cloudUnavailable(res, "This needs the internet — connect and try again.");
     }
     // The cloud not accepting this register isn't the person being signed out here: a 401
     // passed on would log them out of the register.
     if (response.status === 401) return cloudUnavailable(res, "The online account didn't accept this register — check its connection on the Devices page.");
     const buffer = Buffer.from(await response.arrayBuffer());
+    if (spec.syncAfter && response.ok) await Promise.race([sync()?.syncNow().catch(() => {}), new Promise((r) => setTimeout(r, SYNC_AFTER_MS))]);
     res.status(response.status);
     res.set("content-type", response.headers.get("content-type") || (spec.binary ? "application/octet-stream" : "application/json"));
     if (spec.binary && response.ok) res.set("cache-control", "private, max-age=86400");

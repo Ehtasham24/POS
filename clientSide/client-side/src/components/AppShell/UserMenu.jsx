@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { HiOutlineUserCircle, HiOutlineArrowRightOnRectangle, HiOutlineLifebuoy } from "react-icons/hi2";
+import { HiOutlineUserCircle, HiOutlineArrowRightOnRectangle, HiOutlineLifebuoy, HiOutlineKey } from "react-icons/hi2";
 import { useAuth } from "auth/AuthContext";
 import { useLanguage } from "i18n/LanguageContext";
 import TextSizePicker from "components/TextSizePicker";
+import ChangePasswordModal from "components/ChangePasswordModal";
 
 // Sits next to OfflineStatusBadge/LowStockBell in both of AppShell's header clusters
 // (mobile top bar, page top bar) — same small-status-widget pattern those two already
@@ -15,6 +16,7 @@ export default function UserMenu() {
   const navigate = useNavigate();
   const { pathname } = useLocation();
   const [open, setOpen] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -81,6 +83,17 @@ export default function UserMenu() {
           </button>
           <button
             type="button"
+            onClick={() => {
+              setOpen(false);
+              setChangingPassword(true);
+            }}
+            className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-gray-700 transition-colors hover:bg-surface-subtle dark:text-gray-200 dark:hover:bg-gray-700"
+          >
+            <HiOutlineKey className="text-base" />
+            {t("auth.changePassword")}
+          </button>
+          <button
+            type="button"
             onClick={handleLogout}
             className="flex w-full items-center gap-2 px-3.5 py-2.5 text-left text-sm text-danger-600 transition-colors hover:bg-danger-50 dark:text-danger-400 dark:hover:bg-danger-500/10"
           >
@@ -89,6 +102,7 @@ export default function UserMenu() {
           </button>
         </div>
       )}
+      {changingPassword && <ChangePasswordModal onClose={() => setChangingPassword(false)} />}
     </div>
   );
 }

@@ -8,9 +8,10 @@ const { readThroughSpec, lookupVia, swapParams, swapIds } = require("../utils/re
 // of whoever is signed in on it. The usual route then runs as that person — requireAuth picks
 // up req.deviceReadThrough in place of a session cookie — so role rules (a cashier's own sales
 // only, the report for owners) apply exactly as on the web. Only what utils/readThrough.js
-// lists is accepted this way — those history reads, and support tickets (which live only in
-// the cloud, so a register's ticket and reply come through here too); anything else carrying
-// a device token goes on to its route's own check and is refused there.
+// lists is accepted this way — those history reads, support tickets (which live only in the
+// cloud), and password changes (a change needs the current password; setting one without it
+// only while an admin-issued temporary password requires it); anything else carrying a device
+// token goes on to its route's own check and is refused there.
 //
 // The device token is a shop-wide credential and the register already holds its staff (with
 // password hashes), so letting it read as one of them stays inside what it can do anyway. The

@@ -1,5 +1,5 @@
 const asyncHandler = require("../utils/asyncHandler");
-const { login, setNewPassword } = require("../Sevices/authService");
+const { login, setNewPassword, changePassword } = require("../Sevices/authService");
 const { createRequest } = require("../Sevices/passwordResetService");
 const { COOKIE_NAME, sessionCookieOptions } = require("../utils/auth");
 const { getFeaturesForTier } = require("../config/features");
@@ -67,4 +67,11 @@ const SetNewPassword = asyncHandler(async (req, res) => {
   res.status(204).send();
 });
 
-module.exports = { Login, Logout, Me, ForgotPassword, SetNewPassword };
+// A signed-in user changing their own password (needs the current one).
+const ChangePassword = asyncHandler(async (req, res) => {
+  const { currentPassword, newPassword } = req.body || {};
+  await changePassword(req.user.id, currentPassword, newPassword);
+  res.status(204).send();
+});
+
+module.exports = { Login, Logout, Me, ForgotPassword, SetNewPassword, ChangePassword };

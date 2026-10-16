@@ -42,9 +42,13 @@ serviceWorkerRegistration.register({
   },
 });
 
+// Only when a worker was already in control: on the very first visit the newly installed worker
+// takes control too (controllerchange fires), and there's no old build to replace — reloading
+// then would just wipe whatever the person had started typing (the sign-in or setup form).
+const hadController = !!navigator.serviceWorker?.controller;
 let reloadedForUpdate = false;
 navigator.serviceWorker?.addEventListener("controllerchange", () => {
-  if (reloadedForUpdate) return;
+  if (!hadController || reloadedForUpdate) return;
   reloadedForUpdate = true;
   window.location.reload();
 });

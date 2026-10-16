@@ -131,11 +131,14 @@ const Server = async () => {
   server.use(routesPayment); // third-party webhook, deliberately left public
   server.use(routesPaymentNotifications); // phone-forwarder webhook, gated by shared secret not auth
   server.use(routesPaymentGateway); // JazzCash/Easypaisa: initiate gated by requireAuth per-route, callback verified by gateway signature not auth
-  server.use(routesAuth); // public: login/logout; /me itself requires auth per-route
-  // A shop's register reading Sales History / Sales Report as its signed-in user (utils/readThrough.js)
+  // Before the auth routes: a password change is one of the requests a register passes on to
+  // the cloud (utils/readThrough.js). On the cloud, deviceReadThrough lets such a request run as
+  // the register's signed-in user; on a register, its routes (device/deviceRoutes.js: status,
+  // first-run setup, and the read-through itself) must see it before the local route answers.
   if (!ON_DEVICE) server.use(deviceReadThrough);
+  if (ON_DEVICE) server.use(global.posDevice.routes);
+  server.use(routesAuth); // public: login/logout; /me itself requires auth per-route
   server.use(routesHealth); // public: connectivity ping target
-  if (ON_DEVICE) server.use(global.posDevice.routes); // device status and first-run setup (device/deviceRoutes.js)
   server.use(routesUsers);
   server.use(routesProducts);
   server.use(routesCategories);

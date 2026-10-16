@@ -1,6 +1,6 @@
 const express = require("express");
 const routes = express.Router();
-const { Login, Logout, Me, ForgotPassword, SetNewPassword } = require("../../Controller/authController");
+const { Login, Logout, Me, ForgotPassword, SetNewPassword, ChangePassword } = require("../../Controller/authController");
 const requireAuth = require("../../Middleware/requireAuth");
 
 // Login/logout are deliberately public (see requireAuth.js/Middleware comments — nothing
@@ -16,5 +16,7 @@ routes.post("/api/auth/forgot-password", ForgotPassword);
 // The mandatory post-temp-password change — needs a session (one the temp password itself
 // just created), but no current-password check (see authService.js's setNewPassword).
 routes.patch("/api/auth/set-new-password", requireAuth, SetNewPassword);
+// Changing your own password from the account menu — checks the current one.
+routes.patch("/api/auth/password", requireAuth, ChangePassword);
 
 module.exports = routes;
