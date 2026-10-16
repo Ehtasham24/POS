@@ -8,6 +8,7 @@ const { openLocalDb } = require("./localDb");
 const { createPglitePool } = require("./pglitePool");
 const { deviceRoutes } = require("./deviceRoutes");
 const { createSyncWorker } = require("./syncWorker");
+const { createUpdater } = require("./updater");
 
 // Where the shop's cloud server is. The setup page shows it and lets it be changed.
 const DEFAULT_CLOUD_URL = process.env.POS_CLOUD_URL || "https://localhost:4000";
@@ -108,9 +109,12 @@ const startDevice = async ({ dataDir, port = 4100, devShop }) => {
   });
   const saveConfig = (next) => saveDeviceConfig(dataDir, next);
   let syncWorker = null;
+  // The Android app's start-up (mobile/node/index.js) sets global.posUpdater: it updates itself
+  // from the project's releases. The Windows app doesn't (yet).
+  const updater = global.posUpdater ? createUpdater(global.posUpdater) : null;
   global.posDevice = {
     createPool: (driver) => createPglitePool(db, driver),
-    routes: deviceRoutes({ db, config, saveConfig, defaultCloudUrl: DEFAULT_CLOUD_URL, sync: () => syncWorker }),
+    routes: deviceRoutes({ db, config, saveConfig, defaultCloudUrl: DEFAULT_CLOUD_URL, sync: () => syncWorker, updater: () => updater }),
   };
 
   if (devShop) await createDevShop(devShop);
@@ -120,11 +124,13 @@ const startDevice = async ({ dataDir, port = 4100, devShop }) => {
   // It idles until the device is registered and set up.
   syncWorker = createSyncWorker({ db: require("../ExpressBackend/Db").systemPool, config, saveConfig });
   syncWorker.start();
+  updater?.start();
 
   return {
     url: `http://127.0.0.1:${port}`,
     close: async () => {
       await syncWorker.stop();
+      updater?.stop();
       await db.close();
     },
   };

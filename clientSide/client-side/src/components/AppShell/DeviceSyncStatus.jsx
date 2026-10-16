@@ -1,23 +1,14 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { HiOutlineArrowPath, HiOutlineCheckCircle, HiOutlineSignalSlash } from "react-icons/hi2";
-import useDeviceStatus, { refreshDeviceStatus } from "hooks/useDeviceStatus";
+import { refreshDeviceStatus, usePolledDeviceStatus } from "hooks/useDeviceStatus";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiPost } from "utils/api";
 import { timeAgoIn } from "utils/timeAgo";
 
-const POLL_MS = 15000;
-
 // How current a shop's own register is with the cloud (device/syncWorker.js): only shown in the
-// Windows/Android app, once the device is registered. Polls the device's own status.
+// Windows/Android app, once the device is registered.
 const useSyncState = () => {
-  const initial = useDeviceStatus();
-  const [status, setStatus] = useState(null);
-  useEffect(() => {
-    if (!initial?.registered) return undefined;
-    setStatus(initial);
-    const timer = setInterval(() => refreshDeviceStatus().then((s) => s && setStatus(s)), POLL_MS);
-    return () => clearInterval(timer);
-  }, [initial]);
+  const [status, setStatus] = usePolledDeviceStatus();
   return [status?.sync ?? null, setStatus];
 };
 

@@ -68,7 +68,7 @@ const readThrough = ({ config, sync, onlineNow }) => {
     return {
       deviceName: config.deviceName ?? null,
       receiptPrefix: config.receiptPrefix ?? null,
-      appVersion: require("./package.json").version,
+      appVersion: require("./appInfo").APP_VERSION,
       lastSyncAt: config.lastSyncAt ?? null,
       sync: sync()?.state() ?? null,
       serverErrors: recentServerErrorsFor(null, 60 * 60 * 1000),

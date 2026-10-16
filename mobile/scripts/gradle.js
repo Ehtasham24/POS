@@ -16,10 +16,12 @@ if (!javaHome) throw new Error("No Java 21 found: install Android Studio or set 
 const androidDir = path.join(__dirname, "..", "android");
 // By full path: some shells (NoDefaultCurrentDirectoryInExePath) don't look in the working directory.
 const wrapper = path.join(androidDir, process.platform === "win32" ? "gradlew.bat" : "gradlew");
-const result = spawnSync(`"${wrapper}"`, process.argv.slice(2), {
+// Windows runs gradlew.bat through the shell, so the path is quoted there (it may hold spaces).
+const onWindows = process.platform === "win32";
+const result = spawnSync(onWindows ? `"${wrapper}"` : wrapper, process.argv.slice(2), {
   cwd: androidDir,
   stdio: "inherit",
-  shell: process.platform === "win32",
+  shell: onWindows,
   env: { ...process.env, JAVA_HOME: javaHome },
 });
 process.exit(result.status ?? 1);

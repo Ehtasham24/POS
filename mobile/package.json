@@ -1,12 +1,16 @@
 {
   "name": "pos-mobile",
-  "version": "0.0.1",
+  "version": "1.0.0",
+  "posCloudUrl": "https://pos01.duckdns.org",
+  "posUpdateFeed": "https://github.com/Ehtasham24/POS/releases",
+  "posShell": 1,
   "private": true,
   "description": "The POS register on Android: the same backend and local database as the Windows app (../device), run by nodejs-mobile inside a Capacitor app. See ../plan-offline-sync.md.",
   "scripts": {
     "bundle-node": "node scripts/bundle-node.js",
     "sync": "npm run bundle-node && npx cap sync android",
     "apk": "npm run sync && node scripts/gradle.js assembleDebug",
+    "apk:release": "npm run sync && node scripts/gradle.js assembleRelease",
     "phone": "npm run apk && node scripts/install.js",
     "postinstall": "node scripts/patch-plugin.js"
   },

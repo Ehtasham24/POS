@@ -1,5 +1,19 @@
 apply plugin: 'com.android.application'
 
+// This build's version, from the release.json scripts/bundle-node.js writes (one source for the
+// app, its update checks and this APK): 1.2.3 -> versionName "1.2.3", versionCode 10203.
+def posRelease = new groovy.json.JsonSlurper().parse(file('../../www/nodejs/release.json'))
+def versionParts = posRelease.version.tokenize('.').collect { it as int }
+
+// The release signing key: never in the repository. CI passes it in the environment (see
+// .github/workflows/release.yml); on a developer's machine it's read from
+// ~/.pos-release/keystore.properties (storeFile, storePassword, keyAlias, keyPassword).
+// Every release must be signed with the same key, or phones can't update in place.
+def signingProps = new Properties()
+def localSigning = new File(System.getProperty('user.home'), '.pos-release/keystore.properties')
+if (localSigning.exists()) localSigning.withInputStream { signingProps.load(it) }
+def signingValue = { String env, String prop -> System.getenv(env) ?: signingProps.getProperty(prop) }
+
 android {
     namespace = "pk.pos.register"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -7,8 +21,8 @@ android {
         applicationId "pk.pos.register"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode versionParts[0] * 10000 + versionParts[1] * 100 + versionParts[2]
+        versionName posRelease.version
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // Phones only (every current Android phone is arm64): the Node.js runtime is ~40 MB per ABI.
         ndk { abiFilters 'arm64-v8a' }
@@ -18,12 +32,29 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            def store = signingValue('ANDROID_KEYSTORE_FILE', 'storeFile')
+            if (store) {
+                storeFile file(store)
+                storePassword signingValue('ANDROID_KEYSTORE_PASSWORD', 'storePassword')
+                keyAlias signingValue('ANDROID_KEY_ALIAS', 'keyAlias')
+                keyPassword signingValue('ANDROID_KEY_PASSWORD', 'keyPassword')
+            }
+        }
+    }
     buildTypes {
         release {
+            if (signingConfigs.release.storeFile) signingConfig signingConfigs.release
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
         }
     }
+}
+
+// pos-register-1.2.3.apk, the name the release and the in-app updater use.
+android.applicationVariants.all { variant ->
+    variant.outputs.all { outputFileName = "pos-register-${posRelease.version}${variant.buildType.name == 'release' ? '' : '-' + variant.buildType.name}.apk" }
 }
 
 repositories {

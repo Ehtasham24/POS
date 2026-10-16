@@ -1,0 +1,95 @@
+# Publishes a release of the Android register when a version tag is pushed:
+#
+#   git tag v1.2.0 && git push origin v1.2.0
+#
+# The GitHub release then carries the signed APK (what a new shop installs, and what phones that
+# need a new app download), the code-only update package, and update.json with its signature
+# (mobile/scripts/pack-release.js). Phones check the latest release every few hours and update
+# themselves (device/updater.js). Only tags trigger this: a push to main never reaches a shop.
+#
+# Repository secrets it needs (Settings → Secrets and variables → Actions). The values are in
+# ~/.pos-release/ on the machine that created the keys — never in the repository:
+#   ANDROID_KEYSTORE_BASE64     the release keystore (pos-release.jks), base64
+#   ANDROID_KEYSTORE_PASSWORD   its password
+#   ANDROID_KEY_ALIAS           the key's alias
+#   ANDROID_KEY_PASSWORD        the key's password
+#   OTA_SIGNING_KEY             ota-signing-key.pem (the update signing key), as is
+# Every release must use the same keystore, or installed phones can't update in place.
+name: Release
+
+on:
+  push:
+    tags: ["v[0-9]+.[0-9]+.[0-9]+"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - name: Check the signing secrets are set
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: |
+          test -n "$ANDROID_KEYSTORE_BASE64" || { echo "::error::ANDROID_KEYSTORE_BASE64 is not set"; exit 1; }
+          test -n "$OTA_SIGNING_KEY" || { echo "::error::OTA_SIGNING_KEY is not set"; exit 1; }
+
+      - name: Version from the tag
+        run: echo "POS_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+
+      - name: Build the web app
+        working-directory: clientSide/client-side
+        run: |
+          npm ci --no-audit --no-fund
+          CI=false npm run build
+
+      - name: Install the backend and the device runtime
+        run: |
+          npm ci --omit=dev --no-audit --no-fund --prefix ExpressBackend
+          npm ci --omit=dev --no-audit --no-fund --prefix device
+
+      - name: Install the mobile project
+        working-directory: mobile
+        run: npm ci --no-audit --no-fund
+
+      - name: Build the signed APK
+        working-directory: mobile
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          export ANDROID_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          npm run apk:release
+          rm -f "$RUNNER_TEMP/release.jks"
+
+      - name: Pack and sign the update
+        working-directory: mobile
+        env:
+          OTA_SIGNING_KEY: ${{ secrets.OTA_SIGNING_KEY }}
+        run: node scripts/pack-release.js
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" mobile/release/* --title "POS $POS_VERSION" --generate-notes --latest

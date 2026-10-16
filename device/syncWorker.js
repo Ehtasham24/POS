@@ -17,7 +17,7 @@ const { cloudClient } = require("./cloudClient");
 
 const SYNC_EVERY_MS = 10000;
 const PUSH_BATCH = 200;
-const APP_VERSION = require("./package.json").version;
+const { APP_VERSION } = require("./appInfo");
 
 const createSyncWorker = ({ db, config, saveConfig }) => {
   const state = {

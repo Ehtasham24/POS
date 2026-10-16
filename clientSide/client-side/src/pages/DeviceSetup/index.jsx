@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { HiOutlineCheckCircle } from "react-icons/hi2";
 import Logo from "components/Logo";
 import { useToast } from "components/Toast/ToastContext";
+import { useAuth } from "auth/AuthContext";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiPost } from "utils/api";
 import { refreshDeviceStatus } from "hooks/useDeviceStatus";
@@ -14,29 +15,52 @@ const STEPS = ["signing_in", "registering", "downloading", "saving"];
 const POLL_MS = 700;
 
 // First run on a shop's own device (the Windows/Android app): the owner signs in with their
-// usual account, and the device registers with the cloud and downloads the shop
-// (device/setup.js). Only reachable on a device — Login sends a device that isn't set up here.
+// usual account (the one the platform admin created), and the device registers with the cloud
+// and downloads the shop (device/setup.js). When that's done they're signed in straight away
+// with the same account, not asked for it again. Only reachable on a device — Login sends a
+// device that isn't set up here.
 export default function DeviceSetup() {
   const { t } = useLanguage();
   const toast = useToast();
   const navigate = useNavigate();
-  const [form, setForm] = useState({ username: "", password: "", deviceName: "Counter PC", cloudUrl: "" });
+  const { login } = useAuth();
+  const [form, setForm] = useState({ username: "", password: "", deviceName: "", cloudUrl: "" });
   const [showServer, setShowServer] = useState(false);
   const [setup, setSetup] = useState(null);
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const pollRef = useRef(null);
+  // The account setup was started with, to sign in with once it's done (state would be stale
+  // inside the polling callback).
+  const credentialsRef = useRef(null);
+
+  const finish = async (shopName) => {
+    toast.success(t("deviceSetup.done", { shop: shopName }));
+    const credentials = credentialsRef.current;
+    if (credentials) {
+      try {
+        await login(credentials.username, credentials.password);
+        return navigate("/", { replace: true });
+      } catch {
+        // Signing in can still be done by hand.
+      }
+    }
+    return navigate("/login", { replace: true });
+  };
 
   // Progress comes from the device itself, not this page's state, so it survives the page
   // being reloaded or remounted while setup runs.
   const applyStatus = (status) => {
     if (!status?.device) return navigate("/login", { replace: true });
-    setForm((prev) => ({ ...prev, cloudUrl: prev.cloudUrl || status.cloudUrl || "" }));
+    setForm((prev) => ({
+      ...prev,
+      cloudUrl: prev.cloudUrl || status.cloudUrl || "",
+      deviceName: prev.deviceName || (status.platform === "android" ? "Phone" : "Counter PC"),
+    }));
     setSetup(status.setup);
     if (status.setUp) {
       clearInterval(pollRef.current);
-      toast.success(t("deviceSetup.done", { shop: status.shopName }));
-      navigate("/login", { replace: true });
+      finish(status.shopName);
     } else if (status.setup?.status === "running") {
       if (!pollRef.current) pollRef.current = setInterval(() => refreshDeviceStatus().then(applyStatus), POLL_MS);
     } else {
@@ -58,6 +82,7 @@ export default function DeviceSetup() {
     e.preventDefault();
     setError("");
     setSubmitting(true);
+    credentialsRef.current = { username: form.username, password: form.password };
     try {
       applyStatus({ device: true, setUp: false, setup: await apiPost("/api/device/setup", form) });
     } catch (err) {

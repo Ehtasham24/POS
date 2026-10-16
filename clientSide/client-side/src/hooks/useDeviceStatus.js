@@ -17,6 +17,22 @@ export const refreshDeviceStatus = () => {
   return fetchDeviceStatus();
 };
 
+const POLL_MS = 15000;
+
+// The status kept current while the page is open, on a registered device (its sync state and
+// updates change): [status, setStatus]. Null on the cloud and before registration.
+export function usePolledDeviceStatus() {
+  const initial = useDeviceStatus();
+  const [status, setStatus] = useState(null);
+  useEffect(() => {
+    if (!initial?.registered) return undefined;
+    setStatus(initial);
+    const timer = setInterval(() => refreshDeviceStatus().then((s) => s && setStatus(s)), POLL_MS);
+    return () => clearInterval(timer);
+  }, [initial]);
+  return [status, setStatus];
+}
+
 export default function useDeviceStatus() {
   const [status, setStatus] = useState(null);
   useEffect(() => {

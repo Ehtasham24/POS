@@ -175,6 +175,24 @@ node scripts/verify-shop-isolation.js   # backend must be running
 
 **Adding a new shop-owned table:** give it `shop_id NOT NULL` with no default, then add it to the `tenant_tables` list in a new migration modelled on `028`. Until you do, the app gets "permission denied" on that table. It fails loudly instead of quietly exposing every shop's rows.
 
+**The server.** `deploy/setup-server.sh` sets up a fresh Ubuntu 24.04 VM (swap, firewall, Node, nginx, a Let's Encrypt certificate, a systemd service). `deploy/update-server.sh` deploys a new version on it.
+
+### Releasing the Android app
+
+Push a version tag:
+
+```bash
+git tag v1.2.0 && git push origin v1.2.0
+```
+
+`.github/workflows/release.yml` builds the signed APK and a code-only update package, signs `update.json`, and publishes them as a GitHub release. The release's APK is what a new shop installs.
+
+Installed phones check the latest release every few hours (`device/updater.js`):
+- **Code changes** (React, backend, device runtime) download in the background. They apply on the next start, or at once from the "Restart now" banner. A new version runs on trial and falls back if it fails to start twice.
+- **Native changes** (Java, plugins, permissions) need a new APK. Raise `posShell` in `mobile/package.json` for such a release; phones then offer to install the APK, and Android asks the person to confirm.
+
+The signing keys live outside the repository, in `~/.pos-release/` on the machine that created them, and as the workflow's repository secrets. Back that folder up: without `pos-release.jks`, installed phones can never be updated.
+
 ## Project Structure
 
 ```

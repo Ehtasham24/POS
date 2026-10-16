@@ -7,8 +7,7 @@ const express = require(require.resolve("express", { paths: [path.join(__dirname
 const { startSetup, setupState } = require("./setup");
 const { readThrough } = require("./readThrough");
 
-const APP_VERSION = require("./package.json").version;
-const PLATFORM = process.platform === "android" ? "android" : "windows";
+const { APP_VERSION, PLATFORM } = require("./appInfo");
 
 // Past this without reaching the cloud, a register stops selling until it syncs: its prices,
 // stock and staff could be weeks out of date, and its sales unknown to the owner. Warned from
@@ -17,7 +16,8 @@ const BLOCK_AFTER_DAYS = 14;
 const WARN_AFTER_DAYS = 3;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync }) => {
+// `updater`: device/updater.js when this app updates itself (the Android app), else null.
+const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync, updater = () => null }) => {
   const routes = express.Router();
   // Through the backend's pool (loaded after these routes are built), so these reads queue with
   // the requests' transactions instead of landing in the middle of one (pglitePool.js).
@@ -70,6 +70,19 @@ const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync }) => {
     }
   });
 
+  // "Check for updates" from the page; answers with the updater's state once the check is done
+  // (a download it starts carries on in the background).
+  routes.post("/api/device/update/check", async (req, res, next) => {
+    try {
+      if (!updater()) return res.status(404).send({ message: "This app doesn't update itself" });
+      const check = updater().check();
+      await Promise.race([check, new Promise((r) => setTimeout(r, 15000))]);
+      res.send(updater().state());
+    } catch (err) {
+      next(err);
+    }
+  });
+
   routes.post("/api/device/sync-now", async (req, res, next) => {
     try {
       if (!config.deviceToken) return res.status(409).send({ message: "This device isn't registered with the cloud" });
@@ -98,6 +111,7 @@ const deviceRoutes = ({ db, config, saveConfig, defaultCloudUrl, sync }) => {
         snapshotAt: config.snapshotAt ?? null,
         setup: setupState(),
         sync: config.deviceToken ? { ...sync()?.state(), ...offlineAge() } : null,
+        update: updater()?.state() ?? null,
       });
     } catch (err) {
       next(err);

@@ -32,6 +32,27 @@ copy("clientSide/client-side/build", "clientSide/client-side/build", (rel) => re
 
 fs.copyFileSync(path.join(__dirname, "..", "node", "index.js"), path.join(OUT, "index.js"));
 
+// What this build is, read by node/index.js (and by Gradle for the APK's version):
+//   version   the release (a tag v1.2.3 in CI sets POS_VERSION=1.2.3; else mobile/package.json's)
+//   shell     the native app's compatibility level (mobile/package.json "posShell"): raised
+//             whenever the APK itself changes — plugins, permissions, Java code — so an update
+//             to the code alone is only taken by an APK that can run it
+//   cloudUrl  the shop's cloud server (POS_CLOUD_URL, else mobile/package.json "posCloudUrl")
+//   updateFeed  the GitHub releases the app updates itself from (mobile/package.json
+//             "posUpdateFeed"; device/updater.js)
+const pkg = require("../package.json");
+const version = process.env.POS_VERSION || pkg.version;
+if (!/^\d{1,2}\.\d{1,2}\.\d{1,2}$/.test(version)) throw new Error(`Version must look like 1.2.3 (each part 0-99), got "${version}"`);
+const release = {
+  version,
+  shell: pkg.posShell,
+  cloudUrl: process.env.POS_CLOUD_URL || pkg.posCloudUrl,
+  updateFeed: pkg.posUpdateFeed,
+  commit: process.env.GITHUB_SHA || null,
+  builtAt: new Date().toISOString(),
+};
+fs.writeFileSync(path.join(OUT, "release.json"), JSON.stringify(release, null, 2));
+
 // Android's build unpacks every *.gz asset and drops the ".gz" (PGlite's extension bundles,
 // pg_trgm.tar.gz and the like, would arrive as plain .tar, which PGlite can't load). So they
 // travel as *.gz.keep, and node/index.js names them back before the backend starts.
@@ -44,4 +65,4 @@ const files = walk(OUT);
 const leaked = files.filter((f) => /Development\.env$|\.env$|[\\/]certs[\\/]|\.pem$|\.key$/.test(f) && !/node_modules/.test(f));
 if (leaked.length) throw new Error(`Refusing to bundle secrets:\n${leaked.join("\n")}`);
 const bytes = files.reduce((n, f) => n + fs.statSync(f).size, 0);
-console.log(`Bundled ${files.length} files, ${(bytes / 1048576).toFixed(1)} MB, into ${path.relative(process.cwd(), OUT)}`);
+console.log(`Bundled ${files.length} files, ${(bytes / 1048576).toFixed(1)} MB, into ${path.relative(process.cwd(), OUT)} (v${version}, shell ${release.shell}, ${release.cloudUrl})`);

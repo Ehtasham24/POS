@@ -14,6 +14,7 @@ import DeviceSyncStatus, { DeviceSyncNotice } from "./DeviceSyncStatus";
 import UserMenu from "./UserMenu";
 import SupportBadge from "./SupportBadge";
 import ProblemPrompt from "./ProblemPrompt";
+import UpdateBanner from "./UpdateBanner";
 import CartCheckout from "categoriesComponents/cartCheckout";
 
 // `fullBleed` (the Register): the page gets exactly the viewport below the top bar, with no
@@ -134,6 +135,7 @@ export default function AppShell({ title, actions, hideSearch, fullBleed = false
 
         <ShopNotices />
         <DeviceSyncNotice />
+        <UpdateBanner />
 
         <main className={fullBleed ? "min-h-0 flex-1" : "flex-1 px-8 py-8 md:px-5 md:py-6 sm:px-4 safe-pb"}>{children}</main>
       </div>
