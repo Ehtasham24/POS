@@ -20,6 +20,28 @@ const MOBILE = path.join(__dirname, "..");
 const NODE_DIR = path.join(MOBILE, "www", "nodejs");
 const OUT = path.join(MOBILE, "release");
 
+// The signing key as pasted into a CI secret can arrive reshaped: its line breaks lost or written
+// as "\n", surrounding lines copied along, or just the base64 body. Any of those becomes the key;
+// and it must be the one the app trusts (mobile/node/index.js), or every phone would refuse the
+// update. Neither error shows the key.
+const loadSigningKey = () => {
+  const raw = process.env.OTA_SIGNING_KEY || fs.readFileSync(path.join(os.homedir(), ".pos-release", "ota-signing-key.pem"), "utf8");
+  const block = /-----BEGIN PRIVATE KEY-----([\s\S]*?)-----END PRIVATE KEY-----/.exec(raw);
+  const body = (block ? block[1] : raw).replace(/\\n/g, "").replace(/[^A-Za-z0-9+/=]/g, "");
+  let key;
+  try {
+    key = crypto.createPrivateKey({ key: Buffer.from(body, "base64"), format: "der", type: "pkcs8" });
+  } catch {
+    throw new Error("The update signing key (OTA_SIGNING_KEY) isn't a readable private key: paste ota-signing-key.pem as it is");
+  }
+  const trusted = /const UPDATE_PUBLIC_KEY = `([^`]+)`/.exec(fs.readFileSync(path.join(MOBILE, "node", "index.js"), "utf8"))[1];
+  const ours = crypto.createPublicKey(key).export({ type: "spki", format: "der" });
+  if (!ours.equals(crypto.createPublicKey(trusted).export({ type: "spki", format: "der" }))) {
+    throw new Error("The update signing key (OTA_SIGNING_KEY) isn't the one the app trusts (UPDATE_PUBLIC_KEY in mobile/node/index.js)");
+  }
+  return key;
+};
+
 const sha256 = (file) => crypto.createHash("sha256").update(fs.readFileSync(file)).digest("hex");
 const describe = (file) => ({ file: path.basename(file), sha256: sha256(file), size: fs.statSync(file).size });
 
@@ -28,8 +50,7 @@ const describe = (file) => ({ file: path.basename(file), sha256: sha256(file), s
   const apkBuilt = path.join(MOBILE, "android", "app", "build", "outputs", "apk", "release", `pos-register-${release.version}.apk`);
   if (!fs.existsSync(apkBuilt)) throw new Error(`No release APK for ${release.version}: run npm run apk:release first`);
 
-  const keyPem = process.env.OTA_SIGNING_KEY || fs.readFileSync(path.join(os.homedir(), ".pos-release", "ota-signing-key.pem"), "utf8");
-  const privateKey = crypto.createPrivateKey(keyPem);
+  const privateKey = loadSigningKey();
 
   fs.rmSync(OUT, { recursive: true, force: true });
   fs.mkdirSync(OUT, { recursive: true });
@@ -65,6 +86,7 @@ const describe = (file) => ({ file: path.basename(file), sha256: sha256(file), s
   console.log(`  ${manifest.bundle.file}  ${mb(manifest.bundle.size)} (${packed.files} files, ${mb(packed.bytes)} unpacked)`);
   console.log("  update.json, update.json.sig");
 })().catch((err) => {
-  console.error(err.message);
+  // In GitHub Actions, as an annotation: shown on the run's summary page, not only in its log.
+  console.error(`${process.env.GITHUB_ACTIONS ? "::error::" : ""}${err.message}`);
   process.exit(1);
 });
