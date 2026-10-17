@@ -142,8 +142,17 @@ const check = (label, ok, detail) => {
     const cashierReport = await cashierApi("POST", "/api/Sales/summary", reportBody);
     check("A cashier still can't open the Sales Report", cashierReport.status === 403, cashierReport);
 
+    // An announcement from the platform admin, addressed to this shop: it lives only in the cloud.
+    await cloudDb.query(`INSERT INTO announcements (title, body, shop_id, starts_at) VALUES ('Maintenance tonight', 'test', $1, NOW() - INTERVAL '1 minute')`, [
+      shopId,
+    ]);
+    const notices = (await A.api("GET", "/api/shop/notices")).body;
+    check("The platform's announcement shows on the register", notices.announcements?.some((a) => a.title === "Maintenance tonight"), notices);
+
     // --- 3. Offline: the register's own sales only, and it says from when.
     await line.cut();
+    const offlineNotices = await A.api("GET", "/api/shop/notices");
+    check("Offline, the register just shows no announcements", offlineNotices.status === 200 && offlineNotices.body.announcements?.length === 0, offlineNotices);
     await A.anon("POST", "/api/device/sync-now");
     const offline = await history(A.api);
     check(

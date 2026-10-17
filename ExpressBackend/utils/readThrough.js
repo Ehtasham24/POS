@@ -29,6 +29,10 @@ const READ_THROUGH = {
   },
   "POST /api/Sales/timeseries": {},
   "POST /api/Sales/payment-medium-totals": {},
+  // The platform's announcements and the owner's subscription reminder (ShopNotices): neither is
+  // synced to registers, so the register's own answer is just "none" — right while it's offline,
+  // since nothing can be done about either then. Their ids are only the dismissed-list's keys.
+  "GET /api/shop/notices": {},
 };
 
 // Stands in for an id that has no counterpart on the other side: ids are positive, so it
