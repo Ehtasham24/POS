@@ -92,10 +92,11 @@ const listLoginEvents = async ({ outcome, shopId, username, ...paging } = {}) =>
   params.push(pageSize, offset);
   const { rows } = await pool.query(
     `SELECT e.id, e.username, e.outcome, e.ip, e.user_agent, e.created_at, e.shop_id, s.name AS shop_name,
-            u.role, COUNT(*) OVER () AS total_count
+            u.role, d.name AS device_name, COUNT(*) OVER () AS total_count
      FROM login_events e
      LEFT JOIN shops s ON s.id = e.shop_id
      LEFT JOIN users u ON u.id = e.user_id
+     LEFT JOIN devices d ON d.id = e.device_id
      ${where}
      ORDER BY e.created_at DESC, e.id DESC
      LIMIT $${params.length - 1} OFFSET $${params.length}`,

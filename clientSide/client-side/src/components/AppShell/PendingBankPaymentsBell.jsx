@@ -25,7 +25,7 @@ export default function PendingBankPaymentsBell() {
 
   const fetchCount = async () => {
     try {
-      const intents = await apiGet("/api/bank-payments/intents?status=awaiting_payment");
+      const intents = await apiGet("/api/bank-payments/intents?status=awaiting_payment", { background: true });
       setCount(intents.length);
     } catch (error) {
       console.error("Error fetching pending bank payments:", error);

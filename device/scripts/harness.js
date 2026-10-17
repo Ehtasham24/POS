@@ -44,10 +44,10 @@ const stopDevice = (child) =>
     child.kill("SIGTERM");
   });
 
-const client = (base, token) => async (method, url, body) => {
+const client = (base, token) => async (method, url, body, headers = {}) => {
   const res = await fetch(base + url, {
     method,
-    headers: { "content-type": "application/json", cookie: `pos_session=${token}` },
+    headers: { "content-type": "application/json", cookie: `pos_session=${token}`, ...headers },
     body: body ? JSON.stringify(body) : undefined,
   });
   const text = await res.text();

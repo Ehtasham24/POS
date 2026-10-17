@@ -2,6 +2,7 @@ const ApiError = require("../utils/ApiError");
 const { verifyToken, COOKIE_NAME } = require("../utils/auth");
 const { findUserById } = require("../Sevices/authService");
 const { runAsTenant } = require("../Db");
+const { noteActivity } = require("../utils/activity");
 
 // Mounted per-router (router.use(requireAuth) inside each protected router file — see
 // categoriesRoutes.js etc.), NOT globally in Server.js. This app's routers don't share a
@@ -69,6 +70,7 @@ async function requireAuth(req, res, next) {
   }
 
   req.user = user;
+  noteActivity(req, user);
   // Tier is read fresh here every request, never off the JWT payload — the token is
   // long-lived (utils/auth.js's 180-day TTL), so a shop that upgrades/downgrades today
   // would otherwise keep granting/denying features based on whatever tier it was on

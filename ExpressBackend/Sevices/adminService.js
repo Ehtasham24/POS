@@ -72,10 +72,12 @@ const slugify = (name) =>
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/(^-+|-+$)/g, "") || "shop";
 
-// Per shop: when it last sold something and when anyone last signed in — how the admin
-// spots a shop that has quietly stopped using the system.
+// Per shop: when it last sold something, when anyone last used the app (migration 037: the web
+// app or a register) and when anyone last signed in — how the admin spots a shop that has
+// quietly stopped using the system.
 const SHOP_ACTIVITY_SQL = `
   (SELECT MAX(sa.sale_time) FROM sales sa WHERE sa.shop_id = s.id) AS last_sale_at,
+  (SELECT MAX(ua.last_active_at) FROM user_activity ua WHERE ua.shop_id = s.id) AS last_active_at,
   (SELECT MAX(e.created_at) FROM login_events e WHERE e.shop_id = s.id AND e.outcome = 'success') AS last_login_at`;
 
 const isOnline = (shopId) => {
@@ -612,8 +614,12 @@ const getShopDetail = async (shopId) => {
   const [users, trading, counts, payments, logins, audit, devices] = await Promise.all([
     pool.query(
       `SELECT u.id, u.username, u.display_name, u.role, u.is_active, u.created_at,
-              (SELECT MAX(e.created_at) FROM login_events e WHERE e.user_id = u.id AND e.outcome = 'success') AS last_login_at
-       FROM users u WHERE u.shop_id = $1
+              (SELECT MAX(e.created_at) FROM login_events e WHERE e.user_id = u.id AND e.outcome = 'success') AS last_login_at,
+              ua.last_active_at, d.name AS last_active_device, d.platform AS last_active_platform
+       FROM users u
+       LEFT JOIN user_activity ua ON ua.user_id = u.id
+       LEFT JOIN devices d ON d.id = ua.device_id
+       WHERE u.shop_id = $1
        ORDER BY u.is_active DESC, CASE u.role WHEN 'owner' THEN 0 ELSE 1 END, u.display_name`,
       [shopId]
     ),

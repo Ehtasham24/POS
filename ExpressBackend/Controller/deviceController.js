@@ -1,5 +1,5 @@
 const { registerDevice, listDevices, setDeviceStatus, listRejections, resolveRejection } = require("../Sevices/deviceService");
-const { startSnapshot, snapshotPage, pullChanges, pushEvents, recordDeviceContact } = require("../Sevices/syncService");
+const { startSnapshot, snapshotPage, pullChanges, pushEvents, recordDeviceContact, recordDeviceActivity } = require("../Sevices/syncService");
 const asyncHandler = require("../utils/asyncHandler");
 const { pool } = require("../Db");
 
@@ -48,6 +48,9 @@ const withContactRecord = (direction, handler) =>
     try {
       const { result, rows } = await handler(req);
       await recordDeviceContact(req.device, { direction, rows, durationMs: Date.now() - started, ok: true, report });
+      // Who used the register (the admin panel's "Last active"), with a call that worked: the
+      // device clears what it sent once the call succeeds. Monitoring only — never fails the sync.
+      if (report.activity) await recordDeviceActivity(req.device, report.activity).catch((err) => console.error("Device activity write failed:", err.message));
       res.send({ ...result, serverTime: new Date().toISOString() });
     } catch (err) {
       await recordDeviceContact(req.device, {

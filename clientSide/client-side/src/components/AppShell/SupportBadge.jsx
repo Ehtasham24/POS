@@ -5,7 +5,9 @@ import { useLanguage } from "i18n/LanguageContext";
 import { apiGet } from "utils/api";
 import { SUPPORT_CHANGED_EVENT } from "pages/Support/events";
 
-const POLL_MS = 60000;
+// Every few minutes, and only while the app is on screen: on a register each check goes to the
+// cloud (device/readThrough.js), one small server for every shop.
+const POLL_MS = 5 * 60 * 1000;
 
 // Answers on this user's support tickets they haven't seen yet. Invisible until there's one
 // (like StorageWarningBadge), then a lifebuoy with the count that opens the Support page.
@@ -17,11 +19,11 @@ export default function SupportBadge() {
   useEffect(() => {
     let alive = true;
     const refresh = () =>
-      apiGet("/api/support/unread")
+      apiGet("/api/support/unread", { background: true })
         .then((data) => alive && setCount(Number(data?.count) || 0))
         .catch(() => {});
     refresh();
-    const interval = setInterval(refresh, POLL_MS);
+    const interval = setInterval(() => document.visibilityState === "visible" && refresh(), POLL_MS);
     window.addEventListener(SUPPORT_CHANGED_EVENT, refresh);
     window.addEventListener("focus", refresh);
     return () => {

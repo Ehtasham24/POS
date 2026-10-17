@@ -46,6 +46,12 @@ const METHOD_LABEL = Object.fromEntries(PAYMENT_METHODS);
 const FREE_METHODS = ["trial", "waiver"];
 const emptyPayment = { method: "cash", amount: "", months: 1, coversFrom: "", reference: "", note: "" };
 
+// The later of two times (either may be missing).
+const latest = (a, b) => (!a || (b && new Date(b) > new Date(a)) ? b : a);
+
+// Where a user was last active: on one of the shop's registers (by its name), or the web app.
+const activeWhere = (u) => (u.last_active_device ? `on ${u.last_active_device}` : "on the web");
+
 const chipClass = (active) =>
   `rounded-full px-3 py-1 text-sm font-medium transition-colors ${
     active
@@ -188,8 +194,8 @@ export default function ShopDetail({ shopId, onClose, onChanged }) {
               <span className={`h-2 w-2 rounded-full ${shop.onlineNow ? "bg-success-500" : "bg-gray-400"}`} />
               {shop.onlineNow
                 ? "Online now"
-                : shop.lastSeenAt
-                  ? `Last active ${timeAgo(shop.lastSeenAt)}`
+                : shop.last_active_at || shop.lastSeenAt
+                  ? `Last active ${timeAgo(latest(shop.last_active_at, shop.lastSeenAt))}`
                   : `Last sign-in ${timeAgo(shop.last_login_at)}`}
             </span>
           </div>
@@ -220,6 +226,7 @@ export default function ShopDetail({ shopId, onClose, onChanged }) {
               </div>
               <dl className={`${cardClass} grid grid-cols-3 gap-4 p-4 text-sm sm:grid-cols-2`}>
                 <Fact label="Last sale" value={timeAgo(shop.last_sale_at)} />
+                <Fact label="Last active" value={timeAgo(shop.last_active_at)} />
                 <Fact label="Last sign-in" value={timeAgo(shop.last_login_at)} />
                 <Fact label="Products" value={detail.activity.products.toLocaleString()} />
                 <Fact label="Open shifts" value={detail.activity.openShifts} />
@@ -269,6 +276,7 @@ export default function ShopDetail({ shopId, onClose, onChanged }) {
                     <tr>
                       <th className={thClass}>User</th>
                       <th className={thClass}>Role</th>
+                      <th className={thClass}>Last active</th>
                       <th className={thClass}>Last sign-in</th>
                       <th className={thClass}>Status</th>
                       <th className={thClass} />
@@ -282,6 +290,10 @@ export default function ShopDetail({ shopId, onClose, onChanged }) {
                           <p className="text-xs text-gray-500 dark:text-gray-400">{u.username}</p>
                         </td>
                         <td className={`${tdClass} capitalize`}>{u.role}</td>
+                        <td className={tdClass} title={formatDateTime(u.last_active_at)}>
+                          {timeAgo(u.last_active_at)}
+                          {u.last_active_at && <p className="text-xs text-gray-500 dark:text-gray-400">{activeWhere(u)}</p>}
+                        </td>
                         <td className={tdClass} title={formatDateTime(u.last_login_at)}>
                           {timeAgo(u.last_login_at)}
                         </td>

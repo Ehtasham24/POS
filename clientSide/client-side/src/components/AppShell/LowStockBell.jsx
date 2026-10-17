@@ -47,7 +47,7 @@ export default function LowStockBell() {
 
   const fetchAlerts = async () => {
     try {
-      const data = await apiGet("/api/inventory");
+      const data = await apiGet("/api/inventory", { background: true });
       setItems(
         (data.items || []).filter((item) => item.status === "low_stock" || item.status === "out_of_stock")
       );

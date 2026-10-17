@@ -115,6 +115,9 @@ const startDevice = async ({ dataDir, port = 4100, devShop }) => {
   global.posDevice = {
     createPool: (driver) => createPglitePool(db, driver),
     routes: deviceRoutes({ db, config, saveConfig, defaultCloudUrl: DEFAULT_CLOUD_URL, sync: () => syncWorker, updater: () => updater }),
+    // Someone used the register (ExpressBackend/utils/activity.js): the sync paces itself by it
+    // and reports it to the cloud.
+    noteActivity: (userId, options) => syncWorker?.noteActivity(userId, options),
   };
 
   if (devShop) await createDevShop(devShop);

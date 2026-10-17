@@ -21,7 +21,7 @@ export default function StorageWarningBadge() {
 
   const fetchStatus = async () => {
     try {
-      setStatus(await apiGet("/api/shop/storage-status"));
+      setStatus(await apiGet("/api/shop/storage-status", { background: true }));
     } catch (error) {
       console.error("Error fetching storage status:", error);
     }

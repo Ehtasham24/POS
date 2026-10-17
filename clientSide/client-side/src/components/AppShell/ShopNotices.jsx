@@ -52,7 +52,7 @@ export default function ShopNotices() {
 
   useEffect(() => {
     const load = () =>
-      apiGet("/api/shop/notices")
+      apiGet("/api/shop/notices", { background: true })
         .then(setNotices)
         .catch(() => {});
     load();

@@ -26,11 +26,15 @@ const request = async (method, path, body, opts = {}) => {
   // npm start's dev mode, where the CRA dev server (localhost:3000) and this API
   // (localhost:4000) are a different origin — same-origin in production, where this is a
   // no-op either way. Paired with Server.js's cors({credentials: true}).
-  const options = { method, credentials: "include" };
+  const options = { method, credentials: "include", headers: {} };
   if (body !== undefined) {
-    options.headers = { "Content-Type": "application/json" };
+    options.headers["Content-Type"] = "application/json";
     options.body = JSON.stringify(body);
   }
+  // A page refreshing something on its own (a badge's poll), not someone using the app: it
+  // doesn't count as the user being active, and a register doesn't sync faster for it
+  // (ExpressBackend/utils/activity.js).
+  if (opts.background) options.headers["X-POS-Background"] = "1";
 
   const isRead = method === "GET" || opts.read;
   const timeoutMs = opts.timeoutMs ?? (isRead ? DEFAULT_READ_TIMEOUT_MS : null);

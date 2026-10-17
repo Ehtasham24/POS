@@ -632,10 +632,11 @@ async function main() {
     }
     check("Shop 2 can't insert a row into shop 1 even with raw SQL", /row-level security/.test(crossInsertError || ""), crossInsertError);
 
-    // Platform tables (migration 031). Sign-in history and the admin audit trail are never
-    // readable from a shop request; a shop reads only its own subscription payments and
-    // only the announcements addressed to every shop or to itself — and writes neither.
-    for (const table of ["login_events", "admin_audit_log"]) {
+    // Platform tables (migrations 031, 037). Sign-in history, the admin audit trail and who was
+    // last active are never readable from a shop request; a shop reads only its own
+    // subscription payments and only the announcements addressed to every shop or to itself —
+    // and writes neither.
+    for (const table of ["login_events", "admin_audit_log", "user_activity"]) {
       const denied = await errorOf(() => asShop2(`SELECT COUNT(*) FROM ${table}`));
       check(`A shop request can't read ${table} at all`, /permission denied/.test(denied || ""), denied);
     }

@@ -201,7 +201,7 @@ export default function AdminActivity() {
                         className={`${tdClass} max-w-[16rem] truncate text-xs text-gray-500 dark:text-gray-400`}
                         title={r.user_agent || ""}
                       >
-                        {r.user_agent || "—"}
+                        {r.device_name ? `Register: ${r.device_name}` : r.user_agent || "—"}
                       </td>
                     </tr>
                   ))}

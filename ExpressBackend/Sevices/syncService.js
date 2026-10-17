@@ -1,6 +1,7 @@
-const { pool } = require("../Db");
+const { pool, systemPool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { SYNC_TABLES, SYNC_ORDER, keyColumn, LOCAL_COLUMNS } = require("../utils/syncTables");
+const { recordActivity } = require("../utils/activity");
 
 // What a newly registered device downloads to start working offline (plan-offline-sync.md,
 // phase 2): the shop, its settings and staff, its whole catalogue, the balances it must get
@@ -358,4 +359,55 @@ const recordDeviceContact = async (device, { direction, rows, durationMs, ok, er
   );
 };
 
-module.exports = { startSnapshot, snapshotPage, pullChanges, pushEvents, recordDeviceContact, SNAPSHOT_DAYS, TABLES };
+// Who used the register since its last report (device/syncWorker.js): [{ user (uuid), at, kind }],
+// kind 'active' (the user's latest request there) or 'login' (a sign-in on it, which the cloud
+// otherwise never sees — registers sign people in on their own). Arrives as JSON text in the
+// pull's query string. Kept for the admin panel (migration 037, utils/activity.js); anything
+// malformed is dropped rather than failing the sync, and times are held between the last 90 days
+// and now, whatever the device's clock says.
+const MAX_ACTIVITY_ENTRIES = 50;
+const recordDeviceActivity = async (device, raw) => {
+  let entries;
+  try {
+    entries = typeof raw === "string" ? JSON.parse(raw) : raw;
+  } catch {
+    return;
+  }
+  if (!Array.isArray(entries)) return;
+  const now = Date.now();
+  const valid = entries
+    .slice(0, MAX_ACTIVITY_ENTRIES)
+    .filter((e) => e && typeof e.user === "string" && (e.kind === "active" || e.kind === "login"))
+    .map((e) => ({ ...e, at: new Date(Math.min(new Date(e.at).getTime(), now)) }))
+    .filter((e) => !Number.isNaN(e.at.getTime()) && now - e.at.getTime() < 90 * 24 * 60 * 60 * 1000);
+  if (!valid.length) return;
+
+  // systemPool: user_activity and login_events are platform-only (migrations 031, 037); the
+  // users are looked up within the device's own shop, so a uuid from elsewhere matches nothing.
+  const { rows: users } = await systemPool.query(`SELECT id, uuid, username FROM users WHERE shop_id = $1 AND uuid = ANY($2::uuid[])`, [
+    device.shop_id,
+    [...new Set(valid.map((e) => e.user))].filter((u) => /^[0-9a-f-]{36}$/i.test(u)),
+  ]);
+  const byUuid = new Map(users.map((u) => [u.uuid, u]));
+  const known = valid.filter((e) => byUuid.has(e.user));
+
+  await recordActivity(known.map((e) => ({ userId: byUuid.get(e.user).id, shopId: device.shop_id, at: e.at, deviceId: device.id })));
+  const logins = known.filter((e) => e.kind === "login");
+  if (logins.length) {
+    await systemPool.query(
+      `INSERT INTO login_events (username, user_id, shop_id, outcome, device_id, created_at)
+       SELECT l.username, l.user_id, $1, 'success', $2, l.at AT TIME ZONE 'UTC'
+       FROM unnest($3::text[], $4::int[], $5::timestamptz[]) AS l (username, user_id, at)
+       ON CONFLICT (device_id, user_id, created_at) WHERE device_id IS NOT NULL DO NOTHING`,
+      [
+        device.shop_id,
+        device.id,
+        logins.map((e) => byUuid.get(e.user).username),
+        logins.map((e) => byUuid.get(e.user).id),
+        logins.map((e) => e.at.toISOString()),
+      ]
+    );
+  }
+};
+
+module.exports = { startSnapshot, snapshotPage, pullChanges, pushEvents, recordDeviceContact, recordDeviceActivity, SNAPSHOT_DAYS, TABLES };
