@@ -8,6 +8,8 @@ import android.os.Bundle;
 import android.os.Process;
 import android.provider.Settings;
 import android.webkit.JavascriptInterface;
+import android.webkit.WebView;
+import androidx.activity.OnBackPressedCallback;
 import androidx.core.content.FileProvider;
 import java.io.File;
 import java.io.IOException;
@@ -88,6 +90,28 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         getBridge().getWebView().addJavascriptInterface(new PosShell(), "PosShell");
+
+        // The register (Node.js) runs inside this app's process, and Node can start only once per
+        // process: an activity created again over the running register starts it a second time,
+        // which aborts the app. So Back never closes the activity — it steps back through the
+        // pages and, on the first one, sends the app to the background like Home does (the
+        // register keeps running and syncing, and reopening is instant).
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                WebView web = getBridge().getWebView();
+                if (web.canGoBack()) web.goBack();
+                else moveTaskToBack(true);
+            }
+        });
+    }
+
+    // …and when the activity does go for good (swiped away, or reclaimed by Android), the process
+    // goes with it, so the next launch starts the register afresh.
+    @Override
+    public void onDestroy() {
+        super.onDestroy();
+        if (!isChangingConfigurations()) Process.killProcess(Process.myPid());
     }
 
     // Capacitor's SystemBars resets the icons to the system theme on a configuration change

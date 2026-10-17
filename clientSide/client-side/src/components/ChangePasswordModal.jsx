@@ -3,6 +3,7 @@ import { Modal } from "components";
 import { useLanguage } from "i18n/LanguageContext";
 import { useToast } from "components/Toast/ToastContext";
 import { apiPatch } from "utils/api";
+import { useAuth } from "auth/AuthContext";
 
 const inputClass =
   "block w-full rounded-lg border border-surface-border bg-white-A700 p-2.5 text-sm text-gray-900 focus:border-primary-500 focus:ring-2 focus:ring-primary-500 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-100";
@@ -14,6 +15,7 @@ const labelClass = "mb-1 block text-xs font-semibold text-gray-500 dark:text-gra
 export default function ChangePasswordModal({ onClose }) {
   const { t } = useLanguage();
   const toast = useToast();
+  const { user } = useAuth();
   const [form, setForm] = useState({ currentPassword: "", newPassword: "", confirm: "" });
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
@@ -48,6 +50,9 @@ export default function ChangePasswordModal({ onClose }) {
   return (
     <Modal isOpen onClose={onClose} title={t("auth.changePassword")} maxWidth="max-w-sm">
       <form onSubmit={submit} className="flex flex-col gap-4">
+        {/* For the phone's or browser's password manager: whose password this is, so it updates the
+            right saved login (otherwise it guesses one). */}
+        <input type="text" autoComplete="username" value={user?.username ?? ""} readOnly hidden />
         {field("currentPassword", t("auth.currentPassword"), { autoFocus: true, autoComplete: "current-password" })}
         {field("newPassword", t("auth.newPassword"), { minLength: 8, autoComplete: "new-password", placeholder: t("auth.passwordMinLength") })}
         {field("confirm", t("auth.confirmNewPassword"), { minLength: 8, autoComplete: "new-password" })}
