@@ -1,5 +1,6 @@
 const { registerDevice, listDevices, setDeviceStatus, listRejections, resolveRejection } = require("../Sevices/deviceService");
 const { startSnapshot, snapshotPage, pullChanges, pushEvents, recordDeviceContact, recordDeviceActivity } = require("../Sevices/syncService");
+const { announcementsStamp } = require("../Sevices/announcementService");
 const asyncHandler = require("../utils/asyncHandler");
 const { pool } = require("../Db");
 
@@ -71,9 +72,12 @@ const PushChanges = withContactRecord("push", async (req) => {
   return { result, rows: Array.isArray(events) ? events.length : 0 };
 });
 
+// The last page of a pull also says what the shop's announcements look like now (a stamp), so
+// the register shows a new one while it's in use rather than at its next 10-minute check.
 const PullChanges = withContactRecord("pull", async (req) => {
   const { after, upTo, afterId } = req.query;
   const result = await pullChanges(req.device.shop_id, { after, upTo, afterId });
+  if (result.done) result.noticesStamp = await announcementsStamp(req.shop.id, req.shop.tier);
   return { result, rows: result.changes.length };
 });
 

@@ -285,6 +285,8 @@ const createSyncWorker = ({ db, config, saveConfig }) => {
       received += page.changes.length;
       if (page.done) {
         config.feedCursor = page.nextCursor;
+        // The page's banners reload when this changes (the frontend's ShopNotices).
+        if (page.noticesStamp) state.noticesStamp = page.noticesStamp;
         return received;
       }
       upTo = page.upTo;

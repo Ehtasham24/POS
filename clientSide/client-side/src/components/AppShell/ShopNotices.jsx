@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { HiOutlineXMark, HiOutlineMegaphone, HiOutlineExclamationTriangle } from "react-icons/hi2";
 import { useLanguage } from "i18n/LanguageContext";
 import { apiGet } from "utils/api";
 import { SEVERITY_CLASS } from "utils/severity";
+import { usePolledDeviceStatus } from "hooks/useDeviceStatus";
 
 const REFRESH_MS = 10 * 60 * 1000;
 // Dismissed announcements stay dismissed on this device; the subscription reminder only for
@@ -50,15 +51,31 @@ export default function ShopNotices() {
     }
   });
 
-  useEffect(() => {
-    const load = () =>
+  const load = useCallback(
+    () =>
       apiGet("/api/shop/notices", { background: true })
         .then(setNotices)
-        .catch(() => {});
+        .catch(() => {}),
+    []
+  );
+  useEffect(() => {
     load();
     const timer = setInterval(load, REFRESH_MS);
-    return () => clearInterval(timer);
-  }, []);
+    const onVisible = () => document.visibilityState === "visible" && load();
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [load]);
+
+  // On a register: its sync hears from the cloud every few seconds while it's in use, and says
+  // when the announcements changed (device/syncWorker.js) — reload then, not 10 minutes later.
+  const [device] = usePolledDeviceStatus();
+  const noticesStamp = device?.sync?.noticesStamp;
+  useEffect(() => {
+    if (noticesStamp) load();
+  }, [noticesStamp, load]);
 
   if (!notices) return null;
 

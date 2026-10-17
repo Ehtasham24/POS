@@ -1,3 +1,4 @@
+const crypto = require("crypto");
 const { pool } = require("../Db");
 const ApiError = require("../utils/ApiError");
 const { TIER_RANK } = require("../config/features");
@@ -81,4 +82,14 @@ const activeAnnouncementsForShop = async (shopId, tier) => {
   return rows;
 };
 
-module.exports = { LEVELS, listAnnouncements, createAnnouncement, endAnnouncement, activeAnnouncementsForShop };
+// A short fingerprint of what a shop should be showing right now: it changes when an
+// announcement starts, ends, or is added. A register's sync pull carries it (deviceController),
+// so the page there reloads its banners the moment it changes — no extra request to the cloud.
+const announcementsStamp = async (shopId, tier) =>
+  crypto
+    .createHash("sha1")
+    .update(JSON.stringify(await activeAnnouncementsForShop(shopId, tier)))
+    .digest("hex")
+    .slice(0, 12);
+
+module.exports = { LEVELS, listAnnouncements, createAnnouncement, endAnnouncement, activeAnnouncementsForShop, announcementsStamp };

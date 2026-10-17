@@ -148,6 +148,12 @@ const check = (label, ok, detail) => {
     ]);
     const notices = (await A.api("GET", "/api/shop/notices")).body;
     check("The platform's announcement shows on the register", notices.announcements?.some((a) => a.title === "Maintenance tonight"), notices);
+    const stampNow = async () => (await syncNow(A), (await A.anon("GET", "/api/device/status")).body.sync?.noticesStamp);
+    const stampBefore = await stampNow();
+    await cloudDb.query(`INSERT INTO announcements (title, shop_id, starts_at) VALUES ('Second notice', $1, NOW() - INTERVAL '1 minute')`, [shopId]);
+    const stampAfter = await stampNow();
+    check("A new announcement changes the stamp the register's sync brings (the page reloads on it)", stampBefore && stampAfter && stampBefore !== stampAfter, { stampBefore, stampAfter });
+    check("…and an unchanged one doesn't", (await stampNow()) === stampAfter, null);
 
     // --- 3. Offline: the register's own sales only, and it says from when.
     await line.cut();
